@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/RappelzCore.png" alt="RappelzCore" width="320">
+</p>
+
 # RappelzCore & RappelzRust
 
 Émulateur de serveur **Rappelz** (RappelzCore) et client de jeu (RappelzRust), en Rust, reconstruits
