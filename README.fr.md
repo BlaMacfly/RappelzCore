@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/RappelzCore.png" alt="RappelzCore" width="320">
+  <img src="docs/images/RappelzRust.png" alt="RappelzRust" width="320">
 </p>
 
 <p align="center">
