@@ -3,95 +3,99 @@
 </p>
 
 <p align="center">
-  <a href="https://discord.gg/RPtfV6GjZz"><img src="https://img.shields.io/badge/Discord-Rejoindre%20le%20serveur-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord RappelzCore"></a>
+  <a href="https://discord.gg/RPtfV6GjZz"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="RappelzCore Discord"></a>
 </p>
+
+<p align="center"><b>English</b> · <a href="README.fr.md">Français</a></p>
 
 # RappelzCore & RappelzRust
 
-Émulateur de serveur **Rappelz** (RappelzCore) et client de jeu (RappelzRust), en Rust, reconstruits
-par rétro-ingénierie (REA / Ghidra) du client **Rappelz NoLimits** (`Rappelz NoLimits\SFrame.exe`, v1.3.60).
+A **Rappelz** server emulator (RappelzCore) and game client (RappelzRust), written in Rust and
+rebuilt by reverse engineering (REA / Ghidra) the **Rappelz NoLimits** client
+(`Rappelz NoLimits\SFrame.exe`, v1.3.60).
 
-- **RappelzCore** utilise **exactement le schéma SQL d'AzerothCore** (`acore_auth`, `acore_characters`,
-  `acore_world`, importé du dépôt officiel, commit `3179ea3` du 25/10/2026), son format de configuration
-  (`authserver.conf`, `worldserver.conf`, variables `AC_*`), son hachage SRP6 des mots de passe et sa
-  console. Un compte créé par AzerothCore fonctionne ici, et inversement.
-- **RappelzRust** range ses ressources **comme un client World of Warcraft 3.3.5** : archives **MPQ**
-  (`Data/common.MPQ`, `Data/common-2.MPQ`, `Data/frFR/locale-frFR.MPQ`), bases client **DBC**
+- **RappelzCore** uses **exactly the AzerothCore SQL schema** (`acore_auth`, `acore_characters`,
+  `acore_world`, imported from the official repository, commit `3179ea3` of 2026-10-25). It also
+  reuses AzerothCore's configuration format (`authserver.conf`, `worldserver.conf`, `AC_*`
+  variables), its SRP6 password hashing and its console. An account created by AzerothCore works
+  here, and the other way round.
+- **RappelzRust** stores its assets **like a World of Warcraft 3.3.5 client**: **MPQ** archives
+  (`Data/common.MPQ`, `Data/common-2.MPQ`, `Data/frFR/locale-frFR.MPQ`), **DBC** client databases
   (`DBFilesClient\*.dbc`), `realmlist.wtf`, `WTF/Config.wtf`.
-- Les deux parlent le **protocole réseau du client Rappelz d'origine** : RappelzCore vise aussi le
-  client NoLimits officiel (voir « Limites »).
+- Both speak the **network protocol of the original Rappelz client**, so RappelzCore also targets
+  the official NoLimits client (see "Known limitations").
 
 ## Branches
 
-| Branche | Contenu |
+| Branch | Contents |
 |---|---|
-| `RappelzCore` (par défaut) | **RappelzCore**, le serveur : `authserver`, `worldserver`, `rz-dbimport`, schéma SQL AzerothCore (`sql/`), configuration (`conf/`), crates partagées nécessaires (protocole, base de données, formats Rappelz), outils `rz-extractor` (données serveur) et `rz-bot` (tests). |
-| `RappelzRust` | **RappelzRust**, le client : `RappelzRust.exe`, `rz-extractor` (client Rappelz → MPQ/DBC), `rz-bot`, crates de rendu et de formats (textures, terrain, modèles, interface) et crates partagées. |
+| `RappelzCore` (default) | **RappelzCore**, the server: `authserver`, `worldserver`, `rz-dbimport`, AzerothCore SQL schema (`sql/`), configuration (`conf/`), the shared crates it needs (protocol, database, Rappelz formats), and the `rz-extractor` (server data) and `rz-bot` (tests) tools. |
+| `RappelzRust` | **RappelzRust**, the client: `RappelzRust.exe`, `rz-extractor` (Rappelz client → MPQ/DBC), `rz-bot`, the rendering and format crates (textures, terrain, models, interface) and the shared crates. |
 
-Chaque branche compile seule (`cargo build --release`). Les fichiers du jeu (client Rappelz,
-archives converties) ne sont pas versionnés : il faut un client Rappelz NoLimits pour les produire.
+Each branch builds on its own (`cargo build --release`). Game files (Rappelz client, converted
+archives) are not versioned: you need a Rappelz NoLimits client to produce them.
 
-## Arborescence
+## Layout
 
 ```
-Cargo.toml                    espace de travail
+Cargo.toml                    workspace
 shared/
-  rz-common/                  configuration .conf (AzerothCore), journalisation
-  rz-mpq/                     MPQ v1 : lecture, écriture, chaîne de patchs (format WoW)
-  rz-dbc/                     WDBC : lecture, écriture, chaînes de format façon DBCfmt.h
-  rz-rappelz/                 formats Rappelz d'origine : data.000-008, .rdb → .dbc, DBC par nom de champ
-  rz-proto/                   protocole : RC4 « XRC4 », RSA/AES, messages TS_* (msg.rs, msg_game.rs)
-  rz-database/                MySQL (sqlx) sur le schéma AzerothCore, SRP6
-  rz-texture/                 textures : DDS (DXT1/3/5, non compressé), TGA, JPEG, PNG, BMP
-  rz-terrain/                 cartes nFlavor : .nfm (relief, textures, décors), .nfw, .nfa, .qpf, .nfs…
-  rz-model/                   modèles .nx3 (BTRF/KNIB), animations .naf, objets .cob, assemblage
-  rz-ui/                      interface d'origine : sprites .spr, fenêtres .nui, règles de dessin
+  rz-common/                  .conf configuration (AzerothCore style), logging
+  rz-mpq/                     MPQ v1: read, write, patch chain (WoW format)
+  rz-dbc/                     WDBC: read, write, DBCfmt.h-style format strings
+  rz-rappelz/                 original Rappelz formats: data.000-008, .rdb → .dbc, DBC by field name
+  rz-proto/                   protocol: "XRC4" RC4, RSA/AES, TS_* messages (msg.rs, msg_game.rs)
+  rz-database/                MySQL (sqlx) on the AzerothCore schema, SRP6
+  rz-texture/                 textures: DDS (DXT1/3/5, uncompressed), TGA, JPEG, PNG, BMP
+  rz-terrain/                 nFlavor maps: .nfm (heightmap, textures, props), .nfw, .nfa, .qpf, .nfs…
+  rz-model/                   .nx3 models (BTRF/KNIB), .naf animations, .cob objects, assembly
+  rz-ui/                      original interface: .spr sprites, .nui windows, drawing rules
 RappelzCore/
   authserver/                 → authserver.exe
-  worldserver/                → worldserver.exe (lobby, monde, visibilité, chat, commandes GM, console)
-  tools/rz-dbimport/          DBC → tables acore_world
+  worldserver/                → worldserver.exe (lobby, world, visibility, chat, GM commands, console)
+  tools/rz-dbimport/          DBC → acore_world tables
 RappelzRust/
   client/                     → RappelzRust.exe (macroquad)
-  tools/rz-extractor/         client Rappelz → installation RappelzRust (MPQ/DBC) ; extraction DBC serveur
-  tools/rz-bot/               client de test sans interface
+  tools/rz-extractor/         Rappelz client → RappelzRust install (MPQ/DBC); server DBC extraction
+  tools/rz-bot/               headless test client
 sql/
-  base/db_auth|db_characters|db_world/   schéma AzerothCore (world : structure seule)
-  custom/                     ajouts RappelzCore (royaume par défaut)
-  create/create_mysql.sql     utilisateur et bases (comme AzerothCore)
+  base/db_auth|db_characters|db_world/   AzerothCore schema (world: structure only)
+  custom/                     RappelzCore additions (default realm)
+  create/create_mysql.sql     user and databases (as in AzerothCore)
 conf/                         authserver.conf.dist, worldserver.conf.dist
-docs/re/                      rétro-ingénierie : archive, RDB, protocole (+ scripts Node de validation)
-tools/                        import du schéma AzerothCore, génération des schémas RDB
+docs/re/                      reverse engineering: archive, RDB, protocol (+ Node validation scripts)
+tools/                        AzerothCore schema import, RDB schema generation
 ```
 
-## Compilation
+## Building
 
 ```bash
 cargo build --release
 ```
 
-Binaires dans `target/release/` : `authserver`, `worldserver`, `RappelzRust`, `rz-extractor`,
-`rz-dbimport`, `rz-bot`. Tests : `cargo test` (certains tests lisent le vrai client s'il est présent
-dans `Rappelz NoLimits/`).
+Binaries land in `target/release/`: `authserver`, `worldserver`, `RappelzRust`, `rz-extractor`,
+`rz-dbimport`, `rz-bot`. Tests: `cargo test`. Some tests read the real client when it is present in
+`Rappelz NoLimits/`.
 
-## Mise en route
+## Getting started
 
-### 1. Convertir le client Rappelz en client RappelzRust
+### 1. Convert the Rappelz client into a RappelzRust client
 
 ```bash
 target/release/rz-extractor client --client "Rappelz NoLimits" --out client-data/RappelzRust --locale frFR --codepage windows-1252
 target/release/rz-extractor verify --client "Rappelz NoLimits" --data client-data/RappelzRust/Data
 ```
 
-6,4 Go → 3,5 Go de MPQ en ~40 s ; `verify` compare les 125 212 ressources octet par octet.
-Copiez ensuite `RappelzRust.exe` dans `client-data/RappelzRust/`.
+6.4 GB → 3.5 GB of MPQ in about 40 s; `verify` compares all 125,212 assets byte by byte.
+Then copy `RappelzRust.exe` into `client-data/RappelzRust/`.
 
-### 2. Données du serveur (comme le map_extractor d'AzerothCore)
+### 2. Server data (like AzerothCore's map_extractor)
 
 ```bash
 target/release/rz-extractor dbc --data client-data/RappelzRust/Data --out <DataDir>
 ```
 
-### 3. Bases de données
+### 3. Databases
 
 ```bash
 mariadb -uroot -p < sql/create/create_mysql.sql
@@ -99,111 +103,167 @@ tools/sql/import_all.sh 127.0.0.1 3306 acore acore
 target/release/rz-dbimport --data-dir <DataDir> --apply "127.0.0.1;3306;acore;acore;acore_world"
 ```
 
-`rz-dbimport` remplit `item_template` (34 682), `creature_template` (+ `creature_template_model`),
-`creature` (1 497 PNJ placés), `quest_template` (986) et `game_tele` (407) à partir des DBC.
+From the DBC files, `rz-dbimport` fills:
+- `item_template` (34,682);
+- `creature_template` (+ `creature_template_model`);
+- `creature` (1,497 placed NPCs);
+- `quest_template` (986);
+- `game_tele` (407).
 
-### 4. Serveurs
+### 4. Servers
 
-Copiez `conf/*.conf.dist` en `authserver.conf` / `worldserver.conf` (adaptez `*DatabaseInfo` et
-`DataDir`), puis :
+Copy `conf/*.conf.dist` to `authserver.conf` / `worldserver.conf` and adjust `*DatabaseInfo` and
+`DataDir`. Then run:
 
 ```bash
-authserver -c authserver.conf      # port 4615 (auth_port du launcher NoLimits)
+authserver -c authserver.conf      # port 4615 (NoLimits launcher auth_port)
 worldserver -c worldserver.conf    # port 4514 (= realmlist.port)
 ```
 
-Console du worldserver : `account create <compte> <mdp>`, `account set gmlevel <compte> 3`,
-`account set password …`, `announce …`, `server info`, `saveall`, `exit`.
+Worldserver console:
+- `account create <account> <password>`
+- `account set gmlevel <account> 3`
+- `account set password …`
+- `announce …`
+- `server info`
+- `saveall`
+- `exit`
 
-### 5. Jouer
+### 5. Play
 
 ```bash
-RappelzRust.exe                      # dans le dossier de l'installation (Data/, WTF/)
-RappelzRust.exe -demo                # monde hors ligne avec les PNJ de NpcResource.dbc
+RappelzRust.exe                      # from the install folder (Data/, WTF/)
+RappelzRust.exe -demo                # offline world with the NPCs from NpcResource.dbc
 ```
 
-Adresse de l'authserver : `Data/frFR/realmlist.wtf` (`set realmlist 127.0.0.1[:port]`).
-Volumes : `SET Sound_MusicVolume "0.5"` / `SET Sound_SFXVolume "0.7"` dans `WTF/Config.wtf`.
+Authserver address: `Data/frFR/realmlist.wtf` (`set realmlist 127.0.0.1[:port]`).
+Volumes: `SET Sound_MusicVolume "0.5"` / `SET Sound_SFXVolume "0.7"` in `WTF/Config.wtf`.
 
-Le client affiche les ressources d'origine : fenêtres `.nui` du lobby et du HUD (connexion, serveurs,
-personnages, jauges, chat, raccourcis, menu, inventaire, dialogue PNJ), relief et textures de sol des
-cartes, décors (`TerrainPropInfo.cfg` → `.cob` → `.nx3`), personnages, PNJ et monstres animés
-(`.nx3` + `.naf`, skinning), écrans de chargement, musiques et sons.
+The client displays the original assets:
+- lobby and HUD `.nui` windows: login, servers, characters, gauges, chat, quick slots, menu,
+  inventory, NPC dialogue;
+- map heightmaps and ground textures;
+- props (`TerrainPropInfo.cfg` → `.cob` → `.nx3`);
+- animated characters, NPCs and monsters (`.nx3` + `.naf`, skinning);
+- loading screens, music and sounds.
 
-En jeu : ZQSD/WASD ou clic droit au sol pour se déplacer, clic gauche glissé pour la caméra, molette
-pour le zoom ; clic gauche sur une créature = cible, clic droit = attaquer (monstre) ou parler (PNJ) ;
-`I` = inventaire (clic droit : équiper/retirer, Maj+clic avec une boutique ouverte : vendre) ;
-Entrée pour le chat (`/w nom msg`, `/y msg`, `.help`), Échap ferme les fenêtres puis renvoie au lobby.
-Commandes : `.gps`, `.online`, `.save`, `.server info`, `.tele <lieu>`, `.go x y`, `.appear`,
-`.summon`, `.announce`, `.level`, `.money`, `.additem <id> [n]`, `.spawn <monstre> [respawn]`
-(ajoute un point d'apparition dans `creature`), `.vendor add <objet>` (boutique du PNJ le plus proche,
-table `npc_vendor`) — selon le niveau GM d'`account_access`.
+**In-game controls**
 
-## Correspondance des données Rappelz ↔ AzerothCore
+| Action | Input |
+|---|---|
+| Move | ZQSD/WASD, or right-click on the ground |
+| Camera | left-drag; mouse wheel to zoom |
+| Target a creature | left-click on it |
+| Attack a monster / talk to an NPC | right-click on it |
+| Inventory | `I`; right-click an item to equip/unequip, Shift+click to sell while a shop is open |
+| Chat | Enter (`/w name msg`, `/y msg`, `.help`) |
+| Close windows, then back to lobby | Escape |
+
+GM commands (availability depends on the GM level in `account_access`):
+
+| Command | Effect |
+|---|---|
+| `.gps`, `.online`, `.save`, `.server info` | position, online players, save, server status |
+| `.tele <place>`, `.go x y`, `.appear`, `.summon` | teleports |
+| `.announce`, `.level`, `.money` | announcement, level, rupees |
+| `.additem <id> [n]` | adds an item |
+| `.spawn <monster> [respawn]` | adds a spawn point to `creature` |
+| `.vendor add <item>` | adds the item to the nearest NPC's shop (`npc_vendor` table) |
+
+## Rappelz ↔ AzerothCore data mapping
 
 | Rappelz | AzerothCore |
 |---|---|
-| compte, mot de passe | `account` (username en majuscules, `salt`/`verifier` SRP6) |
-| clé one-time auth → jeu | `account.session_key` (8 premiers octets) |
-| serveurs | `realmlist`, `realmcharacters` |
-| personnage | `characters` : race (3 Gaia, 4 Deva, 5 Asura), `gender` = sexe − 1, `class` = classe de base du métier, `level`, `xp`, `money` (rupees), position |
-| métier, niveau de métier, JP, apparence | `character_settings` (`source = 'rappelz'`) |
-| objets, monstres, PNJ, quêtes, lieux | `item_template`, `creature_template`, `creature`, `quest_template`, `game_tele` |
-| inventaire et équipement | `item_instance` + `character_inventory` (slot 0–27 = emplacement porté, ≥ 28 = sac) |
-| boutiques des PNJ | `npc_vendor` (entry = 1 000 000 + id NpcResource) |
-| monstres placés | `creature` (entry = id Monster.dbc), réapparition `spawntimesecs` |
-| bases client .rdb | `DBFilesClient\*.dbc` (WDBC), lus par le worldserver dans `DataDir/dbc` |
+| account, password | `account` (upper-case username, SRP6 `salt`/`verifier`) |
+| auth → game one-time key | `account.session_key` (first 8 bytes) |
+| servers | `realmlist`, `realmcharacters` |
+| character | `characters`: race (3 Gaia, 4 Deva, 5 Asura), `gender` = sex − 1, `class` = base class of the job, `level`, `xp`, `money` (rupees), position |
+| job, job level, JP, appearance | `character_settings` (`source = 'rappelz'`) |
+| items, monsters, NPCs, quests, places | `item_template`, `creature_template`, `creature`, `quest_template`, `game_tele` |
+| inventory and equipment | `item_instance` + `character_inventory` (slot 0–27 = worn slot, ≥ 28 = bag) |
+| NPC shops | `npc_vendor` (entry = 1,000,000 + NpcResource id) |
+| monster spawns | `creature` (entry = Monster.dbc id), respawn `spawntimesecs` |
+| client .rdb databases | `DBFilesClient\*.dbc` (WDBC), read by the worldserver from `DataDir/dbc` |
 
-Contraintes héritées du schéma : noms de personnage de 12 caractères max (`characters.name`),
-mots de passe de 16 caractères max (règle AzerothCore).
+Constraints inherited from the schema:
+- character names are at most 12 characters (`characters.name`);
+- passwords are at most 16 characters (AzerothCore rule).
 
-## Rétro-ingénierie (docs/re)
+## Reverse engineering (docs/re)
 
-- `data_archive.md` : index `data.000` XORé, encodage des noms, hachage vers `data.001-008`,
-  extensions en clair. Lecteur Rust : `shared/rz-rappelz/src/archive.rs`.
-- `rdb_format.md` : en-tête de 132 octets, 23 schémas de tables validés jusqu'au dernier octet,
-  `db_string`, `db_item.ref`, ids de monstres bit-permutés.
-- `network_protocol.md` : en-tête de 7 octets + checksum, RC4 à KSA non standard (drop 1013),
-  RSA-1024 + AES-128-CBC pour le mot de passe et la clé one-time, paquets du flux de connexion,
-  monde, chat, ENTER (ids brouillés), STAT_INFO ; §9 : 52 messages de gameplay (inventaire,
-  équipement, PNJ, boutique, compétences, quêtes, combat).
-- `terrain_format.md` : `.nfm` v16/v22 (relief 384×384, couches de textures, décors, herbe), fichiers
-  associés et `.cfg` ; repère monde vérifié (continuité des bords, position des PNJ).
-- `model_format.md` : conteneurs BTRF/KNIB et gabarits `nx3.tml`, maillages, matériaux, squelettes,
-  animations (4800 ticks/s), `.cob`, assemblage des personnages (`db_DefaultModelRes`, `db_item`).
-- `ui_format.md` : `.spr` texte/binaire, `.nui`, règles de dessin (1/3/9 images, états), légendes
-  `<$id>`, fenêtres de chaque écran.
+- `data_archive.md`:
+  - XOR-encrypted `data.000` index, file-name encoding, hashing to `data.001-008`;
+  - extensions stored in clear;
+  - Rust reader: `shared/rz-rappelz/src/archive.rs`.
+- `rdb_format.md`:
+  - 132-byte header, 23 table schemas validated down to the last byte;
+  - `db_string`, `db_item.ref`, bit-permuted monster ids.
+- `network_protocol.md`:
+  - 7-byte header + checksum, RC4 with a non-standard KSA (drop 1013);
+  - RSA-1024 + AES-128-CBC for the password and the one-time key;
+  - login, world and chat packets, ENTER (scrambled ids), STAT_INFO;
+  - §9: 52 gameplay messages (inventory, equipment, NPCs, shop, skills, quests, combat).
+- `terrain_format.md`:
+  - `.nfm` v16/v22 (384×384 heightmap, texture layers, props, grass), sidecar files and `.cfg`;
+  - world coordinates verified (seamless edges, NPC positions).
+- `model_format.md`:
+  - BTRF/KNIB containers and `nx3.tml` templates;
+  - meshes, materials, skeletons, animations (4800 ticks/s), `.cob`;
+  - character assembly (`db_DefaultModelRes`, `db_item`).
+- `ui_format.md`:
+  - text/binary `.spr`, `.nui`;
+  - drawing rules (1/3/9 images, states), `<$id>` captions, the windows used on each screen.
 
-## Ce qui a été vérifié
+## What has been verified
 
-- Tests unitaires (vecteurs RC4 et checksum tirés du binaire, tailles des 20 paquets observés,
-  MPQ/StormLib, DBC, SRP6, RDB sur les vrais fichiers).
-- Conversion complète du client et vérification octet par octet.
-- Schéma AzerothCore importé sans erreur dans MariaDB 13 ; import des données du monde.
-- Parcours complet avec deux `rz-bot` simultanés et avec le client graphique : authentification,
-  royaume, création de personnage, entrée en jeu, visibilité joueurs/PNJ, déplacements, chat,
-  commandes GM, sauvegarde et déconnexion ; données vérifiées en base.
-- Gameplay avec `rz-bot` : `.additem` → inventaire, équipement (`ITEM_WEAR_INFO` + `WEAR_INFO`),
-  dialogue PNJ → boutique → achat (rupees débitées), monstre placé par `.spawn` → combat dans les
-  deux sens → mort du monstre → récompenses Monster.dbc ; objets, boutique et monstres persistent
-  après redémarrage.
-- Rendu vérifié par captures (`-screenshot`) : lobby et HUD d'origine, Laksy en 3D (bâtiments,
-  pavés, PNJ animés), monstre envoyé par le serveur affiché avec son modèle.
-- Formats : 22 061/22 072 nx3, 20 825 naf, 4 311/4 312 cob, 106 cartes, 485 `.nui` relus ;
-  textures DDS/TGA décodées sans échec sur l'échantillon testé.
+- **Unit tests**: RC4 and checksum vectors taken from the binary, sizes of the 20 observed packets,
+  MPQ/StormLib, DBC, SRP6, RDB on the real files.
+- **Client conversion**: full conversion and byte-by-byte verification.
+- **Databases**: AzerothCore schema imported into MariaDB 13 without errors; world data imported.
+- **Full login flow**, with two `rz-bot` running at the same time and with the graphical client:
+  - authentication, realm, character creation, entering the world;
+  - player/NPC visibility, movement, chat, GM commands;
+  - saving and logging out;
+  - data checked in the database.
+- **Gameplay with `rz-bot`**:
+  - `.additem` → inventory;
+  - equipment (`ITEM_WEAR_INFO` + `WEAR_INFO`);
+  - NPC dialogue → shop → purchase (rupees deducted);
+  - monster placed with `.spawn` → combat both ways → monster death → Monster.dbc rewards;
+  - items, shop and monsters persist across restarts.
+- **Rendering**, checked with screenshots (`-screenshot`):
+  - original lobby and HUD;
+  - Laksy in 3D (buildings, paving, animated NPCs);
+  - a monster sent by the server shown with its model.
+- **Formats**:
+  - 22,061/22,072 nx3, 20,825 naf, 4,311/4,312 cob, 106 maps and 485 `.nui` files read back;
+  - DDS/TGA textures decoded without failure on the tested sample.
 
-## Limites connues
+## Known limitations
 
-- Rendu : pas encore d'eau (`.nfw`), d'herbe procédurale, d'effets (`rcfx`, `.spt`), de ciel ni
-  de brouillard ; armes et accessoires pas encore accrochés aux os ; éclairage simplifié pour les
-  modèles. Les pièces d'armure remplacent les parties nues d'après leur nom de fichier.
-- Interface : les fenêtres sont celles du jeu, mais leurs positions à l'écran sont choisies par
-  RappelzRust (le client d'origine les fixe dans son code) ; l'écran de création de personnage, la
-  boutique et l'équipement détaillé utilisent encore des panneaux simples.
-- Gameplay serveur : combat au corps à corps avec formules provisoires (en attendant db_BasicStat /
-  db_Exp), récompenses EXP/JP/rupees, mort et réapparition ; pas encore de compétences, de quêtes,
-  de groupe, de butin au sol ni d'IA de monstres agressifs.
-- Le client NoLimits d'origine n'a pas été testé contre RappelzCore. Il doit être lancé par son
-  launcher (`<process>_RUNNER`). Le KSA RC4 a été lu en assembleur sans capture réelle pour le
-  confirmer. Plusieurs champs de paquets de gameplay sont déduits (marqués [D] dans la doc).
-- La sémantique de plusieurs champs RDB est déduite (positions prouvées, sens parfois inconnu).
+- **Rendering**:
+  - no water (`.nfw`), procedural grass, effects (`rcfx`, `.spt`), sky or fog yet;
+  - weapons and accessories are not attached to bones yet;
+  - lighting on models is simplified;
+  - armour pieces replace naked body parts based on their file name.
+- **Interface**:
+  - the windows are the game's own, but RappelzRust chooses their on-screen positions (the
+    original client sets them in code);
+  - character creation, the shop and the detailed equipment view still use simple panels.
+- **Server gameplay**:
+  - melee combat with provisional formulas (until db_BasicStat / db_Exp are decoded);
+  - EXP/JP/rupee rewards, death and respawn;
+  - no skills, quests, parties, ground loot or aggressive monster AI yet.
+- **Original NoLimits client**:
+  - not tested against RappelzCore yet;
+  - it must be started by its launcher (`<process>_RUNNER`);
+  - the RC4 KSA was read from assembly, with no real capture to confirm it;
+  - several gameplay packet fields are deduced (marked [D] in the docs).
+- **RDB fields**: the meaning of several fields is deduced (their positions are proven, their
+  meaning sometimes unknown).
+
+## License
+
+GPL-2.0-or-later. The SQL schema in `sql/base` comes from
+[AzerothCore](https://github.com/azerothcore/azerothcore-wotlk) (GPL-2.0). Rappelz is a trademark of
+its respective owners; no game file is distributed.
