@@ -1,0 +1,26 @@
+[package]
+name = "rappelz-rust"
+description = "RappelzRust : client de jeu Rappelz en Rust, ressources au format WoW (MPQ/DBC)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "RappelzRust"
+path = "src/main.rs"
+
+[dependencies]
+rz-common = { path = "../../shared/rz-common" }
+rz-mpq = { path = "../../shared/rz-mpq" }
+rz-dbc = { path = "../../shared/rz-dbc" }
+rz-proto = { path = "../../shared/rz-proto" }
+rz-rappelz = { path = "../../shared/rz-rappelz" }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+macroquad = { version = "0.4", features = ["audio"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "bmp"] }
+rz-texture = { path = "../../shared/rz-texture" }
+rz-terrain = { path = "../../shared/rz-terrain" }
+rz-model = { path = "../../shared/rz-model" }
+rz-ui = { path = "../../shared/rz-ui" }

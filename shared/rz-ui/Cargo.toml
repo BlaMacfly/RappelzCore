@@ -1,0 +1,16 @@
+[package]
+name = "rz-ui"
+description = "Interface du client Rappelz : sprites .spr, fenêtres .nui, règles de dessin des contrôles"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+encoding_rs.workspace = true
+
+[dev-dependencies]
+rz-rappelz = { path = "../rz-rappelz" }
+rz-texture = { path = "../rz-texture" }
+image = { version = "0.25", default-features = false, features = ["png"] }
+ab_glyph = "0.2.32"

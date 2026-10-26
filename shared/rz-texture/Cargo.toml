@@ -1,0 +1,13 @@
+[package]
+name = "rz-texture"
+description = "Décodage des textures du client Rappelz : DDS (DXT1/3/5, non compressé) et TGA/JPEG/PNG/BMP vers RGBA8"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "bmp", "tga"] }
+
+[dev-dependencies]
+rz-rappelz = { path = "../rz-rappelz" }

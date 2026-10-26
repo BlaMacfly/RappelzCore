@@ -1,0 +1,12 @@
+[package]
+name = "rz-model"
+description = "Modèles et animations Rappelz (.nx3, .naf, .cob) : maillages, matériaux, squelettes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+rz-rappelz = { path = "../rz-rappelz" }

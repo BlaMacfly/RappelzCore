@@ -1,0 +1,13 @@
+[package]
+name = "rz-terrain"
+description = "Cartes Rappelz (nFlavor Map .nfm et fichiers associés) : relief, textures, eau, objets placés"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+encoding_rs = "0.8"
+
+[dev-dependencies]
+rz-rappelz = { path = "../rz-rappelz" }

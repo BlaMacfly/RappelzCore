@@ -4,14 +4,15 @@ members = [
     "shared/rz-common",
     "shared/rz-mpq",
     "shared/rz-dbc",
-    "shared/rz-database",
     "shared/rz-rappelz",
     "shared/rz-proto",
+    "shared/rz-terrain",
+    "shared/rz-model",
+    "shared/rz-texture",
+    "shared/rz-ui",
+    "RappelzRust/client",
     "RappelzRust/tools/rz-extractor",
     "RappelzRust/tools/rz-bot",
-    "RappelzCore/tools/rz-dbimport",
-    "RappelzCore/authserver",
-    "RappelzCore/worldserver",
 ]
 
 [workspace.package]
