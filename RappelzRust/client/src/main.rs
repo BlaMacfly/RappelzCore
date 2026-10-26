@@ -78,9 +78,25 @@ pub struct App {
     background: Option<Texture2D>,
 }
 
+/// Icône de la fenêtre (barre de titre, barre des tâches), générée par `build.rs` depuis le logo.
+fn window_icon() -> macroquad::miniquad::conf::Icon {
+    macroquad::miniquad::conf::Icon {
+        small: *include_bytes!(concat!(env!("OUT_DIR"), "/icon_16.rgba")),
+        medium: *include_bytes!(concat!(env!("OUT_DIR"), "/icon_32.rgba")),
+        big: *include_bytes!(concat!(env!("OUT_DIR"), "/icon_64.rgba")),
+    }
+}
+
 fn window_conf() -> macroquad::conf::Conf {
     macroquad::conf::Conf {
-        miniquad_conf: Conf { window_title: "RappelzRust".to_owned(), window_width: 1280, window_height: 720, high_dpi: true, ..Default::default() },
+        miniquad_conf: Conf {
+            window_title: "RappelzRust".to_owned(),
+            window_width: 1280,
+            window_height: 720,
+            high_dpi: true,
+            icon: Some(window_icon()),
+            ..Default::default()
+        },
         // Les modèles Rappelz dépassent les tampons par défaut (10 000 sommets / 5 000 index).
         draw_call_vertex_capacity: 65_536,
         draw_call_index_capacity: 196_608,
