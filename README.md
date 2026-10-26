@@ -2,6 +2,10 @@
   <img src="docs/images/RappelzCore.png" alt="RappelzCore" width="320">
 </p>
 
+<p align="center">
+  <a href="https://discord.gg/RPtfV6GjZz"><img src="https://img.shields.io/badge/Discord-Rejoindre%20le%20serveur-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord RappelzCore"></a>
+</p>
+
 # RappelzCore & RappelzRust
 
 Émulateur de serveur **Rappelz** (RappelzCore) et client de jeu (RappelzRust), en Rust, reconstruits
