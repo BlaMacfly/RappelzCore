@@ -1,0 +1,20 @@
+[package]
+name = "rappelzcore-authserver"
+description = "RappelzCore authserver : authentification Rappelz sur la base acore_auth d'AzerothCore"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "authserver"
+path = "src/main.rs"
+
+[dependencies]
+rz-common = { path = "../../shared/rz-common" }
+rz-database = { path = "../../shared/rz-database" }
+rz-proto = { path = "../../shared/rz-proto" }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+rand.workspace = true
+clap.workspace = true

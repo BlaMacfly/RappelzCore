@@ -1,0 +1,10 @@
+[package]
+name = "rz-mpq"
+description = "Archives MPQ v1 (format des clients World of Warcraft) : lecture, écriture, chaîne de patchs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+flate2.workspace = true
+thiserror.workspace = true

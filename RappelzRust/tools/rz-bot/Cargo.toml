@@ -1,0 +1,14 @@
+[package]
+name = "rz-bot"
+description = "Client de test sans interface : parcours complet auth → royaume → personnage → monde"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rz-common = { path = "../../../shared/rz-common" }
+rz-proto = { path = "../../../shared/rz-proto" }
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+clap.workspace = true

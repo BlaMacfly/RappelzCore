@@ -1,0 +1,92 @@
+################################################
+# RappelzCore World Server configuration file #
+################################################
+# Copiez ce fichier en « worldserver.conf » à côté de worldserver.exe.
+# Même format qu'AzerothCore ; surcharge possible par variables d'environnement AC_<CLE>.
+[worldserver]
+
+###################################################################################################
+# BASES DE DONNÉES (schémas AzerothCore : acore_auth, acore_world, acore_characters)
+
+LoginDatabaseInfo     = "127.0.0.1;3306;acore;acore;acore_auth"
+WorldDatabaseInfo     = "127.0.0.1;3306;acore;acore;acore_world"
+CharacterDatabaseInfo = "127.0.0.1;3306;acore;acore;acore_characters"
+WorldDatabase.WorkerThreads = 4
+
+###################################################################################################
+# SERVEUR
+#
+#    RealmID
+#        Description: Id du royaume dans acore_auth.realmlist (le port du royaume doit
+#                     correspondre à WorldServerPort).
+#    DataDir
+#        Description: Dossier contenant dbc/ (produit par « rz-extractor dbc »).
+#    WorldServerPort
+#        Description: Port d'écoute des joueurs (port du royaume dans realmlist).
+
+RealmID = 1
+DataDir = "."
+WorldServerPort = 4514
+BindIP = "0.0.0.0"
+LogLevel = 2
+
+#    PlayerLimit
+#        Description: Nombre maximal de joueurs connectés.
+#    PlayerSaveInterval
+#        Description: Intervalle de sauvegarde des personnages, en millisecondes.
+#    CharactersPerRealm
+#        Description: Nombre maximal de personnages par compte sur ce royaume.
+
+PlayerLimit = 1000
+PlayerSaveInterval = 900000
+CharactersPerRealm = 5
+
+#    Motd
+#        Description: Message affiché à l'entrée dans le monde.
+
+Motd = "Bienvenue sur RappelzCore."
+
+###################################################################################################
+# PERSONNAGES
+#
+#    StartPlayerLevel / StartPlayerMoney
+#        Description: Niveau et rupees des nouveaux personnages.
+
+StartPlayerLevel = 1
+StartPlayerMoney = 0
+
+#    Rappelz.StartPosition.<Race>
+#        Description: Position de départ « x y » par race. La valeur par défaut est la place de
+#                     Laksy (position du PNJ 1001 dans NpcResource.dbc).
+
+Rappelz.StartPosition.Gaia  = "8330 7167"
+Rappelz.StartPosition.Deva  = "8330 7167"
+Rappelz.StartPosition.Asura = "8330 7167"
+
+###################################################################################################
+# MONDE
+#
+#    Visibility.Distance
+#        Description: Distance de visibilité des joueurs et PNJ (unités Rappelz).
+#    Rappelz.RegionSize / Rappelz.CellSize
+#        Description: Valeurs envoyées au client dans TS_SC_LOGIN_RESULT.
+#    Rappelz.PlayerMoveSpeed
+#        Description: Vitesse de déplacement envoyée dans TS_SC_MOVE.
+#    Rappelz.MoveSpeedScale
+#        Description: Unités parcourues par seconde = PlayerMoveSpeed × MoveSpeedScale.
+#    Rappelz.MoveTolerance
+#        Description: Écart maximal toléré entre la position annoncée par le client et celle
+#                     calculée par le serveur (anti-téléportation).
+
+Visibility.Distance = 540
+Rappelz.RegionSize = 180
+Rappelz.CellSize = 6
+Rappelz.PlayerMoveSpeed = 120
+Rappelz.MoveSpeedScale = 1.0
+Rappelz.MoveTolerance = 60
+
+###################################################################################################
+# RAPPELZ — RÉSEAU
+
+Rappelz.NetworkKey = "}h79q~B%al;k'y $E"
+Rappelz.Codepage = "windows-1252"

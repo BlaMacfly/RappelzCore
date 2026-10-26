@@ -1,0 +1,11 @@
+[package]
+name = "rz-rappelz"
+description = "Formats du client Rappelz d'origine : archive data.000-008, bases .rdb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+encoding_rs.workspace = true
+rz-dbc = { path = "../rz-dbc" }

@@ -1,0 +1,16 @@
+[package]
+name = "rz-proto"
+description = "Protocole réseau Rappelz (RC4 XRC4Cipher, RSA/AES, messages TS_*) reconstruit depuis SFrame.exe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+encoding_rs.workspace = true
+rand.workspace = true
+rsa.workspace = true
+aes.workspace = true
+cbc.workspace = true
+tokio.workspace = true
+tracing.workspace = true

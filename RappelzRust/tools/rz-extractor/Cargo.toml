@@ -1,0 +1,16 @@
+[package]
+name = "rz-extractor"
+description = "Convertit un client Rappelz (data.000-008, .rdb) en données RappelzRust façon WoW (MPQ, DBC)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rz-common = { path = "../../../shared/rz-common" }
+rz-mpq = { path = "../../../shared/rz-mpq" }
+rz-dbc = { path = "../../../shared/rz-dbc" }
+rz-rappelz = { path = "../../../shared/rz-rappelz" }
+anyhow.workspace = true
+tracing.workspace = true
+clap.workspace = true
+rayon.workspace = true

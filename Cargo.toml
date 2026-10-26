@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = [
+    "shared/rz-common",
+    "shared/rz-mpq",
+    "shared/rz-dbc",
+    "shared/rz-database",
+    "shared/rz-rappelz",
+    "shared/rz-proto",
+    "RappelzRust/tools/rz-extractor",
+    "RappelzRust/tools/rz-bot",
+    "RappelzCore/tools/rz-dbimport",
+    "RappelzCore/authserver",
+    "RappelzCore/worldserver",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+authors = ["BlaMacfly"]
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+flate2 = "1"
+byteorder = "1"
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "mysql", "macros", "chrono"] }
+sha1 = "0.10"
+num-bigint = "0.4"
+rand = "0.8"
+chrono = "0.4"
+encoding_rs = "0.8"
+rayon = "1"
+rsa = "0.9"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc", "block-padding"] }
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 2

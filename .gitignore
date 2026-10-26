@@ -1,0 +1,5 @@
+/target
+/Rappelz NoLimits
+/client-data
+*.conf
+!conf/*.conf.dist
