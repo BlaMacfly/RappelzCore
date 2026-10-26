@@ -17,7 +17,7 @@ par rétro-ingénierie (REA / Ghidra) du client **Rappelz NoLimits** (`Rappelz N
 
 | Branche | Contenu |
 |---|---|
-| `main` | **RappelzCore**, le serveur : `authserver`, `worldserver`, `rz-dbimport`, schéma SQL AzerothCore (`sql/`), configuration (`conf/`), crates partagées nécessaires (protocole, base de données, formats Rappelz), outils `rz-extractor` (données serveur) et `rz-bot` (tests). |
+| `RappelzCore` (par défaut) | **RappelzCore**, le serveur : `authserver`, `worldserver`, `rz-dbimport`, schéma SQL AzerothCore (`sql/`), configuration (`conf/`), crates partagées nécessaires (protocole, base de données, formats Rappelz), outils `rz-extractor` (données serveur) et `rz-bot` (tests). |
 | `RappelzRust` | **RappelzRust**, le client : `RappelzRust.exe`, `rz-extractor` (client Rappelz → MPQ/DBC), `rz-bot`, crates de rendu et de formats (textures, terrain, modèles, interface) et crates partagées. |
 
 Chaque branche compile seule (`cargo build --release`). Les fichiers du jeu (client Rappelz,
