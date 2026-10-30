@@ -31,6 +31,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Installe l'addon Lua de demonstration, sans modifier les fichiers deja presents.
+    Addons {
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Convertit un client Rappelz en données RappelzRust.
     Client {
         /// Dossier du client Rappelz (contient data.000 et Resource\).
@@ -84,6 +89,7 @@ enum Command {
 fn main() -> Result<()> {
     rz_common::init_logging("info");
     match Cli::parse().command {
+        Command::Addons { out } => write_example_addon(&out),
         Command::Client {
             client,
             out,
@@ -102,12 +108,33 @@ fn main() -> Result<()> {
             }
             write_locale(&client, &data_dir, &locale, &codepage, compression)?;
             write_config(&out, &locale, &realmlist)?;
+            write_example_addon(&out)?;
             tracing::info!("Terminé en {:.0?} → {}", started.elapsed(), out.display());
             Ok(())
         }
         Command::Dbc { data, locale, out } => extract_dbc(&data, &locale, &out),
         Command::Verify { client, data, locale } => verify(&client, &data, &locale),
     }
+}
+
+fn write_example_addon(out: &Path) -> Result<()> {
+    use std::io::Write;
+    let directory = out.join("Interface").join("AddOns").join("RappelzDebug");
+    std::fs::create_dir_all(&directory)?;
+    let files: [(&str, &[u8]); 3] = [
+        ("RappelzDebug.toc", include_bytes!("../../../Interface/AddOns/RappelzDebug/RappelzDebug.toc")),
+        ("RappelzDebug.lua", include_bytes!("../../../Interface/AddOns/RappelzDebug/RappelzDebug.lua")),
+        ("RappelzDebug.xml", include_bytes!("../../../Interface/AddOns/RappelzDebug/RappelzDebug.xml")),
+    ];
+    for (name, content) in files {
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(directory.join(name)) {
+            Ok(mut file) => file.write_all(content)?,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {},
+            Err(e) => return Err(e.into()),
+        }
+    }
+    tracing::info!("Addon RappelzDebug disponible dans {}", directory.display());
+    Ok(())
 }
 
 fn verify(client: &Path, data: &Path, locale: &str) -> Result<()> {

@@ -109,18 +109,8 @@ pub async fn handle(session: &mut Session, line: &str) -> Result<()> {
                     g.character.level = lv;
                 }
                 let mut w = ctx.world.lock().unwrap();
-                if let Some(p) = w.players.get_mut(&handle) {
-                    p.max_hp = crate::gameplay::max_hp_for(lv);
-                    p.max_mp = crate::gameplay::max_mp_for(lv);
-                    p.hp = p.max_hp;
-                    p.mp = p.max_mp;
-                    p.attack = crate::gameplay::attack_for(lv);
-                    p.defence = crate::gameplay::defence_for(lv);
-                    p.enter.creature.level = lv as i32;
-                }
-                let level_packet = rz_proto::msg_game::ScLevelUpdate { handle, level: lv as i32, job_level: 1 }.to_packet();
-                w.broadcast_around(handle, &level_packet, true);
-                w.send_to(handle, msg::ScProperty { handle, name: "lv".into(), value: lv as i64, text: None }.to_packet());
+                let job_level = session.in_game.as_ref().map(|g| g.character.extra_i64("jlv", 1) as i32).unwrap_or(1);
+                w.set_player_level(handle, lv, job_level);
                 w.notify(handle, &format!("Niveau {lv}."));
             }
             _ => reply("Usage : .level <n>"),

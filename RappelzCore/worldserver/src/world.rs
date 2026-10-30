@@ -284,7 +284,13 @@ impl World {
 
     fn player_enter(&self, p: &PlayerEntity, now: u32) -> RawPacket {
         let (x, y) = p.motion.position(now);
-        ScEnter { enter_type: 0, handle: p.handle, x, y, z: p.z, layer: p.layer, kind: EnterKind::Player(p.enter.clone()) }
+        let mut enter = p.enter.clone();
+        // Combat/regen update the live entity; the appearance cache is not a vitals store.
+        enter.creature.hp = p.hp;
+        enter.creature.max_hp = p.max_hp;
+        enter.creature.mp = p.mp;
+        enter.creature.max_mp = p.max_mp;
+        ScEnter { enter_type: 0, handle: p.handle, x, y, z: p.z, layer: p.layer, kind: EnterKind::Player(enter) }
             .to_packet()
     }
 
@@ -434,6 +440,28 @@ impl World {
 
     fn hpmp_packet(handle: u32, hp: i32, max_hp: i32, mp: i32, max_mp: i32, add_hp: i32) -> RawPacket {
         game::ScHpMp { handle, add_hp, hp, max_hp, add_mp: 0, mp, max_mp, need_to_display: add_hp != 0 }.to_packet()
+    }
+
+    /// Apply level-derived stats and publish the same authoritative state to all viewers.
+    pub fn set_player_level(&mut self, handle: u32, level: u8, job_level: i32) -> bool {
+        let Some(player) = self.players.get_mut(&handle) else { return false };
+        player.max_hp = crate::gameplay::max_hp_for(level);
+        player.max_mp = crate::gameplay::max_mp_for(level);
+        player.hp = player.max_hp;
+        player.mp = player.max_mp;
+        player.attack = crate::gameplay::attack_for(level);
+        player.defence = crate::gameplay::defence_for(level);
+        let creature = &mut player.enter.creature;
+        creature.level = level as i32;
+        creature.hp = player.hp;
+        creature.max_hp = player.max_hp;
+        creature.mp = player.mp;
+        creature.max_mp = player.max_mp;
+        let hpmp = Self::hpmp_packet(handle, player.hp, player.max_hp, player.mp, player.max_mp, 0);
+        self.broadcast_around(handle, &game::ScLevelUpdate { handle, level: level as i32, job_level }.to_packet(), true);
+        self.broadcast_around(handle, &hpmp, true);
+        self.send_to(handle, msg::ScProperty { handle, name: "lv".into(), value: level as i64, text: None }.to_packet());
+        true
     }
 
     // ───────────────────────── Combat ─────────────────────────
@@ -661,6 +689,72 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_world() -> (World, Vec<tokio::sync::mpsc::UnboundedReceiver<RawPacket>>) {
+        let mut world = World {
+            started: Instant::now(), players: HashMap::new(), npcs: HashMap::new(), monsters: HashMap::new(),
+            next_handle: 3, next_monster_handle: MONSTER_HANDLE_BASE, visibility_distance: 540.0,
+            max_online: 0, last_regen: 0,
+        };
+        let mut receivers = Vec::new();
+        for handle in [1, 2] {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            receivers.push(rx);
+            world.players.insert(handle, PlayerEntity {
+                handle, guid: handle, account_id: handle, name: format!("Player{handle}"), gm_level: 0,
+                z: 0.0, layer: 0, motion: Motion::at(0.0, 0.0), enter: PlayerEnterInfo::default(),
+                wear: [0; game::WEAR_SLOTS], tx, events: tokio::sync::mpsc::unbounded_channel().0,
+                visible: if handle == 2 { HashSet::from([1]) } else { HashSet::new() },
+                hp: 50, max_hp: 100, mp: 20, max_mp: 50, attack: 16, defence: 6,
+                attack_target: None, next_attack: 0, last_combat: 0,
+            });
+        }
+        (world, receivers)
+    }
+
+    #[test]
+    fn level_change_synchronizes_owner_observer_and_future_enter_packets() {
+        let (mut world, mut receivers) = test_world();
+        assert!(world.set_player_level(1, 2, 7));
+        for rx in &mut receivers {
+            let level = game::ScLevelUpdate::from_packet(&rx.try_recv().unwrap()).unwrap();
+            assert_eq!((level.handle, level.level, level.job_level), (1, 2, 7));
+            let hpmp = game::ScHpMp::from_packet(&rx.try_recv().unwrap()).unwrap();
+            assert_eq!((hpmp.handle, hpmp.hp, hpmp.max_hp, hpmp.mp, hpmp.max_mp), (1, 120, 120, 60, 60));
+        }
+        let property = msg::ScProperty::from_packet(&receivers[0].try_recv().unwrap()).unwrap();
+        assert_eq!((property.name.as_str(), property.value), ("lv", 2));
+        assert!(receivers[1].try_recv().is_err());
+        world.query(2, 1);
+        let enter = msg::ScEnter::from_packet(&receivers[1].try_recv().unwrap()).unwrap();
+        let EnterKind::Player(player) = enter.kind else { panic!("expected player ENTER") };
+        assert_eq!((player.creature.level, player.creature.hp, player.creature.max_hp, player.creature.mp, player.creature.max_mp),
+            (2, 120, 120, 60, 60));
+        assert!(!world.set_player_level(99, 2, 1));
+    }
+
+    #[test]
+    fn query_and_new_visibility_read_current_vitals_after_combat_or_regeneration() {
+        let (mut world, mut receivers) = test_world();
+        let player = world.players.get_mut(&1).unwrap();
+        player.enter.creature.hp = 100;
+        player.enter.creature.mp = 50;
+        player.hp = 43;
+        player.mp = 12;
+        world.query(2, 1);
+        let enter = msg::ScEnter::from_packet(&receivers[1].try_recv().unwrap()).unwrap();
+        let EnterKind::Player(player) = enter.kind else { panic!("expected player") };
+        assert_eq!((player.creature.hp, player.creature.max_hp, player.creature.mp, player.creature.max_mp), (43, 100, 12, 50));
+        while receivers[1].try_recv().is_ok() {}
+        let player = world.players.get_mut(&1).unwrap();
+        player.hp = 48;
+        player.mp = 15;
+        world.players.get_mut(&2).unwrap().visible.clear();
+        world.update_visibility();
+        let enter = msg::ScEnter::from_packet(&receivers[1].try_recv().unwrap()).unwrap();
+        let EnterKind::Player(player) = enter.kind else { panic!("expected player") };
+        assert_eq!((player.creature.hp, player.creature.mp), (48, 15));
+    }
 
     #[test]
     fn motion_interpolation() {

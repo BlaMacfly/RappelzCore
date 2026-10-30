@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use rz_database::characters::{self, BAG_SLOT_BASE};
-use rz_proto::msg::{self, Message};
+use rz_proto::msg::Message;
 use rz_proto::msg_game::{self as game, id as gid};
 use rz_proto::RawPacket;
 
@@ -372,26 +372,11 @@ impl Session {
                 if gold > 0 {
                     self.set_money(money);
                 }
-                let w = ctx.world.lock().unwrap();
+                let mut w = ctx.world.lock().unwrap();
                 w.notify(handle, &format!("{monster} vaincu : +{exp} EXP, +{jp} JP, +{gold} rupees."));
                 if leveled {
-                    let packet = game::ScLevelUpdate { handle, level: level as i32, job_level: jlv }.to_packet();
-                    w.broadcast_around(handle, &packet, true);
-                    w.send_to(handle, msg::ScProperty { handle, name: "lv".into(), value: level as i64, text: None }.to_packet());
+                    w.set_player_level(handle, level, jlv);
                     w.notify(handle, &format!("Niveau {level} atteint !"));
-                }
-                drop(w);
-                if leveled {
-                    let mut w = ctx.world.lock().unwrap();
-                    if let Some(p) = w.players.get_mut(&handle) {
-                        p.max_hp = max_hp_for(level);
-                        p.max_mp = max_mp_for(level);
-                        p.hp = p.max_hp;
-                        p.mp = p.max_mp;
-                        p.attack = attack_for(level);
-                        p.defence = defence_for(level);
-                        p.enter.creature.level = level as i32;
-                    }
                 }
             }
             WorldEvent::Died => {

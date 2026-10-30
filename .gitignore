@@ -3,3 +3,4 @@
 /client-data
 *.conf
 !conf/*.conf.dist
+__pycache__/
