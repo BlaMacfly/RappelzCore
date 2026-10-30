@@ -19,12 +19,21 @@ pub struct PacketTrace {
     experience: Vec<Value>,
     enters: Vec<Value>,
     leaves: Vec<u32>,
+    lifecycle: Vec<Value>,
     errors: Vec<String>,
 }
 
 impl PacketTrace {
     pub fn observe(&mut self, event: &NetEvent) {
-        if self.hits.len() + self.hpmp.len() + self.enters.len() > 2048 {
+        if self.hits.len()
+            + self.hpmp.len()
+            + self.enters.len()
+            + self.leaves.len()
+            + self.levels.len()
+            + self.experience.len()
+            + self.errors.len()
+            >= 2048
+        {
             if self.errors.is_empty() {
                 self.errors.push("combat trace capacity exceeded".into());
             }
@@ -40,8 +49,13 @@ impl PacketTrace {
                     };
                     self.enters.push(json!({"handle":e.handle,"name":name,"kind":kind,"level":creature.level,
                         "hp":creature.hp,"max_hp":creature.max_hp,"mp":creature.mp,"max_mp":creature.max_mp}));
+                    self.lifecycle.push(json!({"event":"enter","handle":e.handle,"hp":creature.hp,"mp":creature.mp}));
                 }
-                NetEvent::Leave(handle) => self.leaves.push(*handle),
+                NetEvent::Leave(handle) => {
+                    self.leaves.push(*handle);
+                    self.lifecycle
+                        .push(json!({"event":"leave","handle":handle}));
+                }
                 NetEvent::Packet(p) => match p.id {
                     id::TS_SC_ATTACK_EVENT => {
                         let packet = game::ScAttackEvent::from_packet(p)?;
@@ -78,7 +92,7 @@ impl PacketTrace {
 
     fn json(&self) -> Value {
         json!({"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
-            "enters":self.enters,"leaves":self.leaves,"errors":self.errors})
+            "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"errors":self.errors})
     }
 }
 
@@ -107,6 +121,36 @@ mod tests {
         assert_eq!(trace.errors.len(), 1);
         assert_eq!(trace.hpmp.len(), 1);
     }
+
+    #[test]
+    fn lifecycle_order_and_leave_only_capacity_are_preserved() {
+        let mut trace = PacketTrace::default();
+        trace.observe(&NetEvent::Enter(rz_proto::msg::ScEnter {
+            enter_type: 0,
+            handle: 8,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            layer: 0,
+            kind: EnterKind::Monster {
+                creature: rz_proto::msg::CreatureInfo {
+                    hp: 105,
+                    mp: 53,
+                    ..Default::default()
+                },
+                is_tamed: false,
+                monster_id: 711,
+            },
+        }));
+        trace.observe(&NetEvent::Leave(8));
+        assert_eq!(trace.lifecycle[0]["event"], "enter");
+        assert_eq!(trace.lifecycle[1]["event"], "leave");
+        for _ in 0..3000 {
+            trace.observe(&NetEvent::Leave(8));
+        }
+        assert_eq!(trace.errors, ["combat trace capacity exceeded"]);
+        assert_eq!(trace.enters.len() + trace.leaves.len(), 2048);
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -116,6 +160,12 @@ enum Stage {
     DamageQuery,
     Query,
     Hold,
+    Corpse,
+    HiddenQuery,
+    Respawn,
+    RepeatFight,
+    RepeatQuery,
+    RepeatHold,
     Logout,
     Leave,
     Done,
@@ -136,6 +186,8 @@ pub struct CombatValidation {
     steps: Vec<Value>,
     failure: Option<String>,
     damage_query_done: bool,
+    kills: u8,
+    monster_enters: usize,
 }
 
 fn unit(unit: &UnitState) -> Value {
@@ -152,6 +204,12 @@ impl CombatValidation {
     pub fn new(plan: PathBuf, app: &App) -> Result<Self> {
         super::guard(app)?;
         let plan: Value = serde_json::from_slice(&std::fs::read(plan)?)?;
+        let kills = plan
+            .get("kills")
+            .map(|v| v.as_u64().context("kills must be 1 or 2"))
+            .transpose()?
+            .unwrap_or(1);
+        ensure!((1..=2).contains(&kills), "kills must be 1 or 2");
         let role = plan["role"].as_str().context("combat role")?.to_string();
         ensure!(
             role == "fighter" || role == "witness",
@@ -180,6 +238,8 @@ impl CombatValidation {
             steps: Vec::new(),
             failure: None,
             damage_query_done: false,
+            kills: kills as u8,
+            monster_enters: 0,
         })
     }
 
@@ -492,10 +552,214 @@ impl CombatValidation {
                     "witness.synced",
                     json!({"fighter":self.fighter,"fresh_enter":last}),
                 )?;
-                self.advance(Stage::Leave);
+                self.advance(if self.kills == 2 {
+                    Stage::Corpse
+                } else {
+                    Stage::Leave
+                });
             }
             Stage::Hold => {
                 if read(&self.directory.join("witness.synced")).is_some() {
+                    self.record(app);
+                    if self.kills == 2 {
+                        self.advance(Stage::Corpse);
+                    } else {
+                        app.send(NetCmd::ReturnLobby);
+                        self.advance(Stage::Logout);
+                    }
+                }
+            }
+            Stage::Corpse => {
+                let world = app
+                    .world
+                    .as_ref()
+                    .context("world missing at corpse removal")?;
+                if !self.trace(app)?.leaves.contains(&self.monster)
+                    || world.unit(self.monster).is_some()
+                {
+                    return Ok(false);
+                }
+                if self.role == "fighter" {
+                    ensure!(
+                        world.addon_state().target.is_none(),
+                        "corpse target was not cleared"
+                    );
+                }
+                self.monster_enters = self
+                    .trace(app)?
+                    .enters
+                    .iter()
+                    .filter(|e| e["handle"] == self.monster)
+                    .count();
+                self.record(app);
+                // A stale handle must not bring a hidden corpse back into the world.
+                app.send(NetCmd::Raw(
+                    game::Handle::<{ id::TS_CS_QUERY }>(self.monster).to_packet(),
+                ));
+                self.advance(Stage::HiddenQuery);
+            }
+            Stage::HiddenQuery => {
+                ensure!(
+                    app.world
+                        .as_ref()
+                        .context("world missing during hidden query")?
+                        .unit(self.monster)
+                        .is_none(),
+                    "query reintroduced hidden corpse"
+                );
+                ensure!(
+                    self.trace(app)?
+                        .enters
+                        .iter()
+                        .filter(|e| e["handle"] == self.monster)
+                        .count()
+                        == self.monster_enters,
+                    "hidden corpse query received ENTER"
+                );
+                if self.since.elapsed() >= Duration::from_secs(1) {
+                    self.record(app);
+                    self.advance(Stage::Respawn);
+                }
+            }
+            Stage::Respawn => {
+                let world = app.world.as_ref().context("world missing at respawn")?;
+                let Some(monster) = world.unit(self.monster) else {
+                    return Ok(false);
+                };
+                ensure!(
+                    monster.health == Some(105)
+                        && monster.max_health == Some(105)
+                        && monster.mana == Some(53)
+                        && monster.max_mana == Some(53),
+                    "respawn vitals: {monster:?}"
+                );
+                ensure!(
+                    self.trace(app)?
+                        .enters
+                        .iter()
+                        .filter(|e| e["handle"] == self.monster)
+                        .count()
+                        > self.monster_enters,
+                    "respawn did not arrive via ENTER"
+                );
+                if !self
+                    .directory
+                    .join(format!("{}.respawn", self.role))
+                    .exists()
+                {
+                    let select = app
+                        .world
+                        .as_mut()
+                        .unwrap()
+                        .select_target(self.monster)
+                        .context("respawn selection")?;
+                    app.send(select);
+                    app.sync_addons();
+                    self.record(app);
+                    self.mark(
+                        &format!("{}.respawn", self.role),
+                        json!({"handle":self.monster}),
+                    )?;
+                }
+                if self.role == "fighter" {
+                    if read(&self.directory.join("witness.respawn")).is_none() {
+                        return Ok(false);
+                    }
+                    let attack = app
+                        .world
+                        .as_ref()
+                        .unwrap()
+                        .attack_target(self.monster)
+                        .context("respawn attack")?;
+                    app.send(attack);
+                }
+                self.advance(Stage::RepeatFight);
+            }
+            Stage::RepeatFight => {
+                let trace = self.trace(app)?;
+                let deaths = trace
+                    .hits
+                    .iter()
+                    .filter(|h| {
+                        h["attacker"] == self.fighter
+                            && h["target"] == self.monster
+                            && h["target_hp"] == 0
+                    })
+                    .count();
+                if deaths < 2 {
+                    return Ok(false);
+                }
+                ensure!(deaths == 2, "unexpected extra kill");
+                let world = app.world.as_ref().context("world missing at second kill")?;
+                if self.role == "fighter" {
+                    if world.experience() != (9, 6) {
+                        return Ok(false);
+                    }
+                    let player = world.addon_state().player.context("fighter missing")?;
+                    ensure!(
+                        player.level == Some(3)
+                            && player.health.is_some_and(|hp| hp > 0 && hp < 140)
+                            && player.max_health == Some(140)
+                            && player.mana == Some(70),
+                        "second kill state: {player:?}"
+                    );
+                    self.record(app);
+                    self.capture()?;
+                    self.mark("fighter.repeat.reward", json!({"fighter":self.fighter}))?;
+                    self.advance(Stage::RepeatHold);
+                } else {
+                    ensure!(world.experience() == (0, 0), "witness gained repeat reward");
+                    self.query_enters = trace
+                        .enters
+                        .iter()
+                        .filter(|e| e["handle"] == self.fighter)
+                        .count();
+                    let select = app
+                        .world
+                        .as_mut()
+                        .unwrap()
+                        .select_target(self.fighter)
+                        .context("fighter selection after repeat")?;
+                    app.send(select);
+                    app.sync_addons();
+                    self.record(app);
+                    app.send(NetCmd::Raw(
+                        game::Handle::<{ id::TS_CS_QUERY }>(self.fighter).to_packet(),
+                    ));
+                    self.advance(Stage::RepeatQuery);
+                }
+            }
+            Stage::RepeatQuery => {
+                let trace = self.trace(app)?;
+                let enters: Vec<_> = trace
+                    .enters
+                    .iter()
+                    .filter(|e| e["handle"] == self.fighter)
+                    .collect();
+                if enters.len() <= self.query_enters {
+                    return Ok(false);
+                }
+                let last = enters.last().unwrap();
+                let hpmp = trace
+                    .hpmp
+                    .iter()
+                    .rev()
+                    .find(|e| e["handle"] == self.fighter)
+                    .context("repeat HPMP missing")?;
+                ensure!(
+                    last["level"] == 3
+                        && ["hp", "max_hp", "mp", "max_mp"]
+                            .iter()
+                            .all(|k| last[k] == hpmp[k]),
+                    "repeat query disagrees with live HPMP: {last} versus {hpmp}"
+                );
+                self.record(app);
+                self.capture()?;
+                self.mark("witness.repeat.synced", json!({"fighter":self.fighter}))?;
+                self.advance(Stage::Leave);
+            }
+            Stage::RepeatHold => {
+                if read(&self.directory.join("witness.repeat.synced")).is_some() {
                     self.record(app);
                     app.send(NetCmd::ReturnLobby);
                     self.advance(Stage::Logout);
@@ -534,7 +798,7 @@ impl CombatValidation {
     pub fn finish(&self, app: &App) -> Result<bool> {
         let success = self.stage == Stage::Done && self.failure.is_none();
         self.mark(&format!("{}.json",self.role),json!({"success":success,"failure":self.failure,"role":self.role,
-            "account":app.account,"fighter":self.fighter,"monster":self.monster,"own":self.own,"events":self.events,
+            "account":app.account,"fighter":self.fighter,"monster":self.monster,"own":self.own,"kills":self.kills,"events":self.events,
             "messages":self.messages,"steps":self.steps,"trace":self.trace(app)?.json()}))?;
         Ok(success)
     }
