@@ -21,8 +21,9 @@ un sous-ensemble XML et l'addon RappelzDebug avec paramètres persistants. Le
 [matrice des API](docs/LUA_API_COMPATIBILITY.md) précisent les fonctionnalités testées et les limites.
 La [validation native locale](docs/LIVE_SERVER_VALIDATION.md) et le
 [combat/EXP à deux clients](docs/COMBAT_VALIDATION.md) confirment les événements, dégâts synchronisés,
-montées de niveau par EXP et données préservées. L'espace de développement combiné passe
-81 tests Rust et 5 tests Python ; chaque branche conserve son périmètre serveur/client compilable.
+montées de niveau par EXP et données préservées. Le [suivi des réapparitions](docs/RESPAWN_VALIDATION.md)
+ajoute les combats répétés et le refus des requêtes hors visibilité. L'espace de développement combiné passe
+85 tests Rust et 6 tests Python ; chaque branche conserve son périmètre serveur/client compilable.
 
 - **RappelzCore** utilise **exactement le schéma SQL d'AzerothCore** (`acore_auth`, `acore_characters`,
   `acore_world`, importé du dépôt officiel, commit `3179ea3` du 25/10/2026), son format de configuration
@@ -190,7 +191,7 @@ mots de passe de 16 caractères max (règle AzerothCore).
 ## Vérifications des développements précédents
 
 Cette liste contient des résultats conservés des travaux précédents. Les vérifications du
-30–31/10/2026 (81 tests Rust réussis, compilation optimisée et 125 212 ressources identiques) sont séparées
+30–31/10/2026 (85 tests Rust réussis, compilation optimisée et 125 212 ressources identiques) sont séparées
 des anciens résultats serveur/base de données dans [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md).
 
 Pour installer l'addon sur un client déjà converti :

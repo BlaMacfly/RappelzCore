@@ -67,6 +67,8 @@ The embedded legacy message-name table uses some older IDs; observed constructor
 
 The source has message definitions for inventory/equipment, NPC dialogs and shops, skills/skill lists, quests, stats, combat and additional gameplay. `worldserver/session.rs`, `gameplay.rs` and `commands.rs` implement selected behavior; message existence is not proof that the corresponding full game system works. Decoding support and server simulation coverage must be tracked separately.
 
+The [respawn regression](RESPAWN_VALIDATION.md) additionally verifies ordered monster LEAVE/ENTER and a second real kill with two clients. QUERY now requires an announced object that remains visible by live distance/layer/corpse state. Pending player attacks recheck that same visibility, and monster retaliation stops on layer changes. The native pair verifies hidden-corpse query denial; range/layer transitions currently have server-test coverage.
+
 Existing protocol tests cover cipher vectors, framing/dummy packets, fixed strings, observed packet lengths, message round trips, entity IDs and RSA/AES round trips. Their latest executed results are recorded in [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md). A round trip between two Rust endpoints can share the same mistake; retain independent binary offsets/vectors and add captured fixtures when available.
 
 Historical `client-data/bot1.log` and `bot2.log` show simultaneous local login, world entry, nearby NPC/player visibility, movement, chat and clean disconnect. They are useful restart evidence, not a fresh test run or coverage of all gameplay. Further work includes original-client interoperability evidence, explicit protocol-profile fixtures, parser robustness checks and verification of inferred gameplay fields.

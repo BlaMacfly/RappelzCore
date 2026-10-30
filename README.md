@@ -20,8 +20,9 @@ persistent RappelzDebug demonstration are included. See [development status](doc
 and the [API compatibility matrix](docs/LUA_API_COMPATIBILITY.md) for tested scope and remaining work.
 The [native local-server regression](docs/LIVE_SERVER_VALIDATION.md) and
 [two-client combat/XP run](docs/COMBAT_VALIDATION.md) verify real events, synchronized damage,
-XP-driven level-up and original-data preservation. The combined development workspace passes
-81 Rust and 5 Python tests; each branch keeps its own buildable server/client scope.
+XP-driven level-up and original-data preservation. The [respawn follow-up](docs/RESPAWN_VALIDATION.md)
+adds repeated kills and hidden-query checks. The combined development workspace passes
+85 Rust and 6 Python tests; each branch keeps its own buildable server/client scope.
 
 - **RappelzCore** uses **exactly the AzerothCore SQL schema** (`acore_auth`, `acore_characters`,
   `acore_world`, imported from the official repository, commit `3179ea3` of 2026-10-25). It also
@@ -232,7 +233,7 @@ Constraints inherited from the schema:
 ## Earlier development verification
 
 The following includes retained results from earlier work. Current combined-workspace checks, including
-81 passing Rust tests, the optimized build and 125,212 identical converted assets, are separated from
+85 passing Rust tests, the optimized build and 125,212 identical converted assets, are separated from
 historical online/database claims in [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md).
 
 - **Unit tests**: RC4 and checksum vectors taken from the binary, sizes of the 20 observed packets,

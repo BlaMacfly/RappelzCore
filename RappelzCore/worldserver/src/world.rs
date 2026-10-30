@@ -324,9 +324,35 @@ impl World {
     /// Réponse à TS_CS_QUERY : renvoie l'ENTER d'un objet visible.
     pub fn query(&self, viewer: u32, handle: u32) {
         let now = self.now();
+        if !self.can_see(viewer, handle, now) {
+            return;
+        }
         for p in self.enter_packets(handle, now) {
             self.send_to(viewer, p);
         }
+    }
+
+    /// Require an announced object and current visibility: the cached set can lag a tick.
+    fn can_see(&self, viewer: u32, handle: u32, now: u32) -> bool {
+        let Some(player) = self.players.get(&viewer) else { return false };
+        if viewer == handle { return true; }
+        if !player.visible.contains(&handle) { return false; }
+        let position = if let Some(other) = self.players.get(&handle) {
+            if other.layer != player.layer { return false; }
+            other.motion.position(now)
+        } else if player.layer != 0 {
+            return false;
+        } else if let Some(npc) = self.npcs.get(&handle) {
+            (npc.x, npc.y)
+        } else if let Some(monster) = self.monsters.get(&handle) {
+            if !monster.alive() && !monster.dead_since.is_some_and(|t| now.saturating_sub(t) < MONSTER_CORPSE_TIME) {
+                return false;
+            }
+            monster.motion.position(now)
+        } else {
+            return false;
+        };
+        dist(player.motion.position(now), position) <= self.visibility_distance
     }
 
     fn monster_move_packet(&self, m: &MonsterEntity) -> RawPacket {
@@ -467,7 +493,9 @@ impl World {
     // ───────────────────────── Combat ─────────────────────────
 
     pub fn start_attack(&mut self, attacker: u32, target: u32) -> bool {
-        let alive = self.monsters.get(&target).is_some_and(|m| m.alive());
+        let alive = self.monsters.get(&target).is_some_and(|m| m.alive())
+            && self.players.get(&attacker).is_some_and(|p| p.hp > 0)
+            && self.can_see(attacker, target, self.now());
         if let Some(p) = self.players.get_mut(&attacker) {
             p.attack_target = alive.then_some(target);
         }
@@ -503,6 +531,10 @@ impl World {
             .map(|p| (p.handle, p.attack_target.unwrap()))
             .collect();
         for (ph, mh) in attackers {
+            if !self.can_see(ph, mh, now) {
+                self.players.get_mut(&ph).unwrap().attack_target = None;
+                continue;
+            }
             let ppos = self.players[&ph].motion.position(now);
             let Some(m) = self.monsters.get(&mh).filter(|m| m.alive()) else {
                 self.players.get_mut(&ph).unwrap().attack_target = None;
@@ -585,7 +617,7 @@ impl World {
                 continue;
             }
             let Some(target) = m.target else { continue };
-            let Some(p) = self.players.get(&target).filter(|p| p.hp > 0) else {
+            let Some(p) = self.players.get(&target).filter(|p| p.hp > 0 && p.layer == 0) else {
                 self.monsters.get_mut(&mh).unwrap().target = None;
                 continue;
             };
@@ -769,6 +801,103 @@ mod tests {
         assert_eq!(m.position(150), (50.0, 0.0));
         assert_eq!(m.position(250), (100.0, 50.0));
         assert_eq!(m.position(10_000), (100.0, 100.0));
+    }
+
+    fn test_monster(world: &mut World) -> u32 {
+        world.spawn_monster(MonsterInfo {
+            id: 711, name: "Fixture".into(), level: 1, hp: 10, mp: 5,
+            attack: 20, defence: 6, exp: 5, jp: 3, gold_min: 0, gold_max: 0,
+            run_speed: 100.0, attack_range: 20.0, race: 0,
+        }, 10.0, 0.0, 0.0, 15)
+    }
+
+    #[test]
+    fn queries_reject_stale_range_layer_and_expired_corpse_visibility() {
+        let (mut world, mut receivers) = test_world();
+        let monster = test_monster(&mut world);
+        world.update_visibility();
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        // Cached visibility has not yet caught up with these live changes.
+        world.players.get_mut(&1).unwrap().motion = Motion::at(1000.0, 0.0);
+        world.query(2, 1);
+        assert!(receivers[1].try_recv().is_err(), "out-of-range player disclosed");
+        world.players.get_mut(&1).unwrap().motion = Motion::at(0.0, 0.0);
+        world.players.get_mut(&1).unwrap().layer = 1;
+        world.query(2, 1);
+        assert!(receivers[1].try_recv().is_err(), "other-layer player disclosed");
+        world.started = Instant::now() - std::time::Duration::from_secs(4);
+        world.monsters.get_mut(&monster).unwrap().dead_since = Some(0);
+        world.monsters.get_mut(&monster).unwrap().hp = 0;
+        world.query(2, monster);
+        assert!(receivers[1].try_recv().is_err(), "expired corpse reintroduced");
+        world.monsters.get_mut(&monster).unwrap().dead_since = Some(world.now());
+        world.query(2, monster);
+        assert!(receivers[1].try_recv().is_ok(), "recent visible corpse should be queryable");
+        while receivers[1].try_recv().is_ok() {}
+        world.players.get_mut(&2).unwrap().visible.remove(&monster);
+        world.query(2, monster);
+        assert!(receivers[1].try_recv().is_err(), "unannounced object disclosed");
+    }
+
+    #[test]
+    fn combat_rechecks_live_visibility_and_stops_across_layers() {
+        let (mut world, _) = test_world();
+        let monster = test_monster(&mut world);
+        world.update_visibility();
+        assert!(world.start_attack(1, monster));
+        world.players.get_mut(&1).unwrap().layer = 1;
+        world.tick_player_attacks(1);
+        assert_eq!(world.monsters[&monster].hp, 10, "attack crossed layers");
+        assert_eq!(world.players[&1].attack_target, None);
+        assert!(!world.start_attack(1, monster));
+        world.monsters.get_mut(&monster).unwrap().target = Some(1);
+        world.tick_monsters(1);
+        assert_eq!(world.players[&1].hp, 50, "retaliation crossed layers");
+        assert_eq!(world.monsters[&monster].target, None);
+        world.players.get_mut(&1).unwrap().layer = 0;
+        world.players.get_mut(&1).unwrap().hp = 0;
+        assert!(!world.start_attack(1, monster), "dead player armed an attack");
+        world.players.get_mut(&1).unwrap().hp = 50;
+        world.players.get_mut(&1).unwrap().motion = Motion::at(1000.0, 0.0);
+        assert!(!world.start_attack(1, monster), "hidden monster targeted");
+    }
+
+    #[test]
+    fn corpse_leave_respawn_and_second_kill_award_once_each() {
+        let (mut world, mut receivers) = test_world();
+        let monster = test_monster(&mut world);
+        let (events, mut rewards) = tokio::sync::mpsc::unbounded_channel();
+        world.players.get_mut(&1).unwrap().events = events;
+        world.update_visibility();
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        assert!(world.start_attack(1, monster));
+        world.tick_player_attacks(0);
+        assert_eq!(world.monsters[&monster].hp, 0);
+        assert!(matches!(rewards.try_recv().unwrap(), WorldEvent::Reward { exp: 5, jp: 3, .. }));
+        world.tick_player_attacks(150);
+        assert!(rewards.try_recv().is_err());
+        world.started = Instant::now() - std::time::Duration::from_secs(4);
+        world.update_visibility();
+        for rx in &mut receivers {
+            let packets: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+            assert!(packets.iter().any(|p| p.id == msg::ScLeave::ID
+                && msg::ScLeave::from_packet(p).unwrap().handle == monster));
+        }
+        world.tick_monsters(1499);
+        assert!(!world.monsters[&monster].alive());
+        world.tick_monsters(1500);
+        world.started = Instant::now() - std::time::Duration::from_secs(15);
+        world.update_visibility();
+        for rx in &mut receivers {
+            let enter = msg::ScEnter::from_packet(&rx.try_recv().unwrap()).unwrap();
+            assert_eq!(enter.handle, monster);
+            let EnterKind::Monster { creature, .. } = enter.kind else { panic!("expected monster") };
+            assert_eq!((creature.hp, creature.mp), (10, 5));
+        }
+        assert!(world.start_attack(1, monster));
+        world.tick_player_attacks(1500);
+        assert!(matches!(rewards.try_recv().unwrap(), WorldEvent::Reward { exp: 5, jp: 3, .. }));
+        assert!(rewards.try_recv().is_err());
     }
 
     #[test]
