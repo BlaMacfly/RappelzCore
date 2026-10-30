@@ -10,6 +10,7 @@ members = [
     "shared/rz-model",
     "shared/rz-texture",
     "shared/rz-ui",
+    "shared/rz-addon",
     "RappelzRust/client",
     "RappelzRust/tools/rz-extractor",
     "RappelzRust/tools/rz-bot",

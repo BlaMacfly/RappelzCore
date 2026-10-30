@@ -12,7 +12,16 @@
 
 A **Rappelz** server emulator (RappelzCore) and game client (RappelzRust), written in Rust and
 rebuilt by reverse engineering (REA / Ghidra) the **Rappelz NoLimits** client
-(`Rappelz NoLimits\SFrame.exe`, v1.3.60).
+(`Rappelz NoLimits\SFrame.exe`). The launcher label is 1.3.60; the executable's exact Epic/patch
+identity remains unresolved (see [binary evidence](docs/CLIENT_REVERSE_ENGINEERING.md)).
+
+Current continuation: a working **Lua 5.1 addon foundation**, native addon manager, XML subset and
+persistent RappelzDebug demonstration are included. See [development status](docs/DEVELOPMENT_STATUS.md)
+and the [API compatibility matrix](docs/LUA_API_COMPATIBILITY.md) for tested scope and remaining work.
+The [native local-server regression](docs/LIVE_SERVER_VALIDATION.md) and
+[two-client combat/XP run](docs/COMBAT_VALIDATION.md) verify real events, synchronized damage,
+XP-driven level-up and original-data preservation. The combined development workspace passes
+81 Rust and 5 Python tests; each branch keeps its own buildable server/client scope.
 
 - **RappelzCore** uses **exactly the AzerothCore SQL schema** (`acore_auth`, `acore_characters`,
   `acore_world`, imported from the official repository, commit `3179ea3` of 2026-10-25). It also
@@ -50,6 +59,7 @@ shared/
   rz-terrain/                 nFlavor maps: .nfm (heightmap, textures, props), .nfw, .nfa, .qpf, .nfs…
   rz-model/                   .nx3 models (BTRF/KNIB), .naf animations, .cob objects, assembly
   rz-ui/                      original interface: .spr sprites, .nui windows, drawing rules
+  rz-addon/                   restricted Lua 5.1 addons, TOC/XML, UI/events, SavedVariables
 RappelzCore/
   authserver/                 → authserver.exe
   worldserver/                → worldserver.exe (lobby, world, visibility, chat, GM commands, console)
@@ -136,6 +146,11 @@ RappelzRust.exe                      # from the install folder (Data/, WTF/)
 RappelzRust.exe -demo                # offline world with the NPCs from NpcResource.dbc
 ```
 
+Install the demonstration into an existing converted client with
+`target/release/rz-extractor addons --out client-data/RappelzRust` (existing addon files are preserved).
+Use the **AddOns** button/F9 for the manager and `/reload` in world chat to reload the addon UI.
+See [LUA_ADDON_SYSTEM.md](docs/LUA_ADDON_SYSTEM.md) for the supported subset and validation limits.
+
 Authserver address: `Data/frFR/realmlist.wtf` (`set realmlist 127.0.0.1[:port]`).
 Volumes: `SET Sound_MusicVolume "0.5"` / `SET Sound_SFXVolume "0.7"` in `WTF/Config.wtf`.
 
@@ -214,7 +229,11 @@ Constraints inherited from the schema:
   - text/binary `.spr`, `.nui`;
   - drawing rules (1/3/9 images, states), `<$id>` captions, the windows used on each screen.
 
-## What has been verified
+## Earlier development verification
+
+The following includes retained results from earlier work. Current combined-workspace checks, including
+81 passing Rust tests, the optimized build and 125,212 identical converted assets, are separated from
+historical online/database claims in [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md).
 
 - **Unit tests**: RC4 and checksum vectors taken from the binary, sizes of the 20 observed packets,
   MPQ/StormLib, DBC, SRP6, RDB on the real files.

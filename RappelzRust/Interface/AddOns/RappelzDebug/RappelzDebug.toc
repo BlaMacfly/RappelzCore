@@ -1,0 +1,10 @@
+## Interface: 30300
+## Title: Rappelz Debug
+## Notes: Live player/target data and persistent click counter for RappelzRust.
+## Author: RappelzCore contributors
+## Version: 0.1.0
+## SavedVariables: RappelzDebugDB
+## SavedVariablesPerCharacter: RappelzDebugCharacterDB
+
+RappelzDebug.lua
+RappelzDebug.xml

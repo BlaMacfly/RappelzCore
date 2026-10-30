@@ -26,6 +26,7 @@ pub enum NetCmd {
 }
 
 pub enum NetEvent {
+    RealmSelected(u16),
     Status(String),
     Error(String),
     ServerList(Vec<msg::ServerInfo>),
@@ -130,6 +131,7 @@ async fn session(
         }
     };
     w.send(&msg::CaSelectServer { server_idx: idx }).await?;
+    let _ = events.send(NetEvent::RealmSelected(idx));
     let sel = msg::AcSelectServer::from_packet(&expect(&mut r, id::TS_AC_SELECT_SERVER).await?)?;
     if sel.result != 0 {
         bail!("Royaume indisponible (code {}).", sel.result);

@@ -507,13 +507,14 @@ impl MpqChain {
         self.archives.push(archive);
     }
 
-    /// Ouvre `Data/` dans l'ordre de WoW : common*, locale, patch*, patch de locale.
+    /// Ouvre `Data/` : common*, expansion*, locale, patch*, patch de locale.
     pub fn open_client_data(data_dir: impl AsRef<Path>, locale: &str) -> Result<Self> {
         let data_dir = data_dir.as_ref();
         let mut chain = Self::new();
         let loc_dir = data_dir.join(locale);
-        let groups: [(&Path, String); 4] = [
+        let groups: [(&Path, String); 5] = [
             (data_dir, "common".to_string()),
+            (data_dir, "expansion".to_string()),
             (&loc_dir, format!("locale-{locale}")),
             (data_dir, "patch".to_string()),
             (&loc_dir, format!("patch-{locale}")),
@@ -559,26 +560,56 @@ impl Default for MpqChain {
     }
 }
 
-/// `prefix.MPQ`, puis `prefix-2.MPQ`, `prefix-3.MPQ`… tant qu'ils existent.
+/// Ordre numerique, meme si une archive intermediaire est absente.
 fn numbered_archives(dir: &Path, prefix: &str) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    let first = dir.join(format!("{prefix}.MPQ"));
-    if first.is_file() {
-        out.push(first);
-    }
-    for n in 2.. {
-        let p = dir.join(format!("{prefix}-{n}.MPQ"));
-        if !p.is_file() {
-            break;
+    let prefix = prefix.to_ascii_lowercase();
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut archives = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        let Some(stem) = name.strip_suffix(".mpq") else { continue };
+        let number = if stem == prefix { Some(1) } else {
+            stem.strip_prefix(&format!("{prefix}-"))
+                .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+                .and_then(|s| s.parse::<u32>().ok()).filter(|n| *n >= 2)
+        };
+        if let Some(number) = number {
+            if entry.path().is_file() { archives.push((number, entry.path())); }
         }
-        out.push(p);
     }
-    out
+    archives.sort();
+    archives.into_iter().map(|(_, path)| path).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expansion_locale_and_sparse_numbered_patches_override_in_numeric_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let locale = dir.path().join("frFR");
+        std::fs::create_dir(&locale).unwrap();
+        for (directory, name, value) in [
+            (dir.path(), "common.MPQ", b"common".as_slice()),
+            (dir.path(), "expansion.MPQ", b"expansion".as_slice()),
+            (locale.as_path(), "locale-frFR.MPQ", b"locale".as_slice()),
+            (dir.path(), "patch-2.MPQ", b"patch2".as_slice()),
+            (dir.path(), "patch-10.mpq", b"patch10".as_slice()),
+            (locale.as_path(), "patch-frFR-3.MPQ", b"localized patch".as_slice()),
+        ] {
+            let mut writer = MpqWriter::create(directory.join(name), 3).unwrap();
+            writer.add_file("Interface/test.txt", value, true).unwrap();
+            if name == "expansion.MPQ" { writer.add_file("World/expansion.txt", b"expansion only", true).unwrap(); }
+            writer.finish().unwrap();
+        }
+        let mut chain = MpqChain::open_client_data(dir.path(), "frFR").unwrap();
+        assert_eq!(chain.archives().len(), 6);
+        assert_eq!(chain.read_file("interface\\test.txt").unwrap(), b"localized patch");
+        assert_eq!(chain.read_file("World/expansion.txt").unwrap(), b"expansion only");
+        let mut neutral = MpqChain::open_client_data(dir.path(), "enUS").unwrap();
+        assert_eq!(neutral.read_file("interface/test.txt").unwrap(), b"patch10");
+    }
 
     #[test]
     fn write_then_read() {

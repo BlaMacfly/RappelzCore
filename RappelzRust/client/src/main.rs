@@ -6,11 +6,13 @@
 //! Options : `-data <dossier>`, `-demo [-pos x,y]` (monde hors ligne), `-screenshot <png>`.
 
 mod assets;
+mod addons;
 mod audio;
 mod config;
 mod gui;
 mod models;
 mod net;
+mod online_validation;
 mod rzui;
 mod terrain;
 mod world;
@@ -49,6 +51,9 @@ const FIELD_PASSWORD: u32 = 2;
 const FIELD_NAME: u32 = 3;
 
 pub struct App {
+    combat_trace: Option<online_validation::PacketTrace>,
+    addons: addons::Addons,
+    addon_realm: String,
     /// Interface d'origine (fenêtres .nui).
     rzui: Option<rzui::RzUi>,
     /// Écran de chargement d'origine (`loading_imageNN.jpg`) affiché à l'entrée en jeu.
@@ -109,6 +114,11 @@ fn arg_value(flag: &str) -> Option<String> {
     args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1).cloned())
 }
 
+fn rz_addon_account(account: &str) -> String {
+    // Server account identifiers are case-insensitive; use one settings scope per account.
+    account.to_uppercase()
+}
+
 fn data_root() -> PathBuf {
     if let Some(p) = arg_value("-data") {
         return PathBuf::from(p);
@@ -123,6 +133,7 @@ fn data_root() -> PathBuf {
 #[macroquad::main(window_conf)]
 async fn main() {
     rz_common::init_logging("info");
+    prevent_quit(); // Allow PLAYER_LOGOUT and atomic settings saves before the window closes.
     let root = data_root();
     let mut config = ClientConfig::load(&root);
     let locale = config.get("locale", "frFR");
@@ -139,6 +150,9 @@ async fn main() {
     let sfx_volume = config.get("Sound_SFXVolume", "0.7").parse().unwrap_or(0.7);
     let rzui = assets.as_mut().map(|a| rzui::RzUi::new(a, font.clone()));
     let mut app = App {
+        combat_trace: arg_value("-validate-combat").is_some().then(Default::default),
+        addons: addons::Addons::new(&root),
+        addon_realm: "offline".into(),
         rzui,
         loading: None,
         audio: audio::Audio::new(music_volume, sfx_volume),
@@ -182,10 +196,22 @@ async fn main() {
         app.send(NetCmd::Login { host, port, account: account.to_string(), password: password.to_string() });
     }
     let screenshot = arg_value("-screenshot");
+    let validation_args = match (arg_value("-validate-addons"), arg_value("-validate-combat")) {
+        (Some(_), Some(_)) => { tracing::error!("Choose only one validation scenario"); std::process::exit(2) },
+        (Some(path), None) => Some(online_validation::OnlineValidation::new(PathBuf::from(path), &app)),
+        (None, Some(path)) => Some(online_validation::OnlineValidation::combat(PathBuf::from(path), &app)),
+        _ => None,
+    };
+    let mut validation = validation_args.map(|result| {
+        result
+            .unwrap_or_else(|e| { tracing::error!("{e:#}"); std::process::exit(2) })
+    });
     let mut frame = 0u32;
 
     loop {
         app.pump_events();
+        app.sync_addons();
+        app.addons.begin_frame(app.screen == Screen::World);
         app.gui.begin_frame();
         clear_background(Color::from_rgba(12, 14, 22, 255));
         match app.screen {
@@ -194,6 +220,20 @@ async fn main() {
                 app.draw_world()
             }
             _ => app.draw_glue(),
+        }
+        app.sync_addons();
+        app.addons.draw(&app.gui, app.screen == Screen::World);
+        for message in app.addons.runtime.drain_messages() {
+            if let Some(validation) = &mut validation { validation.message(&message); }
+            tracing::info!("{message}");
+            if let Some(world) = &mut app.world { world.addon_message(message); }
+        }
+        if let Some(validation) = &mut validation {
+            match validation.tick(&mut app) {
+                Ok(true) => break,
+                Ok(false) => {},
+                Err(error) => { tracing::error!("{error:#}"); validation.fail(error); break; }
+            }
         }
         if let Some(a) = &mut app.assets {
             let wanted = if app.screen == Screen::World { app.field_music } else { audio::LOBBY_MUSIC };
@@ -216,17 +256,35 @@ async fn main() {
             }
         }
         next_frame().await;
+        if is_quit_requested() { break; }
+    }
+    if let Err(e) = app.addons.runtime.shutdown() { tracing::error!("addon settings: {e:#}"); }
+    if let Some(mut validation) = validation {
+        for message in app.addons.runtime.drain_messages() { validation.message(&message); tracing::info!("{message}"); }
+        match validation.finish(&app) {
+            Ok(true) => {},
+            result => { tracing::error!("online validation unsuccessful: {result:?}"); std::process::exit(1); }
+        }
     }
 }
 
 impl App {
+    fn sync_addons(&mut self) {
+        let state = self.world.as_ref().map(world::WorldState::addon_state).unwrap_or_default();
+        self.addons.runtime.update_state(state);
+    }
     fn send(&self, cmd: NetCmd) {
         let _ = self.net.send(cmd);
     }
 
     fn pump_events(&mut self) {
         while let Ok(ev) = self.events.try_recv() {
+            if let Some(trace) = &mut self.combat_trace { trace.observe(&ev); }
             match ev {
+                NetEvent::RealmSelected(id) => {
+                    let (host, port) = config::realmlist(&self.root, &self.config.get("locale", "frFR"));
+                    self.addon_realm = format!("{host}:{port}/{id}");
+                }
                 NetEvent::Status(s) => self.status = s,
                 NetEvent::Error(e) => {
                     self.error = Some(e);
@@ -279,6 +337,12 @@ impl App {
                 NetEvent::LoginResult(lr) => {
                     self.status.clear();
                     if lr.result == 0 {
+                        // Load scoped variables before PLAYER_LOGIN and incoming world events.
+                        let account = rz_addon_account(&self.account);
+                        self.addons.runtime.update_state(Default::default());
+                        if let Err(e) = self.addons.runtime.set_identity(&account, &self.addon_realm, Some(&lr.name)) {
+                            self.addons.error = Some(format!("{e:#}"));
+                        }
                         self.world = Some(world::WorldState::new(&lr));
                         self.loading = Some((get_time(), format!("loading_image{:02}.jpg", lr.handle % 20 + 1)));
                         self.field_music = audio::FIELD_MUSIC[lr.handle as usize % audio::FIELD_MUSIC.len()];
@@ -289,11 +353,20 @@ impl App {
                     }
                 }
                 other => {
+                    let system_message = match &other {
+                        NetEvent::Chat { chat_type, message, .. } if *chat_type == msg::chat_type::NOTICE => Some(message.clone()),
+                        _ => None,
+                    };
                     if let (Some(w), Some(a)) = (&mut self.world, &mut self.assets) {
                         w.on_event(other, a);
                     }
+                    self.sync_addons();
+                    if let Some(message) = system_message {
+                        self.addons.runtime.dispatch(rz_addon::Event::new("CHAT_MSG_SYSTEM", vec![message.into()]));
+                    }
                 }
             }
+            self.sync_addons();
         }
     }
 
@@ -638,7 +711,8 @@ impl App {
 
     fn draw_world(&mut self) {
         let (Some(w), Some(a), Some(ui)) = (&mut self.world, &mut self.assets, &mut self.rzui) else { return };
-        let actions = w.update_and_draw(a, ui);
+        let actions = w.update_and_draw(a, ui, self.addons.mouse_captured, self.addons.manager);
+        if w.take_reload_ui() { self.addons.reload(); }
         // Écran de chargement : la scène se dessine dessous (textures préchargées), puis disparaît.
         if let Some((since, image)) = &self.loading {
             let t = (get_time() - since) as f32;

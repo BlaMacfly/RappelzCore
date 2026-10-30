@@ -23,6 +23,22 @@ const MAX_CHAT_LINES: usize = 7;
 /// Créatures assemblées au plus par image (le chargement des modèles est synchrone).
 const RIGS_PER_FRAME: usize = 2;
 
+#[cfg(test)]
+mod addon_vitals_tests {
+    use super::*;
+
+    #[test]
+    fn known_entity_vitals_reach_addon_target_and_preserve_zero_mana() {
+        let mut entity = Entity::new("Peer".into(), Kind::Player, 0.0, 0.0, 2, None);
+        assert_eq!((entity.unit(7).health, entity.unit(7).mana), (None, None));
+        entity.set_vitals(104, 120, 60, 60);
+        let unit = entity.unit(7);
+        assert_eq!((unit.health, unit.max_health, unit.mana, unit.max_mana), (Some(104), Some(120), Some(60), Some(60)));
+        entity.set_vitals(100, 120, 0, 0);
+        assert_eq!((entity.unit(7).mana, entity.unit(7).max_mana), (Some(0), Some(0)));
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Player,
@@ -87,6 +103,8 @@ struct Entity {
     level: i32,
     hp: i32,
     max_hp: i32,
+    health_known: bool,
+    mana: Option<(i32, i32)>,
     say: Option<(String, f64)>,
     rig_key: Option<RigKey>,
     wear: [i32; game::WEAR_SLOTS],
@@ -97,6 +115,21 @@ struct Entity {
 }
 
 impl Entity {
+    fn set_vitals(&mut self, hp: i32, max_hp: i32, mp: i32, max_mp: i32) {
+        self.hp = hp;
+        self.max_hp = max_hp.max(1);
+        self.health_known = true;
+        self.mana = Some((mp, max_mp));
+    }
+
+    fn unit(&self, handle: u32) -> rz_addon::UnitState {
+        rz_addon::UnitState {
+            handle, name: self.name.clone(), level: Some(self.level),
+            health: self.health_known.then_some(self.hp), max_health: self.health_known.then_some(self.max_hp),
+            mana: self.mana.map(|(current, _)| current), max_mana: self.mana.map(|(_, maximum)| maximum),
+        }
+    }
+
     fn new(name: String, kind: Kind, x: f32, y: f32, level: i32, rig_key: Option<RigKey>) -> Self {
         Self {
             name,
@@ -105,6 +138,8 @@ impl Entity {
             level,
             hp: 1,
             max_hp: 1,
+            health_known: false,
+            mana: None,
             say: None,
             rig_key,
             wear: [0; game::WEAR_SLOTS],
@@ -163,6 +198,10 @@ pub struct WorldState {
     target: Option<u32>,
     floats: Vec<FloatText>,
     offline: bool,
+    addon_level: Option<i32>,
+    addon_money: Option<i64>,
+    bag_revision: u64,
+    reload_ui: bool,
 }
 
 impl WorldState {
@@ -207,6 +246,10 @@ impl WorldState {
             target: None,
             floats: Vec::new(),
             offline: false,
+            addon_level: None,
+            addon_money: None,
+            bag_revision: 0,
+            reload_ui: false,
         }
     }
 
@@ -215,6 +258,8 @@ impl WorldState {
         let lr = msg::ScLoginResult { handle: 1, x, y, name: "Démo".into(), race: 4, sex: 1, hp: 100, max_hp: 100, mp: 50, max_mp: 50, ..Default::default() };
         let mut w = Self::new(&lr);
         w.offline = true;
+        w.addon_level = Some(w.me.level);
+        w.addon_money = Some(w.gold);
         if let Some(npcs) = &assets.npcs {
             for (i, r) in npcs.rows().enumerate() {
                 let (nx, ny) = (r.int("x") as f32, r.int("y") as f32);
@@ -233,6 +278,54 @@ impl WorldState {
 
     fn now(&self) -> f64 {
         self.clock.elapsed().as_secs_f64()
+    }
+
+    pub fn addon_state(&self) -> rz_addon::GameState {
+        rz_addon::GameState {
+            player: Some(rz_addon::UnitState {
+                handle: self.handle, name: self.name.clone(), level: self.addon_level,
+                health: Some(self.hp), max_health: Some(self.max_hp), mana: Some(self.mp), max_mana: Some(self.max_mp),
+            }),
+            target: self.target.and_then(|h| self.unit(h)),
+            money: self.addon_money, party_members: None, bag_revision: self.bag_revision,
+        }
+    }
+
+    pub fn take_reload_ui(&mut self) -> bool { std::mem::take(&mut self.reload_ui) }
+
+    pub fn addon_message(&mut self, line: String) { self.log(YELLOW, line); }
+
+    pub fn unit(&self, handle: u32) -> Option<rz_addon::UnitState> {
+        self.entities.get(&handle).map(|entity| entity.unit(handle))
+    }
+
+    pub fn visible_player(&self, name: &str) -> Option<rz_addon::UnitState> {
+        self.entities.iter().find(|(_, entity)| entity.kind == Kind::Player && entity.name == name)
+            .and_then(|(handle, _)| self.unit(*handle))
+    }
+
+    pub fn living_monster(&self) -> Option<rz_addon::UnitState> {
+        self.entities.iter().filter(|(_, entity)| entity.kind == Kind::Monster && entity.hp > 0 && entity.dead_at.is_none())
+            .min_by_key(|(handle, _)| **handle).and_then(|(handle, _)| self.unit(*handle))
+    }
+
+    pub fn experience(&self) -> (i64, i64) { (self.exp, self.jp) }
+
+    pub fn attack_target(&self, handle: u32) -> Option<NetCmd> {
+        self.entities.get(&handle).filter(|entity| entity.kind == Kind::Monster)?;
+        Some(NetCmd::Raw(game::CsAttackRequest { handle: self.handle, target_handle: handle }.to_packet()))
+    }
+
+    /// Use the same selection path for native mouse input and the online regression runner.
+    pub fn select_target(&mut self, handle: u32) -> Option<NetCmd> {
+        self.entities.get(&handle)?;
+        self.target = Some(handle);
+        Some(NetCmd::Raw(game::Handle::<{ gid::TS_CS_TARGETING }>(handle).to_packet()))
+    }
+
+    pub fn nearby_target(&self) -> Option<u32> {
+        self.entities.iter().filter(|(_, e)| matches!(e.kind, Kind::Npc | Kind::Monster))
+            .min_by_key(|(handle, e)| (e.kind != Kind::Monster, **handle)).map(|(handle, _)| *handle)
     }
 
     fn log(&mut self, color: Color, line: String) {
@@ -259,14 +352,14 @@ impl WorldState {
                 let entity = match &e.kind {
                     EnterKind::Player(p) => {
                         let mut ent = Entity::new(p.name.clone(), Kind::Player, e.x, e.y, p.creature.level, Some(RigKey::Player { race: p.creature.race as i32, sex: p.sex as i32 }));
-                        ent.hp = p.creature.hp;
-                        ent.max_hp = p.creature.max_hp.max(1);
+                        ent.set_vitals(p.creature.hp, p.creature.max_hp, p.creature.mp, p.creature.max_mp);
                         ent.facing = p.creature.face_direction;
                         ent
                     }
                     EnterKind::Npc { npc_id, creature } => {
                         let key = assets.npc_model(*npc_id).and_then(|m| rz_model::entity_cob_name(&m)).map(RigKey::Entity);
                         let mut ent = Entity::new(assets.npc_name(*npc_id), Kind::Npc, e.x, e.y, creature.level, key);
+                        ent.set_vitals(creature.hp, creature.max_hp, creature.mp, creature.max_mp);
                         ent.facing = creature.face_direction;
                         ent
                     }
@@ -274,8 +367,7 @@ impl WorldState {
                         let (name, model, level) = assets.monster_by_raw(*monster_id).unwrap_or_else(|| (format!("Monstre {monster_id}"), String::new(), creature.level));
                         let key = rz_model::entity_cob_name(&model).map(RigKey::Entity);
                         let mut ent = Entity::new(name, Kind::Monster, e.x, e.y, level, key);
-                        ent.hp = creature.hp;
-                        ent.max_hp = creature.max_hp.max(1);
+                        ent.set_vitals(creature.hp, creature.max_hp, creature.mp, creature.max_mp);
                         ent
                     }
                     EnterKind::Other { obj_type, .. } => Entity::new(format!("Objet {obj_type}"), Kind::Other, e.x, e.y, 0, None),
@@ -325,9 +417,11 @@ impl WorldState {
                 if handle == self.handle {
                     if name == "lv" {
                         self.me.level = value as i32;
+                        self.addon_level = Some(value as i32);
                     }
                     if name == "gold" {
                         self.gold = value;
+                        self.addon_money = Some(value);
                     }
                     self.props.insert(name, value);
                 }
@@ -338,6 +432,8 @@ impl WorldState {
     }
 
     fn on_packet(&mut self, p: RawPacket, now: f64) {
+        let previous_inventory = matches!(p.id, gid::TS_SC_INVENTORY | gid::TS_SC_DESTROY_ITEM | gid::TS_SC_ITEM_WEAR_INFO)
+            .then(|| self.inventory.clone());
         match p.id {
             gid::TS_SC_INVENTORY => {
                 if let Ok(inv) = game::ScInventory::from_packet(&p) {
@@ -375,6 +471,7 @@ impl WorldState {
             gid::TS_SC_GOLD_UPDATE => {
                 if let Ok(g) = game::ScGoldUpdate::from_packet(&p) {
                     self.gold = g.gold;
+                    self.addon_money = Some(g.gold);
                 }
             }
             gid::TS_SC_EXP_UPDATE => {
@@ -389,6 +486,7 @@ impl WorldState {
                 if let Ok(l) = game::ScLevelUpdate::from_packet(&p) {
                     if l.handle == self.handle {
                         self.me.level = l.level;
+                        self.addon_level = Some(l.level);
                     } else if let Some(e) = self.entities.get_mut(&l.handle) {
                         e.level = l.level;
                     }
@@ -399,8 +497,7 @@ impl WorldState {
                     if h.handle == self.handle {
                         (self.hp, self.max_hp, self.mp, self.max_mp) = (h.hp, h.max_hp.max(1), h.mp, h.max_mp.max(1));
                     } else if let Some(e) = self.entities.get_mut(&h.handle) {
-                        e.hp = h.hp;
-                        e.max_hp = h.max_hp.max(1);
+                        e.set_vitals(h.hp, h.max_hp, h.mp, h.max_mp);
                         if h.hp <= 0 && e.dead_at.is_none() {
                             e.dead_at = Some(now);
                         }
@@ -445,6 +542,9 @@ impl WorldState {
                 }
             }
             _ => {}
+        }
+        if previous_inventory.is_some_and(|before| before != self.inventory) {
+            self.bag_revision = self.bag_revision.wrapping_add(1);
         }
     }
 
@@ -528,7 +628,7 @@ impl WorldState {
     }
 
     /// Met à jour la simulation, dessine la scène et l'interface, renvoie les commandes réseau.
-    pub fn update_and_draw(&mut self, assets: &mut Assets, ui: &mut RzUi) -> Vec<NetCmd> {
+    pub fn update_and_draw(&mut self, assets: &mut Assets, ui: &mut RzUi, addon_mouse: bool, modal: bool) -> Vec<NetCmd> {
         let mut out = Vec::new();
         let now = self.now();
         if self.terrain.is_none() {
@@ -544,18 +644,18 @@ impl WorldState {
 
         // Caméra : glisser avec le bouton gauche, molette pour le zoom.
         let mouse: Vec2 = mouse_position().into();
-        if is_mouse_button_pressed(MouseButton::Left) {
+        if is_mouse_button_pressed(MouseButton::Left) && !addon_mouse {
             self.press_pos = Some(mouse);
         }
         let dragging = self.press_pos.is_some_and(|p| (p - mouse).length() > 4.0);
-        if is_mouse_button_down(MouseButton::Left) && dragging && !self.chat_open {
+        if is_mouse_button_down(MouseButton::Left) && dragging && !self.chat_open && !addon_mouse {
             let d = mouse - self.last_mouse;
             self.cam_yaw += d.x * 0.008;
             self.cam_pitch = (self.cam_pitch + d.y * 0.006).clamp(0.05, 1.45);
         }
         self.last_mouse = mouse;
         let (_, wheel) = mouse_wheel();
-        if wheel != 0.0 {
+        if wheel != 0.0 && !addon_mouse {
             self.cam_dist = (self.cam_dist * if wheel > 0.0 { 0.9 } else { 1.1 }).clamp(30.0, 900.0);
         }
 
@@ -619,7 +719,7 @@ impl WorldState {
 
         // Interface : la souris est-elle sur une fenêtre ?
         set_default_camera();
-        let over_ui = self.draw_hud(assets, ui, &mut out, now);
+        let over_ui = if modal { true } else { self.draw_hud(assets, ui, &mut out, now) || addon_mouse };
 
         // Étiquettes (noms, barres de vie, bulles) et nombres de dégâts.
         for (h, head) in &screen_labels {
@@ -661,7 +761,7 @@ impl WorldState {
         }
 
         // Déplacement et interaction.
-        if !self.chat_open {
+        if !self.chat_open && !modal {
             self.handle_movement(&cam, mx, my, my_h, now, over_ui, &screen_labels, &mut out);
         }
         if is_mouse_button_released(MouseButton::Left) {
@@ -717,8 +817,7 @@ impl WorldState {
             .map(|(h, _)| h);
         match picked {
             Some(h) => {
-                self.target = Some(h);
-                out.push(NetCmd::Raw(game::Handle::<{ gid::TS_CS_TARGETING }>(h).to_packet()));
+                if let Some(command) = self.select_target(h) { out.push(command); }
                 if clicked_right {
                     let e = &self.entities[&h];
                     let (ex, ey) = e.motion.position(now);
@@ -729,7 +828,7 @@ impl WorldState {
                         out.push(self.start_move(mx, my, vec2(mx + (ex - mx) * k, my + (ey - my) * k), now));
                     }
                     match self.entities[&h].kind {
-                        Kind::Monster => out.push(NetCmd::Raw(game::CsAttackRequest { handle: self.handle, target_handle: h }.to_packet())),
+                        Kind::Monster => if let Some(command) = self.attack_target(h) { out.push(command); },
                         Kind::Npc => out.push(NetCmd::Raw(game::Handle::<{ gid::TS_CS_CONTACT }>(h).to_packet())),
                         _ => {}
                     }
@@ -841,7 +940,9 @@ impl WorldState {
             if is_key_pressed(KeyCode::Enter) {
                 let text = std::mem::take(&mut self.chat_input);
                 self.chat_open = false;
-                if let Some(cmd) = Self::parse_chat(&text) {
+                if text.trim().eq_ignore_ascii_case("/reload") {
+                    self.reload_ui = true;
+                } else if let Some(cmd) = Self::parse_chat(&text) {
                     out.push(cmd);
                 }
             }
