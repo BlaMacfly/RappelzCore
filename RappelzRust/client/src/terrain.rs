@@ -16,7 +16,9 @@ use rz_texture::Rgba;
 use crate::assets::Assets;
 use crate::models::{self, ModelCache};
 
+mod bake;
 mod pixels;
+mod worker;
 use pixels::PixelCache;
 
 pub const MAP_SIZE: f32 = 16128.0;
@@ -26,8 +28,7 @@ const CHUNK_CELLS: usize = 24;
 // 128 texels over 1008 world units discarded almost all source ground detail.
 // Match the chunk's world density with about one texel/unit, keeping original DETAIL repeats.
 const BAKE_PX: usize = 1024;
-/// Morceaux construits par image au plus (évite les saccades).
-const BUILDS_PER_FRAME: usize = 1;
+/// Maximum GPU uploads/frame, including a completed background image.
 const RESTORES_PER_FRAME: usize = 4;
 const CPU_PIXEL_BYTES: usize = 128 * 1024 * 1024;
 
@@ -84,6 +85,12 @@ struct CacheStats {
     last_bakes: usize,
     last_restores: usize,
     prepare_us: u64,
+    submitted: usize,
+    completed: usize,
+    cancelled: usize,
+    last_submits: usize,
+    last_completed_uploads: usize,
+    worker_us: u64,
 }
 
 pub struct Terrain {
@@ -94,6 +101,9 @@ pub struct Terrain {
     bounds: HashMap<(i32, i32), Bounds>,
     stats: CacheStats,
     pixels: PixelCache,
+    worker: Option<worker::Worker<bake::Input, Vec<u8>>>,
+    async_enabled: bool,
+    worker_error: Option<String>,
     reference_validation: bool,
     validation_capture: Option<std::path::PathBuf>,
     layers: HashMap<String, Option<Arc<Rgba>>>,
@@ -124,6 +134,9 @@ impl Terrain {
             bounds: HashMap::new(),
             stats: CacheStats::default(),
             pixels: PixelCache::new(CPU_PIXEL_BYTES),
+            worker: worker::Worker::new(bake::run).ok(),
+            async_enabled: true,
+            worker_error: None,
             reference_validation: false,
             validation_capture: None,
             layers: HashMap::new(),
@@ -180,64 +193,52 @@ impl Terrain {
         img
     }
 
-    /// Texture du sol d'un morceau : mélange des 3 couches de chaque segment.
-    fn bake(&mut self, assets: &mut Assets, map: &NfmMap, ox: f32, oy: f32) -> Vec<u8> {
-        let step = CHUNK / BAKE_PX as f32;
-        let mut px = vec![0u8; BAKE_PX * BAKE_PX * 4];
-        let layer_info: HashMap<u16, (String, f32)> = map
-            .texture_layers
-            .iter()
-            .map(|l| {
-                (
-                    l.texture_id,
-                    (
-                        l.texture.clone(),
-                        l.detail.unwrap_or(4.0).max(0.5) * map.tile_length,
-                    ),
-                )
-            })
-            .collect();
-        let mut images: HashMap<u16, Option<(Arc<Rgba>, f32)>> = HashMap::new();
-        for py in 0..BAKE_PX {
-            for pxx in 0..BAKE_PX {
-                let (lx, ly) = (
-                    ox + (pxx as f32 + 0.5) * step,
-                    oy + (py as f32 + 0.5) * step,
-                );
-                let ids = map.textures_at(lx, ly);
-                let weights = map.layer_weights_at(lx, ly);
-                let mut c = [90.0f32, 110.0, 80.0];
-                for (layer, (&id, &w)) in ids.iter().zip(weights.iter()).enumerate() {
-                    if w == 0 {
-                        continue;
-                    }
-                    let entry = images.entry(id).or_insert_with(|| {
-                        let (name, repeat) = layer_info.get(&id)?.clone();
-                        Some((self.layer_image(assets, &name)?, repeat))
-                    });
-                    let Some((img, repeat)) = entry else { continue };
-                    let u = (lx / *repeat).rem_euclid(1.0);
-                    let v = (ly / *repeat).rem_euclid(1.0);
-                    let (sx, sy) = (u * img.width as f32 - 0.5, v * img.height as f32 - 0.5);
-                    let (x0, y0) = (sx.floor() as i32, sy.floor() as i32);
-                    let (fx, fy) = (sx - sx.floor(), sy - sy.floor());
-                    let sample = |dx: i32, dy: i32, k: usize| {
-                        let x = (x0 + dx).rem_euclid(img.width as i32) as usize;
-                        let y = (y0 + dy).rem_euclid(img.height as i32) as usize;
-                        img.pixels[(y * img.width as usize + x) * 4 + k] as f32
-                    };
-                    let a = if layer == 0 { 1.0 } else { w as f32 / 255.0 };
-                    for k in 0..3 {
-                        let top = sample(0, 0, k) * (1. - fx) + sample(1, 0, k) * fx;
-                        let bottom = sample(0, 1, k) * (1. - fx) + sample(1, 1, k) * fx;
-                        c[k] = c[k] * (1.0 - a) + (top * (1. - fy) + bottom * fy) * a;
-                    }
+    /// Resolve only layers referenced by covered cells; no Assets handle crosses threads.
+    fn bake_input(
+        &mut self,
+        assets: &mut Assets,
+        map: Arc<NfmMap>,
+        ox: f32,
+        oy: f32,
+    ) -> bake::Input {
+        let tl = map.tile_length;
+        let (i0, j0) = ((ox / tl).floor() as usize, (oy / tl).floor() as usize);
+        let (i1, j1) = (
+            ((ox + CHUNK) / tl).ceil() as usize,
+            ((oy + CHUNK) / tl).ceil() as usize,
+        );
+        let mut needed = std::collections::BTreeSet::new();
+        for j in j0..j1.min(map.size) {
+            for i in i0..i1.min(map.size) {
+                let ids = map.textures_at((i as f32 + 0.5) * tl, (j as f32 + 0.5) * tl);
+                needed.insert(ids[0]);
+                let bits = map.fill_bits[j * map.size + i];
+                if bits[0] != 0 {
+                    needed.insert(ids[1]);
                 }
-                let o = (py * BAKE_PX + pxx) * 4;
-                px[o..o + 4].copy_from_slice(&[c[0] as u8, c[1] as u8, c[2] as u8, 255]);
+                if bits[1] != 0 {
+                    needed.insert(ids[2]);
+                }
             }
         }
-        px
+        let mut images = HashMap::new();
+        for id in needed {
+            let value = map
+                .texture_layers
+                .iter()
+                .find(|l| l.texture_id == id)
+                .and_then(|l| {
+                    let repeat = l.detail.unwrap_or(4.0).max(0.5) * tl;
+                    Some((self.layer_image(assets, &l.texture)?, repeat))
+                });
+            images.insert(id, value);
+        }
+        bake::Input {
+            map,
+            ox,
+            oy,
+            images,
+        }
     }
 
     /// Couleur éclairée d'un sommet (formule du client, FUN_00af9960).
@@ -271,19 +272,29 @@ impl Terrain {
         ]
     }
 
-    fn build_chunk(&mut self, assets: &mut Assets, gx: i32, gy: i32) -> Option<Chunk> {
+    fn build_chunk(
+        &mut self,
+        assets: &mut Assets,
+        gx: i32,
+        gy: i32,
+        supplied: Option<Arc<Vec<u8>>>,
+    ) -> Option<Chunk> {
         let per_map = (MAP_SIZE / CHUNK) as i32;
         let (mx, my) = (gx.div_euclid(per_map), gy.div_euclid(per_map));
         let map = self.map(assets, mx, my)?;
         let (cx, cy) = (gx.rem_euclid(per_map), gy.rem_euclid(per_map));
         let (ox, oy) = (cx as f32 * CHUNK, cy as f32 * CHUNK);
         let key = (gx, gy);
-        let image = if let Some(image) = self.pixels.get(key) {
+        let image = if let Some(image) = supplied {
+            self.stats.last_completed_uploads += 1;
+            image
+        } else if let Some(image) = self.pixels.get(key) {
             self.stats.restored += 1;
             self.stats.last_restores += 1;
             image
         } else {
-            let image = self.bake(assets, &map, ox, oy);
+            let input = self.bake_input(assets, map.clone(), ox, oy);
+            let image = bake::run(input, &std::sync::atomic::AtomicBool::new(false))?;
             self.stats.last_bakes += 1;
             self.pixels.insert(key, image)
         };
@@ -374,6 +385,15 @@ impl Terrain {
         }
     }
 
+    pub(crate) fn validation_async(&mut self, enabled: bool) {
+        self.async_enabled = enabled;
+        if !enabled {
+            if let Some(worker) = &self.worker {
+                worker.cancel_unless(|_| false);
+            }
+        }
+    }
+
     pub(crate) fn validation_capture(&mut self, path: std::path::PathBuf) {
         self.validation_capture = Some(path);
     }
@@ -388,7 +408,12 @@ impl Terrain {
             "reference":self.reference_validation,"missing":self.stats.missing,
             "restored":self.stats.restored,"last_bakes":self.stats.last_bakes,
             "last_restores":self.stats.last_restores,"prepare_us":self.stats.prepare_us,
-            "cpu_pixel_bytes":self.pixels.bytes(),"cpu_pixel_limit":self.pixels.limit()})
+            "cpu_pixel_bytes":self.pixels.bytes(),"cpu_pixel_limit":self.pixels.limit(),
+            "async_enabled":self.async_enabled && self.worker.is_some(),"worker_error":self.worker_error,
+            "job_active":self.worker.as_ref().is_some_and(|w|!w.idle()),
+            "submitted":self.stats.submitted,"completed":self.stats.completed,"cancelled":self.stats.cancelled,
+            "last_submits":self.stats.last_submits,"last_completed_uploads":self.stats.last_completed_uploads,
+            "worker_us":self.stats.worker_us})
     }
 
     /// Construit les morceaux visibles autour de (x, y) et dessine le sol.
@@ -396,6 +421,8 @@ impl Terrain {
         let prepare = std::time::Instant::now();
         self.stats.last_bakes = 0;
         self.stats.last_restores = 0;
+        self.stats.last_submits = 0;
+        self.stats.last_completed_uploads = 0;
         let (gx, gy) = ((x / CHUNK).floor() as i32, (y / CHUNK).floor() as i32);
         let r = self.view_chunks;
         let mut wanted: Vec<(i32, i32)> = (gy - r..=gy + r)
@@ -419,30 +446,69 @@ impl Terrain {
             self.stats.evicted += before - self.chunks.len();
         }
         self.stats.wanted = wanted.len();
+        let keep: HashSet<_> = wanted.iter().copied().collect();
+        if let Some(worker) = &self.worker {
+            worker.cancel_unless(|key| self.async_enabled && keep.contains(&key));
+        }
+        let finished = self.worker.as_mut().and_then(|w| w.poll());
+        if let Some(result) = finished {
+            self.stats.worker_us += result.elapsed_us;
+            if result.panicked {
+                self.worker_error = Some("background terrain blend failed".into());
+                tracing::error!("background terrain blend failed for {:?}", result.key);
+            } else if let Some(image) = result.value.filter(|_| {
+                self.async_enabled
+                    && keep.contains(&result.key)
+                    && !self.chunks.contains_key(&result.key)
+            }) {
+                self.stats.completed += 1;
+                let image = self.pixels.insert(result.key, image);
+                if let Some(chunk) =
+                    self.build_chunk(assets, result.key.0, result.key.1, Some(image))
+                {
+                    self.chunks.insert(result.key, chunk);
+                    self.stats.built += 1;
+                }
+            } else {
+                self.stats.cancelled += 1;
+            }
+        }
         // A revisited view can restore several exact images without running the expensive
         // blend again. Bound uploads to 16 MiB/frame; cold blending remains one/frame.
         for &key in &wanted {
-            if self.stats.last_restores >= RESTORES_PER_FRAME {
+            if self.stats.last_restores + self.stats.last_completed_uploads >= RESTORES_PER_FRAME {
                 break;
             }
             if !self.chunks.contains_key(&key) && self.pixels.contains(key) {
-                if let Some(c) = self.build_chunk(assets, key.0, key.1) {
+                if let Some(c) = self.build_chunk(assets, key.0, key.1, None) {
                     self.chunks.insert(key, c);
                     self.stats.built += 1;
                 }
             }
         }
-        let mut built = 0;
-        for &key in &wanted {
-            if built >= BUILDS_PER_FRAME || self.stats.last_restores > 0 {
-                break;
-            }
-            if !self.chunks.contains_key(&key) {
-                if let Some(c) = self.build_chunk(assets, key.0, key.1) {
-                    self.chunks.insert(key, c);
+        if self.worker_error.is_none() && self.stats.last_restores == 0 {
+            if let Some(&key) = wanted.iter().find(|key| !self.chunks.contains_key(key)) {
+                if self.async_enabled && self.worker.is_some() {
+                    if self.worker.as_ref().unwrap().idle() {
+                        let per_map = (MAP_SIZE / CHUNK) as i32;
+                        if let Some(map) =
+                            self.map(assets, key.0.div_euclid(per_map), key.1.div_euclid(per_map))
+                        {
+                            let (ox, oy) = (
+                                key.0.rem_euclid(per_map) as f32 * CHUNK,
+                                key.1.rem_euclid(per_map) as f32 * CHUNK,
+                            );
+                            let input = self.bake_input(assets, map, ox, oy);
+                            if self.worker.as_mut().unwrap().submit(key, input) {
+                                self.stats.submitted += 1;
+                                self.stats.last_submits += 1;
+                            }
+                        }
+                    }
+                } else if let Some(chunk) = self.build_chunk(assets, key.0, key.1, None) {
+                    self.chunks.insert(key, chunk);
                     self.stats.built += 1;
                 }
-                built += 1;
             }
         }
         // Libère les morceaux éloignés.

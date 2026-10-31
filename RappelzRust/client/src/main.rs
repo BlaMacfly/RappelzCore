@@ -232,6 +232,7 @@ async fn main() {
         app.sync_addons();
         app.addons.begin_frame(app.screen == Screen::World);
         app.gui.begin_frame();
+        if let Some(validation) = &validation { validation.before_draw(&mut app); }
         clear_background(Color::from_rgba(12, 14, 22, 255));
         match app.screen {
             Screen::World => {

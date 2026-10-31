@@ -67,3 +67,5 @@ The floor-quality correction changes runtime blending resolution/filtering, not 
 The two-client terrain follow-up keeps the 1024² blend and original source data unchanged. Conservative camera bounds and per-frame texture eviction reduce the observed baked-texture peak from 252 to 84 MiB per client. All 12 ground captures match exactly; see [TERRAIN_RENDERING_VALIDATION.md](TERRAIN_RENDERING_VALIDATION.md) for separate Windows GPU accounting and warmup/hardware limits.
 
 [Warm terrain streaming](TERRAIN_STREAMING_VALIDATION.md) caches exact runtime RGBA images in bounded host memory. It retains original source assets, 1024² sampling and visible-only GPU texture lifetime; it introduces no resource-format or packaging change.
+
+[Background cold blending](TERRAIN_COLD_VALIDATION.md) shares immutable NFM/source-image references with one CPU worker. Layer weights, repeats, bilinear sampling and 1024² byte output remain unchanged; all 12 corresponding previous-version captures match. MPQ/DBC formats and original assets are retained.

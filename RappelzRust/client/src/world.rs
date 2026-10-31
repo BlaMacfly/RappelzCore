@@ -298,6 +298,7 @@ pub struct WorldState {
     chat_open: bool,
     props: HashMap<String, i64>,
     terrain: Option<Terrain>,
+    terrain_validation_policy: Option<(bool, bool, bool)>,
     models: ModelCache,
     hp: i32,
     max_hp: i32,
@@ -320,6 +321,14 @@ pub struct WorldState {
 }
 
 impl WorldState {
+    pub(crate) fn terrain_validation_policy(&mut self, reference: bool, pixels: bool, asynchronous: bool) {
+        self.terrain_validation_policy = Some((reference, pixels, asynchronous));
+        if let Some(terrain) = &mut self.terrain {
+            terrain.validation_reference(reference);
+            terrain.validation_pixel_cache(pixels);
+            terrain.validation_async(asynchronous);
+        }
+    }
     pub(crate) fn terrain_validation_view(&mut self, reference: bool, view: usize) {
         let yaw = std::f32::consts::FRAC_PI_2 + 0.4;
         (self.cam_yaw, self.cam_pitch, self.cam_dist) = match view {
@@ -337,6 +346,10 @@ impl WorldState {
 
     pub(crate) fn terrain_validation_pixel_cache(&mut self, enabled: bool) {
         if let Some(terrain) = &mut self.terrain { terrain.validation_pixel_cache(enabled); }
+    }
+
+    pub(crate) fn terrain_validation_async(&mut self, enabled: bool) {
+        if let Some(terrain) = &mut self.terrain { terrain.validation_async(enabled); }
     }
 
     pub(crate) fn terrain_validation_capture(&mut self, path: std::path::PathBuf) {
@@ -377,6 +390,7 @@ impl WorldState {
             chat_open: false,
             props: HashMap::new(),
             terrain: None,
+            terrain_validation_policy: None,
             models: ModelCache::default(),
             hp: lr.hp,
             max_hp: lr.max_hp.max(1),
@@ -872,7 +886,13 @@ impl WorldState {
         let mut out = Vec::new();
         let now = self.now();
         if self.terrain.is_none() {
-            self.terrain = Some(Terrain::new(assets));
+            let mut terrain = Terrain::new(assets);
+            if let Some((reference, pixels, asynchronous)) = self.terrain_validation_policy {
+                terrain.validation_reference(reference);
+                terrain.validation_pixel_cache(pixels);
+                terrain.validation_async(asynchronous);
+            }
+            self.terrain = Some(terrain);
         }
         let (mx, my) = self.me.motion.position(now);
         if let Some(h) = self.me.motion.heading(now) {

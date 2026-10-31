@@ -29,9 +29,16 @@ pub struct TerrainValidation {
     motion_frame: usize,
     motion_view: usize,
     motion_frames: Vec<Value>,
+    cold: bool,
+    async_bake: bool,
 }
 
 impl TerrainValidation {
+    pub(super) fn before_draw(&self, app: &mut App) {
+        if let Some(world) = &mut app.world {
+            world.terrain_validation_policy(self.reference, self.pixel_cache, self.async_bake);
+        }
+    }
     pub fn new(plan: PathBuf, app: &App) -> Result<Self> {
         super::guard(app)?;
         let p: Value = serde_json::from_slice(&std::fs::read(plan)?)?;
@@ -49,6 +56,14 @@ impl TerrainValidation {
         };
         let directory = PathBuf::from(p["directory"].as_str().context("terrain directory")?);
         let motion = p["motion"].as_bool().unwrap_or(false);
+        let cold = p["cold"].as_bool().unwrap_or(false);
+        ensure!(!cold || motion, "cold validation requires motion sampling");
+        let async_bake = match p["async_bake"].as_str() {
+            None => !motion || cold,
+            Some("enabled") => true,
+            Some("disabled") => false,
+            _ => anyhow::bail!("async_bake must be enabled or disabled"),
+        };
         let pixel_cache = match p["pixel_cache"].as_str() {
             None | Some("enabled") => true,
             Some("disabled") if motion => false,
@@ -81,6 +96,8 @@ impl TerrainValidation {
             motion_frame: 0,
             motion_view: 0,
             motion_frames: Vec::new(),
+            cold,
+            async_bake,
         })
     }
 
@@ -172,6 +189,7 @@ impl TerrainValidation {
                 },
             );
             world.terrain_validation_pixel_cache(self.pixel_cache);
+            world.terrain_validation_async(self.async_bake);
             self.motion_frame = 0;
             self.motion_view = 0;
             if self.phase == 4 || self.phase == 5 {
@@ -184,11 +202,11 @@ impl TerrainValidation {
             self.configured = true;
             return Ok(false);
         }
-        if self.motion && !self.recorded && matches!(self.phase, 2 | 4 | 5) {
+        if self.motion && !self.recorded && (self.cold || matches!(self.phase, 2 | 4 | 5)) {
             let world = app.world.as_ref().unwrap();
             let sample = world.terrain_cache_snapshot();
             let position = world.unit_position(me.handle);
-            if self.phase != 2 || self.motion_frame < 96 {
+            if self.cold || self.phase != 2 || self.motion_frame < 96 {
                 self.motion_frames
                     .push(json!({"phase":self.phase,"frame":self.motion_frame,
                     "view":self.motion_view,"cache":sample,"position":position,
@@ -198,7 +216,7 @@ impl TerrainValidation {
                     "bounded terrain motion samples"
                 );
             }
-            if matches!(self.phase, 2 | 4) && self.motion_frame < 96 {
+            if !self.cold && matches!(self.phase, 2 | 4) && self.motion_frame < 96 {
                 self.motion_frame += 1;
                 let view = if self.motion_frame < 96 {
                     (self.motion_frame / 8) % 2
@@ -214,7 +232,7 @@ impl TerrainValidation {
                     self.settled = None;
                     return Ok(false);
                 }
-            } else if self.phase != 2 {
+            } else if self.cold || self.phase != 2 {
                 self.motion_frame += 1;
             }
         }
@@ -298,10 +316,11 @@ impl TerrainValidation {
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
         let success = self.done && self.failure.is_none() && self.steps.len() == 6;
-        self.write(&format!("{}.json",self.role), json!({"scenario":if self.motion {"terrain-motion"}else{"terrain"},"role":self.role,
+        self.write(&format!("{}.json",self.role), json!({"scenario":if self.cold {"terrain-cold"}else if self.motion {"terrain-motion"}else{"terrain"},"role":self.role,
             "renderer":if self.reference {"reference"} else {"optimized"},"success":success,"failure":self.failure,
             "steps":self.steps,"events":self.events,"frame_ms":self.frames,
             "motion":self.motion,"pixel_cache_enabled":self.pixel_cache,"motion_frames":self.motion_frames,
+            "cold":self.cold,"async_bake":self.async_bake,
             "trace":app.combat_trace.as_ref().context("terrain trace")?.json()}))?;
         Ok(success)
     }

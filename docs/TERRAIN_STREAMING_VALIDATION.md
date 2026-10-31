@@ -1,5 +1,7 @@
 # Warm terrain streaming: two-client motion validation
 
+This records the earlier warm-pixel cycle. The latest [background cold-blending validation](TERRAIN_COLD_VALIDATION.md) moves the remaining full CPU blend off rendering; counts, hashes and timings below belong to this earlier cycle.
+
 Verified **2026-10-31** after the [camera culling/memory cycle](TERRAIN_RENDERING_VALIDATION.md). That cycle reduced unnecessary GPU textures while retaining 1024² detail. It still rebuilt a full image after a camera turn brought an evicted chunk back into view. This follow-up reuses exact CPU pixels for revisited views; it does not reduce resolution or change original assets.
 
 ## Change and bounds

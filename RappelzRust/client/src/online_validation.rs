@@ -28,6 +28,9 @@ pub enum OnlineValidation {
 }
 
 impl OnlineValidation {
+    pub fn before_draw(&self, app: &mut App) {
+        if let Self::Terrain(validation) = self { validation.before_draw(app); }
+    }
     pub fn new(report: PathBuf, app: &App) -> Result<Self> {
         Ok(Self::Addons(AddonValidation::new(report, app)?))
     }
