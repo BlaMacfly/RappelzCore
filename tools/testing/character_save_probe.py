@@ -39,6 +39,9 @@ class Database:
         self.fixtures=json.loads(fixture_path.read_text(encoding='utf-8'))
         self.guids=guarded_fixtures(self.fixtures,probe['existing_character_max'],probe['existing_account_max'])
         host,port,user,password,self.schema=config_values(cfg)['CharacterDatabaseInfo'].split(';')
+        if plan.get('ambiguous_commit') is True:
+            from mysql_commit_proxy import proxy_settings
+            _,_,upstream=proxy_settings(plan);port=str(upstream[1])
         self.env=os.environ.copy();self.env['MYSQL_PWD']=password
         self.command=[probe['mysql_executable'],'--protocol=tcp','--host='+host,'--port='+port,'--user='+user,
             '--batch','--unbuffered','--skip-column-names','--connect-timeout=3']

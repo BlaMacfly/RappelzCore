@@ -18,6 +18,21 @@ import time
 BLOCK=65536
 ROLES=('owner','witness')
 
+def abort_writers(writers):
+    # Windows linger uses two unsigned shorts; Unix uses two ints.
+    linger=struct.pack('HH' if os.name=='nt' else 'ii',1,0)
+    for w in writers:
+        transport_socket=w.get_extra_info('socket')
+        transport_socket.setsockopt(socket.SOL_SOCKET,socket.SO_LINGER,linger)
+        # Windows Proactor transport.abort() calls shutdown(SHUT_RDWR)
+        # before close, producing FIN even with linger zero. Close the
+        # pending I/O first, then close the owned socket synchronously
+        # before its scheduled connection_lost callback can call
+        # shutdown. The callback sees fileno -1 and cannot send FIN.
+        w.transport.abort()
+        transport_socket._sock.close()
+
+
 class Relay:
     def __init__(self,role,upstream=('127.0.0.1',4514)):
         if not ipaddress.ip_address(upstream[0]).is_loopback or not 0<upstream[1]<65536:
@@ -73,18 +88,7 @@ class Relay:
         if action=='pause':self.gate.clear()
         elif action=='resume':self.gate.set()
         elif action=='reset':
-            # Windows linger uses two unsigned shorts; Unix uses two ints.
-            linger=struct.pack('HH' if os.name=='nt' else 'ii',1,0)
-            for w in self.writers:
-                transport_socket=w.get_extra_info('socket')
-                transport_socket.setsockopt(socket.SOL_SOCKET,socket.SO_LINGER,linger)
-                # Windows Proactor transport.abort() calls shutdown(SHUT_RDWR)
-                # before close, producing FIN even with linger zero. Close the
-                # pending I/O first, then close the owned socket synchronously
-                # before its scheduled connection_lost callback can call
-                # shutdown. The callback sees fileno -1 and cannot send FIN.
-                w.transport.abort()
-                transport_socket._sock.close()
+            abort_writers(self.writers)
         else:raise ValueError('unknown relay action')
         return self.record(action,abortive=action=='reset')
     async def close(self):

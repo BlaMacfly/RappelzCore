@@ -17,6 +17,8 @@ enum Stage {
     Initial,
     Active,
     BeforeSave,
+    PeerReturn,
+    PeerLobby,
     PendingSave,
     Down,
     Reconnect,
@@ -41,6 +43,7 @@ pub struct GameplayRestartValidation {
     durable_rewards: bool,
     money_level: bool,
     database_restart: bool,
+    ambiguous_commit: bool,
     second_fight: bool,
     fight_boundary: u64,
     stage: Stage,
@@ -70,6 +73,7 @@ impl GameplayRestartValidation {
         ensure!(!(p["interrupt_save"]==true && p["durable_rewards"]==true), "choose one save strategy");
         ensure!(p["money_level"]!=true || p["durable_rewards"]==true,"money/level requires durable reward mode");
         ensure!(p["database_restart"]!=true || p["money_level"]==true,"database restart requires currency profile");
+        ensure!(p["ambiguous_commit"]!=true || (p["money_level"]==true && p["database_restart"]!=true),"choose isolated COMMIT or database failure");
         let role = p["role"].as_str().context("role")?.to_owned();
         ensure!(role == "owner" || role == "witness", "role");
         let peer = p["peer"].as_str().context("peer")?.to_owned();
@@ -92,6 +96,7 @@ impl GameplayRestartValidation {
             durable_rewards: p["durable_rewards"].as_bool().unwrap_or(false),
             money_level: p["money_level"].as_bool().unwrap_or(false),
             database_restart: p["database_restart"].as_bool().unwrap_or(false),
+            ambiguous_commit:p["ambiguous_commit"].as_bool().unwrap_or(false),
             second_fight:false,
             fight_boundary:0,
             stage: Stage::Join,
@@ -290,7 +295,7 @@ impl GameplayRestartValidation {
             app.addons.error.is_none() && app.addons.runtime.errors().is_empty(),
             "addon errors"
         );
-        if !matches!(self.stage, Stage::Active | Stage::PendingSave | Stage::Down) && !(self.database_restart && self.second_fight) {
+        if !matches!(self.stage, Stage::Active | Stage::PendingSave | Stage::Down) && !(self.database_restart && self.second_fight) && !(self.ambiguous_commit && self.role=="owner" && self.stage==Stage::BeforeSave) {
             ensure!(app.error.is_none(), "unexpected error {:?}", app.error);
         }
         ensure!(
@@ -500,10 +505,13 @@ impl GameplayRestartValidation {
             }
             Stage::Reconnect => {
                 ensure!(app.world.is_none(), "phantom world");
-                if self.ready("clients-reconnect") && self.ready(if self.database_restart {"database-up-1.json"} else {"server-up-1.json"}) {
+                if self.ready("clients-reconnect") && self.ready(if self.ambiguous_commit {"commit-response-reset.json"} else if self.database_restart {"database-up-1.json"} else {"server-up-1.json"}) {
                     self.record(app, "DowntimeHeld");
                     let (host, port) =
                         crate::config::realmlist(&app.root, &app.config.get("locale", "frFR"));
+                    if self.ambiguous_commit && self.role=="witness" {
+                        app.send(NetCmd::EnterWorld(self.character.clone()));self.advance(Stage::Rejoin);return Ok(false);
+                    }
                     app.auto_enter = Some(self.character.clone());
                     app.send(NetCmd::Login {
                         host,
@@ -577,6 +585,14 @@ impl GameplayRestartValidation {
                 }
             }
             Stage::BeforeSave | Stage::PostFight => {
+                if self.ambiguous_commit {
+                    if self.ready("commit-response-reset.json") {
+                        self.record(app,"CommitResponseLost");
+                        if self.role=="owner" {self.advance(Stage::Down);} else {self.move_to(app,self.checkpoint(&self.role))?;self.advance(Stage::PeerReturn);}
+                        return Ok(false);
+                    }
+                    if self.role=="owner" && app.world.is_none() {return Ok(false);}
+                }
                 if self.database_restart && self.second_fight {
                     if self.ready("database-killed.json") {
                         self.record(app,"DatabaseKilled");self.second_fight=false;self.advance(Stage::Down);return Ok(false);
@@ -612,7 +628,7 @@ impl GameplayRestartValidation {
                         }
                         return Ok(false);
                     }
-                    ensure!(!self.second_fight,"interrupted reward was unexpectedly announced");
+                    ensure!(!self.second_fight && !self.ambiguous_commit,"uncertain reward was unexpectedly announced");
                     self.write(if before {"owner.before-save-rewarded"} else {"owner.rewarded"}, json!({"xp_jp":self.awarded_xp()}))?;
                 } else {
                     ensure!(w.experience() == (0, 0), "private reward leaked");
@@ -636,6 +652,20 @@ impl GameplayRestartValidation {
                     json!({"ready":true}),
                 )?;
                 self.advance(Stage::SaveLobby);
+            }
+            Stage::PeerReturn => {
+                if self.at(app,&self.role,self.checkpoint(&self.role)) {
+                    self.record(app,"PeerReturnedToCheckpoint");app.send(NetCmd::ReturnLobby);self.advance(Stage::PeerLobby);
+                }
+            }
+            Stage::PeerLobby => {
+                if app.world.is_none() && self.events.get("PLAYER_LOGOUT")==Some(&1) {
+                    ensure!(matches!(app.screen,Screen::Characters),"peer transport should stay connected");
+                    ensure!(self.audits[0].snapshot()["events"].as_array().unwrap().last().is_some_and(|e|e["event"]=="joined"),"peer worker alive");
+                    self.record(app,"PeerLobbySaved");
+                    self.write("witness.dropped",json!({"joined":true,"normal_lobby":true,"unix_ms":SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()}))?;
+                    self.advance(Stage::Reconnect);
+                }
             }
             Stage::ResumeSave => {
                 ensure!(self.current_hits(app).is_empty(),"reward replay triggered combat");
@@ -757,7 +787,7 @@ impl GameplayRestartValidation {
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
         let success = self.stage == Stage::Done && self.failure.is_none();
-        self.write(&format!("{}.json",self.role),json!({"scenario":if self.durable_rewards {"reward-durable"} else if self.interrupt_save {"save-rollback"} else {"gameplay-restart"},"money_level":self.money_level,"database_restart":self.database_restart,"success":success,"failure":self.failure,"role":self.role,"character":self.character,"steps":self.steps,"samples":self.samples,"events":self.events,"audits":self.audits.iter().map(|a|a.snapshot()).collect::<Vec<_>>(),"trace":self.trace(app)}))?;
+        self.write(&format!("{}.json",self.role),json!({"scenario":if self.durable_rewards {"reward-durable"} else if self.interrupt_save {"save-rollback"} else {"gameplay-restart"},"money_level":self.money_level,"database_restart":self.database_restart,"ambiguous_commit":self.ambiguous_commit,"success":success,"failure":self.failure,"role":self.role,"character":self.character,"steps":self.steps,"samples":self.samples,"events":self.events,"audits":self.audits.iter().map(|a|a.snapshot()).collect::<Vec<_>>(),"trace":self.trace(app)}))?;
         Ok(success)
     }
 }
