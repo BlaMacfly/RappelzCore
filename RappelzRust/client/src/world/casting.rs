@@ -148,6 +148,19 @@ impl WorldState {
 mod tests {
     use super::*;
     #[test]
+    fn late_remote_cast_uses_remaining_time_and_accepts_one_matching_terminal_phase(){
+        let mut w=WorldState::from_login(&msg::ScLoginResult{handle:7,hp:100,max_hp:100,mp:20,max_mp:50,..Default::default()},Vec2::ZERO);
+        let mut peer=Entity::new("Caster".into(),Kind::Player,0.,0.,10,None);peer.layer=Some(0);peer.set_vitals(280,280,20,140);w.entities.insert(8,peer);
+        let body=0x20000001;let mut corpse=Entity::new("Body".into(),Kind::Monster,0.,0.,1,None);corpse.layer=Some(0);corpse.set_vitals(0,105,53,53);w.entities.insert(body,corpse);
+        let event=|phase|{let mut e=rz_proto::restoration::event(3212,1,8,(0.,0.,0.,0),280,if matches!(phase,Phase::CorpseFire{..}){140}else{20},0,phase);e.target=body;e.to_packet()};
+        w.on_packet(event(Phase::Casting(70)),10.);assert_eq!(w.casting[&8].2,10.7);assert_eq!(w.skill_event.as_ref().unwrap().sequence,1);
+        w.on_packet(event(Phase::Casting(145)),10.1);assert_eq!(w.casting[&8].2,10.7);assert_eq!(w.skill_event.as_ref().unwrap().sequence,1);
+        w.on_packet(event(Phase::Cancel),10.2);assert!(!w.casting.contains_key(&8));assert_eq!(w.unit(8).unwrap().mana,Some(20));assert_eq!(w.mp,20);
+        w.on_packet(event(Phase::Casting(40)),11.);w.entities.remove(&body);
+        w.on_packet(event(Phase::CorpseFire{mana:140,amount:320}),11.4);assert_eq!(w.unit(8).unwrap().mana,Some(140));assert_eq!(w.mp,20);
+        w.on_packet(event(Phase::CorpseFire{mana:140,amount:320}),11.5);assert_eq!(w.skill_event.as_ref().unwrap().sequence,4);assert!(w.skill_cooldowns.is_empty());
+    }
+    #[test]
     fn corpse_helper_and_events_separate_dead_selected_target_from_mana_beneficiary(){
         let mut w=WorldState::from_login(&msg::ScLoginResult{handle:7,hp:280,max_hp:280,mp:20,max_mp:140,..Default::default()},Vec2::ZERO);
         w.on_packet(game::ScSkillList{target:7,modification_type:0,skills:vec![game::SkillInfo{skill_id:3212,base_skill_level:1,current_skill_level:1,total_cool_time:5800,remain_cool_time:0}]}.to_packet(),0.);

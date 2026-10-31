@@ -5,8 +5,10 @@ use anyhow::{ensure,Context,Result};
 use rz_proto::Message;
 use serde_json::{json,Value};
 use std::{collections::BTreeMap,path::PathBuf,time::{Duration,Instant}};
+#[path="late_cast.rs"] mod late_cast;
 
 pub struct CorpseSkillValidation {
+    late:Option<late_cast::LateCastValidation>,
     directory:PathBuf,role:String,peer:String,character:String,stage:u8,started:Instant,since:Instant,
     own:u32,initial:u32,other:u32,initial_other:u32,body:u32,announced:bool,
     requests:Vec<Value>,steps:Vec<Value>,events:BTreeMap<String,usize>,messages:Vec<String>,failure:Option<String>,
@@ -18,9 +20,11 @@ impl CorpseSkillValidation {
         let peer=p["peer"].as_str().context("peer")?.to_string();ensure!(peer.starts_with("Lua"),"dedicated peer");
         let directory=PathBuf::from(p["directory"].as_str().context("directory")?);std::fs::create_dir_all(&directory)?;
         ensure!(!directory.join(format!("{role}.json")).exists(),"fresh attempt required");
-        Ok(Self{directory,role,peer,character:app.auto_enter.clone().context("character")?,stage:0,started:Instant::now(),since:Instant::now(),own:0,initial:0,other:0,initial_other:0,body:0,announced:false,requests:vec![],steps:vec![],events:BTreeMap::new(),messages:vec![],failure:None})
+        let late=if p["late_observer"]==true {Some(late_cast::LateCastValidation::new(&p,app)?)} else {None};
+        Ok(Self{late,directory,role,peer,character:app.auto_enter.clone().context("character")?,stage:0,started:Instant::now(),since:Instant::now(),own:0,initial:0,other:0,initial_other:0,body:0,announced:false,requests:vec![],steps:vec![],events:BTreeMap::new(),messages:vec![],failure:None})
     }
     pub fn message(&mut self,line:&str){
+        if let Some(late)=self.late.as_mut(){late.message(line);return;}
         if let Some(event)=line.strip_prefix("[RappelzDebug] EVENT ").and_then(|s|s.split_whitespace().next()){*self.events.entry(event.into()).or_default()+=1;}
         if self.messages.len()<512 {self.messages.push(line.into());}
     }
@@ -50,6 +54,7 @@ impl CorpseSkillValidation {
         self.request(app,game::CsSkill::from_packet(&packet)?,label);Ok(())
     }
     pub fn tick(&mut self,app:&mut App)->Result<bool>{
+        if let Some(late)=self.late.as_mut(){return late.tick(app);}
         ensure!(app.error.is_none() && app.addons.error.is_none() && app.addons.runtime.errors().is_empty(),"client/addon error");
         ensure!(self.started.elapsed()<Duration::from_secs(180),"corpse stage {} timed out",self.stage);
         let trace=app.combat_trace.as_ref().context("trace")?;ensure!(trace.errors.is_empty(),"trace decoding error");
@@ -134,8 +139,9 @@ impl CorpseSkillValidation {
         }
         Ok(false)
     }
-    pub fn fail(&mut self,error:anyhow::Error){self.failure=Some(format!("{error:#}"));let _=self.capture(&format!("{}-failure",self.role));}
+    pub fn fail(&mut self,error:anyhow::Error){if let Some(late)=self.late.as_mut(){late.fail(error);return;}self.failure=Some(format!("{error:#}"));let _=self.capture(&format!("{}-failure",self.role));}
     pub fn finish(&self,app:&App)->Result<bool>{
+        if let Some(late)=self.late.as_ref(){return late.finish(app);}
         let success=self.stage==18 && self.failure.is_none();
         mark(&self.directory,&format!("{}.json",self.role),json!({"scenario":"corpse_skill","role":self.role,"success":success,"failure":self.failure,"own":self.own,"initial":self.initial,"other":self.other,"initial_other":self.initial_other,"body":self.body,"requests":self.requests,"steps":self.steps,"events":self.events,"messages":self.messages,"trace":app.combat_trace.as_ref().context("trace")?.json()}))?;Ok(success)
     }

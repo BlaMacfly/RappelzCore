@@ -68,6 +68,8 @@ The archived-rule negative control is in `negative-self-profile/`; `initial/` re
 
 Preservation passes **9/9 comparisons**. All **19 pre-existing characters**, account/access/realm-character records, protected inventories/settings/items, world content and installed preferences compare unchanged. Original assets/MPQs remain intact; companion files are additive. Operational realm/uptime metadata is outside this equality claim. Worldserver was replaced gracefully once with no players; authentication/database services remain active.
 
+The subsequent [late-observer validation](LATE_CAST_VALIDATION.md) adds dynamic caster/target audience reconciliation and 27 native checks: remaining CASTING on arrival, correct cancellation/effect delivery, private recharge/rewards and no query/completed-effect replay. The corpse-rule evidence and historical counts below remain unchanged.
+
 ## Verification and reproduction
 
 Combined workspace: **140 Rust tests passed**, one intentionally ignored model scan, including **22 actual Lua integration tests**. Python tools pass **34 tests**, including an independent complete corpse fixture, empty/failure guards, mutations of self casts/double consumption/privacy/cooldown/rewards/movement and UTF-8 CLI output. Optimized builds succeed; Clippy completes with style warnings. Unit tests cover hybrid/missing-stage rejection, wire target/beneficiary offsets, expired/out-of-range/cross-layer corpses, competing fires, death-generation reuse, unchanged respawn timing and production client state ordering.
