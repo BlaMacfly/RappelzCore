@@ -64,7 +64,7 @@ impl Motion {
     }
 
     /// A snapshot already supplies the current position; do not replay reached waypoints.
-    fn remaining_points(&self, now: u32) -> Vec<MovePoint> {
+    pub(crate) fn remaining_points(&self, now: u32) -> Vec<MovePoint> {
         if self.speed <= 0.0 { return Vec::new(); }
         let mut budget = self.speed * now.saturating_sub(self.start_time) as f32 / 100.0;
         let (mut x, mut y) = (self.x, self.y);
@@ -156,6 +156,8 @@ impl MonsterEntity {
 }
 
 pub struct World {
+    pub(crate) casts:HashMap<u32,crate::casting::PendingCast>,
+    pub(crate) cast_cooldowns:HashMap<(u32,u32),u64>,
     pub(crate) parties: crate::party::Parties,
     pub(crate) party_clients: HashSet<u32>,
     pub(crate) party_sent: HashMap<u32,rz_proto::party::ScPartyState>,
@@ -221,7 +223,7 @@ impl World {
             next_monster_handle: MONSTER_HANDLE_BASE,
             visibility_distance,
             max_online: 0,
-            last_regen: 0,
+            last_regen: 0, casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         for &(_, id, x, y, z, respawn) in &data.monster_spawns {
             if let Some(info) = data.monsters.get(&id) {
@@ -235,6 +237,7 @@ impl World {
     pub fn now(&self) -> u32 {
         (self.started.elapsed().as_millis() / 10) as u32
     }
+    pub(crate) fn cast_clock(&self)->u64 {(self.started.elapsed().as_millis()/10) as u64}
 
     pub fn uptime_secs(&self) -> u64 {
         self.started.elapsed().as_secs()
@@ -276,6 +279,7 @@ impl World {
 
     /// Retire un joueur et prévient ceux qui le voyaient.
     pub fn remove_player(&mut self, handle: u32) -> Option<PlayerEntity> {
+        self.cancel_restoration(handle);
         let p = self.players.remove(&handle)?;
         self.parties.disconnected(handle);
         self.party_clients.remove(&handle);self.party_sent.remove(&handle);
@@ -472,6 +476,7 @@ impl World {
 
     /// Téléporte un joueur (TS_SC_WARP) et synchronise immédiatement ses observateurs.
     pub fn teleport(&mut self, handle: u32, x: f32, y: f32, z: f32) {
+        self.cancel_restoration(handle);
         if !self.players.contains_key(&handle) { return; }
         let previous_viewers: Vec<u32> = self.players.values()
             .filter(|p| p.visible.contains(&handle)).map(|p| p.handle).collect();
@@ -492,6 +497,7 @@ impl World {
 
     /// Server-authoritative phase transition; ordinary gameplay cannot select arbitrary layers.
     pub fn change_layer(&mut self, handle: u32, layer: u8) -> bool {
+        self.cancel_restoration(handle);
         let now = self.now();
         let Some(player) = self.players.get_mut(&handle) else { return false };
         if player.layer == layer { return true; }
@@ -550,6 +556,7 @@ impl World {
         let alive = self.monsters.get(&target).is_some_and(|m| m.alive())
             && self.players.get(&attacker).is_some_and(|p| p.hp > 0)
             && self.can_see(attacker, target, self.now());
+        if alive {self.cancel_restoration(attacker);}
         if let Some(p) = self.players.get_mut(&attacker) {
             p.attack_target = alive.then_some(target);
         }
@@ -568,6 +575,7 @@ impl World {
     /// Tick de jeu : combat, poursuite, mort et réapparition des monstres, régénération.
     pub fn tick(&mut self) {
         let now = self.now();
+        self.tick_restorations(self.cast_clock());
         self.tick_player_attacks(now);
         self.tick_monsters(now);
         if now.saturating_sub(self.last_regen) >= REGEN_INTERVAL {
@@ -792,7 +800,7 @@ mod tests {
             parties:Default::default(),party_clients:HashSet::new(),party_sent:HashMap::new(),
             started: Instant::now(), players: HashMap::new(), npcs: HashMap::new(), monsters: HashMap::new(),
             next_handle: 3, next_monster_handle: MONSTER_HANDLE_BASE, visibility_distance: 540.0,
-            max_online: 0, last_regen: 0,
+            max_online: 0, last_regen: 0, casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         let mut receivers = Vec::new();
         for handle in [1, 2] {
@@ -882,7 +890,7 @@ mod tests {
         // No real database is reachable by this fixture; any SQL path is a test failure.
         let pool=rz_database::sqlx::mysql::MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(20))
             .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused").unwrap();
-        let data=GameData {skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
+        let data=GameData {restoration:None,skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
             monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![]};
         let settings=Settings {realm_id:1,network_key:vec![],characters_per_realm:1,start_level:1,start_money:0,start_positions:[(0.0,0.0);3],
             region_size:180,cell_size:6,move_speed:120,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
@@ -1212,5 +1220,59 @@ mod tests {
             let d = roll_damage(100, 20);
             assert!((80..=100).contains(&d));
         }
+    }
+
+    fn restoration_fixture()->(rz_rappelz::restoration::Restoration,game::CsSkill) {
+        (rz_rappelz::restoration::Restoration{id:3212,mp_base:0,mp_per_level:5,cast_base:150,cast_per_level:-5,
+            cooldown:2500,group:103,minimum_level:0,minimum_hp:0,minimum_mp:0,amount_base:2000.,amount_per_level:1500.},
+        game::CsSkill{skill_id:3212,caster:1,target:1,skill_level:1,..Default::default()})
+    }
+    #[test]
+    fn restoration_charges_once_at_fire_caps_mana_and_keeps_cooldown_across_handles() {
+        use rz_proto::restoration::{decode,Phase};
+        let (mut w,mut rx)=test_world();let (d,r)=restoration_fixture();let q=d.quote(1).unwrap();
+        let known=vec![(3212,1,Some(q.clone()))];
+        assert!(w.begin_restoration(1,&r,q.clone(),known.clone(),0));
+        assert!(!w.begin_restoration(1,&r,q.clone(),known.clone(),0));
+        assert_eq!(w.players[&1].mp,20);
+        for r in &mut rx {assert_eq!(decode(&game::ScSkill::from_packet(&r.try_recv().unwrap()).unwrap()).unwrap(),Phase::Casting(145));}
+        w.tick_restorations(144);assert_eq!(w.players[&1].mp,20);assert!(rx.iter_mut().all(|r|r.try_recv().is_err()));
+        w.tick_restorations(145);assert_eq!(w.players[&1].mp,50);
+        for r in &mut rx {assert_eq!(decode(&game::ScSkill::from_packet(&r.try_recv().unwrap()).unwrap()).unwrap(),Phase::Fire{mana:50,amount:3500});let h=game::ScHpMp::from_packet(&r.try_recv().unwrap()).unwrap();assert_eq!((h.mp,h.add_mp),(50,30));}
+        let list=game::ScSkillList::from_packet(&rx[0].try_recv().unwrap()).unwrap();assert_eq!((list.skills[0].total_cool_time,list.skills[0].remain_cool_time),(2500,2500));assert!(rx[1].try_recv().is_err());
+        w.tick_restorations(146);assert!(rx.iter_mut().all(|r|r.try_recv().is_err()));
+        let mut p=w.remove_player(1).unwrap();p.handle=3;w.players.insert(3,p);
+        let r=game::CsSkill{caster:3,target:3,..r};
+        assert!(!w.begin_restoration(3,&r,q.clone(),known.clone(),200));
+        assert!(w.begin_restoration(3,&r,q,known,2645));
+    }
+    #[test]
+    fn restoration_refuses_forgery_and_rechecks_cost_and_state_before_fire() {
+        let (mut w,_rx)=test_world();let (d,r)=restoration_fixture();let q=d.quote(1).unwrap();
+        for invalid in [game::CsSkill{caster:2,..r.clone()},game::CsSkill{target:2,..r.clone()},game::CsSkill{layer:1,..r.clone()},game::CsSkill{x:f32::NAN,..r.clone()}] {assert!(!w.begin_restoration(1,&invalid,q.clone(),vec![],0));}
+        w.players.get_mut(&1).unwrap().mp=4;assert!(!w.begin_restoration(1,&r,q.clone(),vec![],0));
+        w.players.get_mut(&1).unwrap().mp=20;assert!(w.begin_restoration(1,&r,q,vec![],0));
+        w.players.get_mut(&1).unwrap().mp=3;w.tick_restorations(145);
+        assert_eq!(w.players[&1].mp,3);assert!(w.casts.is_empty());assert!(w.cast_cooldowns.is_empty());
+    }
+    #[test]
+    fn canceled_hidden_layer_and_disconnected_casts_cannot_restore_or_charge() {
+        let (mut w,mut rx)=test_world();let (d,r)=restoration_fixture();let q=d.quote(1).unwrap();
+        assert!(w.begin_restoration(1,&r,q.clone(),vec![],0));w.cancel_restoration(1);w.tick_restorations(145);assert_eq!(w.players[&1].mp,20);assert!(w.cast_cooldowns.is_empty());
+        assert!(w.begin_restoration(1,&r,q.clone(),vec![],200));w.change_layer(1,1);w.tick_restorations(345);assert_eq!(w.players[&1].mp,20);
+        for r in &mut rx {while r.try_recv().is_ok(){}}
+        let r=game::CsSkill{layer:1,..r};assert!(w.begin_restoration(1,&r,q.clone(),vec![],400));
+        assert!(rx[1].try_recv().is_err());w.remove_player(1);w.tick_restorations(545);assert!(w.casts.is_empty());assert!(w.cast_cooldowns.is_empty());
+    }
+    #[tokio::test]
+    async fn cast_handler_requires_learned_level_without_touching_unreachable_sql() {
+        let (mut session,mut rx)=isolated_session(None);let (d,r)=restoration_fixture();
+        std::sync::Arc::get_mut(&mut session.ctx).unwrap().data.restoration=Some(rz_rappelz::restoration::RestorationBook::from_definition(d));
+        session.cast_skill(r.clone());assert_ne!(msg::ScResult::from_packet(&rx.try_recv().unwrap()).unwrap().result,0);
+        while rx.try_recv().is_ok(){}
+        session.in_game.as_mut().unwrap().character.set_extra("learned_skill_3212",1);
+        session.cast_skill(game::CsSkill{skill_level:2,..r.clone()});assert_ne!(msg::ScResult::from_packet(&rx.try_recv().unwrap()).unwrap().result,0);while rx.try_recv().is_ok(){}
+        session.cast_skill(r);assert_eq!(rx.try_recv().unwrap().id,game::id::TS_SC_SKILL);assert_eq!(msg::ScResult::from_packet(&rx.try_recv().unwrap()).unwrap().result,0);
+        assert_eq!(session.ctx.world.lock().unwrap().players[&1].mp,20);
     }
 }

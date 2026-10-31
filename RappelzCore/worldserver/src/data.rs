@@ -44,6 +44,7 @@ pub struct Teleport {
 }
 
 pub struct GameData {
+    pub restoration:Option<rz_rappelz::restoration::RestorationBook>,
     pub skills:Option<rz_rappelz::skills::SkillBook>,
     pub jobs: HashMap<i32, JobInfo>,
     pub npcs: Vec<NpcSpawn>,
@@ -220,7 +221,10 @@ impl GameData {
         let monster_spawns = rz_database::world::monster_spawns(world, NPC_ENTRY_OFFSET).await?;
         tracing::info!(">> {} monstres placés (acore_world.creature)", monster_spawns.len());
 
-        Ok(Self { skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns })
+        let restoration=match rz_rappelz::restoration::RestorationBook::open(&dbc_dir) {
+            Ok(book)=>Some(book),Err(error)=>{tracing::warn!("{error}: restoration casting unavailable");None}
+        };
+        Ok(Self { restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns })
     }
 
     pub fn find_teleport(&self, name: &str) -> Option<&Teleport> {

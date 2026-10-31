@@ -72,7 +72,8 @@ impl SkillBook {
             .map(|r| SkillDefinition {
                 id: r.id() as u32,
                 valid: r.int("is_valid") == 1,
-                passive: r.int("is_passive") != 0,
+                // Legacy column name: this byte is is_active (0 = passive).
+                passive: r.int("is_passive") == 0,
                 learning_jp: std::array::from_fn(|i| i64::from(r.int(&format!("jp_{:02}", i + 1)))),
             })
             .collect();
@@ -445,6 +446,8 @@ mod tests {
         let known = BTreeMap::new();
         let offer = b.offer(200, 1, 1, 4, &known, 1004);
         assert_eq!((offer.cost, offer.status), (Some(4), LearnStatus::Ready));
+        assert!(offer.passive);
+        assert!(b.offer(200, 1, 3, 100, &known, 1003).passive);
         assert_eq!(
             b.offer(200, 1, 3, 100, &known, 1003).status,
             LearnStatus::Prerequisite

@@ -154,17 +154,21 @@ impl Session {
             );
             return;
         };
+        let world=self.ctx.world.lock().unwrap();
         self.send(&game::ScSkillList {
             target: g.handle,
             modification_type: 0,
             skills: levels
                 .into_iter()
-                .map(|(skill_id, level)| game::SkillInfo {
+                .map(|(skill_id, level)| {
+                    let q=self.ctx.data.restoration.as_ref().and_then(|book|u16::try_from(skill_id).ok().and_then(|id|book.quote(id,level)));
+                    let (total,remain)=q.map_or((0,0),|q|(q.cooldown,world.cooldown_remaining(g.character.guid,q.group)));
+                    game::SkillInfo {
                     skill_id: skill_id as i32,
                     base_skill_level: level,
                     current_skill_level: level,
-                    ..Default::default()
-                })
+                    total_cool_time:total,remain_cool_time:remain,
+                }})
                 .collect(),
         });
     }
@@ -189,7 +193,7 @@ impl Session {
         };
         let active = {
             let world = self.ctx.world.lock().unwrap();
-            world.players.get(&g.handle).is_some_and(|p| {
+            !world.casts.contains_key(&g.handle) && world.players.get(&g.handle).is_some_and(|p| {
                 p.guid == g.character.guid && p.account_id == g.character.account && p.hp > 0
             })
         };

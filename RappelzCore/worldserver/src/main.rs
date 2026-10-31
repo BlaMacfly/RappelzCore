@@ -10,6 +10,7 @@ mod gameplay;
 mod party;
 mod session;
 mod skills;
+mod casting;
 mod world;
 
 use std::path::PathBuf;

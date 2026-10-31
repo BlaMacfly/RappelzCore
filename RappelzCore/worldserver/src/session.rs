@@ -487,6 +487,7 @@ impl Session {
         let s = &self.ctx.settings;
         let mut world = self.ctx.world.lock().unwrap();
         let now = world.now();
+        world.cancel_restoration(g.handle);
         let Some(p) = world.players.get_mut(&g.handle) else { return };
         // Anti-téléportation : le départ annoncé doit être proche de la position serveur.
         let (sx, sy) = p.motion.position(now);

@@ -40,6 +40,7 @@ pub fn handles(id: u16) -> bool {
     matches!(
         id,
         gid::TS_CS_PUTON_ITEM
+            | gid::TS_CS_SKILL
             | gid::TS_CS_LEARN_SKILL
             | gid::TS_CS_PUTOFF_ITEM
             | gid::TS_CS_DROP_ITEM
@@ -212,7 +213,11 @@ impl Session {
                 let req = game::CsAttackRequest::from_packet(&p)?;
                 self.ctx.world.lock().unwrap().start_attack(handle, req.target_handle);
             }
-            gid::TS_CS_CANCEL_ACTION => self.ctx.world.lock().unwrap().stop_attack(handle),
+            gid::TS_CS_SKILL => self.cast_skill(game::CsSkill::from_packet(&p)?),
+            gid::TS_CS_CANCEL_ACTION => {
+                let mut world=self.ctx.world.lock().unwrap();
+                world.cancel_restoration(handle);world.stop_attack(handle);
+            },
             gid::TS_CS_TARGETING => {
                 let target = game::CsTargeting::from_packet(&p)?.0;
                 let accepted = {
