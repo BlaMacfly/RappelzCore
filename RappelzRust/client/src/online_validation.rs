@@ -17,6 +17,7 @@ pub enum OnlineValidation {
     Addons(AddonValidation),
     Combat(combat::CombatValidation),
     Revival(combat::revival::RevivalValidation),
+    Visibility(combat::visibility::VisibilityValidation),
 }
 
 impl OnlineValidation {
@@ -29,11 +30,15 @@ impl OnlineValidation {
     pub fn revival(plan: PathBuf, app: &App) -> Result<Self> {
         Ok(Self::Revival(combat::revival::RevivalValidation::new(plan, app)?))
     }
+    pub fn visibility(plan: PathBuf, app: &App) -> Result<Self> {
+        Ok(Self::Visibility(combat::visibility::VisibilityValidation::new(plan, app)?))
+    }
     pub fn message(&mut self, message: &str) {
         match self {
             Self::Addons(v) => v.message(message),
             Self::Combat(v) => v.message(message),
             Self::Revival(v) => v.message(message),
+            Self::Visibility(v) => v.message(message),
         }
     }
     pub fn tick(&mut self, app: &mut App) -> Result<bool> {
@@ -41,6 +46,7 @@ impl OnlineValidation {
             Self::Addons(v) => v.tick(app),
             Self::Combat(v) => v.tick(app),
             Self::Revival(v) => v.tick(app),
+            Self::Visibility(v) => v.tick(app),
         }
     }
     pub fn fail(&mut self, error: anyhow::Error) {
@@ -48,6 +54,7 @@ impl OnlineValidation {
             Self::Addons(v) => v.fail(error),
             Self::Combat(v) => v.fail(error),
             Self::Revival(v) => v.fail(error),
+            Self::Visibility(v) => v.fail(error),
         }
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
@@ -55,6 +62,7 @@ impl OnlineValidation {
             Self::Addons(v) => v.finish(app),
             Self::Combat(v) => v.finish(app),
             Self::Revival(v) => v.finish(app),
+            Self::Visibility(v) => v.finish(app),
         }
     }
 }

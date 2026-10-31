@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use crate::{App, NetCmd, NetEvent};
 
 pub(super) mod revival;
+pub(super) mod visibility;
 
 #[derive(Default)]
 pub struct PacketTrace {
@@ -23,6 +24,8 @@ pub struct PacketTrace {
     leaves: Vec<u32>,
     lifecycle: Vec<Value>,
     warps: Vec<Value>,
+    moves: Vec<Value>,
+    order: u64,
     errors: Vec<String>,
 }
 
@@ -35,6 +38,7 @@ impl PacketTrace {
             + self.levels.len()
             + self.experience.len()
             + self.warps.len()
+            + self.moves.len()
             + self.errors.len()
             >= 2048
         {
@@ -43,6 +47,7 @@ impl PacketTrace {
             }
             return;
         }
+        self.order = self.order.saturating_add(1);
         let result: Result<()> = (|| {
             match event {
                 NetEvent::Enter(e) => {
@@ -53,7 +58,7 @@ impl PacketTrace {
                     };
                     self.enters.push(json!({"handle":e.handle,"name":name,"kind":kind,"level":creature.level,
                         "hp":creature.hp,"max_hp":creature.max_hp,"mp":creature.mp,"max_mp":creature.max_mp,
-                        "x":e.x,"y":e.y,"z":e.z,"layer":e.layer}));
+                        "x":e.x,"y":e.y,"z":e.z,"layer":e.layer,"order":self.order}));
                     self.lifecycle.push(json!({"event":"enter","handle":e.handle,"hp":creature.hp,"mp":creature.mp}));
                 }
                 NetEvent::Leave(handle) => {
@@ -62,6 +67,8 @@ impl PacketTrace {
                         .push(json!({"event":"leave","handle":handle}));
                 }
                 NetEvent::Warp { x, y, z } => self.warps.push(json!({"x":x,"y":y,"z":z})),
+                NetEvent::Move(m) => self.moves.push(json!({"handle":m.handle,"time":m.start_time,
+                    "layer":m.tlayer,"speed":m.speed,"points":m.points.iter().map(|p|[p.x,p.y]).collect::<Vec<_>>(),"order":self.order})),
                 NetEvent::Packet(p) => match p.id {
                     id::TS_SC_ATTACK_EVENT => {
                         let packet = game::ScAttackEvent::from_packet(p)?;
@@ -98,7 +105,7 @@ impl PacketTrace {
 
     fn json(&self) -> Value {
         json!({"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
-            "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"errors":self.errors})
+            "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors})
     }
 }
 
@@ -156,6 +163,29 @@ mod tests {
         }
         assert_eq!(trace.errors, ["combat trace capacity exceeded"]);
         assert_eq!(trace.enters.len() + trace.leaves.len(), 2048);
+    }
+
+    #[test]
+    fn movement_routes_are_recorded_in_order_and_bounded() {
+        let mut trace = PacketTrace::default();
+        let event = NetEvent::Move(rz_proto::msg::ScMove {
+            start_time: 123,
+            handle: 7,
+            tlayer: 2,
+            speed: 120,
+            points: vec![rz_proto::msg::MovePoint {
+                x: 9050.0,
+                y: 7167.0,
+            }],
+        });
+        for _ in 0..3000 {
+            trace.observe(&event);
+        }
+        assert_eq!(trace.moves.len(), 2048);
+        assert_eq!(trace.moves[0]["points"], json!([[9050.0, 7167.0]]));
+        assert_eq!(trace.moves[0]["layer"], 2);
+        assert!(trace.moves[1]["order"].as_u64() > trace.moves[0]["order"].as_u64());
+        assert_eq!(trace.errors, ["combat trace capacity exceeded"]);
     }
 }
 

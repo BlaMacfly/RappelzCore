@@ -344,6 +344,14 @@ impl WorldState {
 
     pub fn experience(&self) -> (i64, i64) { (self.exp, self.jp) }
 
+    /// Programmatic route uses the same local prediction as keyboard/mouse movement.
+    pub fn move_path(&mut self, points: Vec<MovePoint>) -> Option<NetCmd> {
+        if points.is_empty() || points.len() > 64 || points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) { return None; }
+        let now = self.now();
+        let (x, y) = self.me.motion.position(now);
+        Some(self.start_path(x, y, points, now))
+    }
+
     pub fn attack_target(&self, handle: u32) -> Option<NetCmd> {
         self.entities.get(&handle).filter(|entity| entity.kind == Kind::Monster)?;
         Some(NetCmd::Raw(game::CsAttackRequest { handle: self.handle, target_handle: handle }.to_packet()))
@@ -876,6 +884,10 @@ impl WorldState {
 
     fn start_move(&mut self, x: f32, y: f32, target: Vec2, now: f64) -> NetCmd {
         let points = vec![MovePoint { x: target.x, y: target.y }];
+        self.start_path(x, y, points, now)
+    }
+
+    fn start_path(&mut self, x: f32, y: f32, points: Vec<MovePoint>, now: f64) -> NetCmd {
         self.me.motion = Motion { x, y, start: now, points: points.clone(), speed: self.speed };
         self.last_move_sent = now;
         NetCmd::Move { x, y, points }

@@ -2,7 +2,9 @@
 
 Audit/development date: **2026-10-30**. This records one verified continuation of the existing workspace, not completion of an MMORPG ecosystem.
 
-**Latest follow-up (2026-10-31):** [Player death/revival validation](REVIVAL_VALIDATION.md) passes with two native clients: real lethal retaliation, automatic revival at the start point, correct observer position/rendering beyond the corpse timeout, Lua death/alive events and logout. Two native negative controls reproduce the observer defects before the fixes; the final comparison passes 26 conditions. **91 Rust tests + 10 Python tests pass**, one Rust test ignored. All records that predate this cycle, including the earlier fixtures, world content and installed WTF files compare unchanged.
+**Latest follow-up (2026-10-31):** [Movement/visibility validation](VISIBILITY_VALIDATION.md) passes with two native clients: moving-player ENTER now resumes the unfinished route, then range LEAVE clears the target and hidden QUERY is denied. A native negative control reproduces the frozen late observer. The final pair passes 25 comparison checks, confirms arrival through actual server state and saves both characters offline. **94 Rust tests + 14 Python tests pass**, one Rust test ignored. All pre-cycle records through character/account ID 9, world content and installed WTF files compare unchanged.
+
+The previous [player death/revival cycle](REVIVAL_VALIDATION.md) verified lethal retaliation, automatic revival, observer rendering/position and real Lua death/alive events with 26 comparison checks after two native negative controls. Its 91 Rust/10 Python counts remain historical.
 
 The previous [corpse/respawn cycle](RESPAWN_VALIDATION.md) verified two kills, same-handle respawn and 22 identical attacks, fixing hidden QUERY disclosure and cross-layer combat. Its 85 Rust/6 Python counts remain historical.
 
@@ -12,7 +14,7 @@ The earlier [two-client combat validation](COMBAT_VALIDATION.md) fixed discarded
 
 Initial recursive inventory found 16 Cargo members, 74 Rust source files, original `Rappelz NoLimits` data, converted client data, SQL files, reverse-engineering notes and ignored historical runtime/decompiler outputs. The added `rz-addon` makes 17 workspace members. Rust 1.99.0/Cargo 1.99.0 target `x86_64-pc-windows-msvc`.
 
-The initial development folder has an **unborn `master`**, with sources untracked. Existing server/client histories were recovered. On the user's explicit publication request, separate `codex/validate-lua-core` and `codex/validate-lua-client` worktrees were created, preserving each branch's server/client split and existing license/logo/history. The first Lua/combat cycle was published as `841ef3c` / `4674ce9`, then the respawn cycle as `60f93c3` / `19a0ce5` on `RappelzCore` / `RappelzRust`; this follow-up continues those worktrees. The combined local folder remains intact; its Git state is not evidence of missing source progress. Retained artifacts corroborate earlier development but do not identify its authoring tool independently.
+The initial development folder has an **unborn `master`**, with sources untracked. Existing server/client histories were recovered. On the user's explicit publication request, separate `codex/validate-lua-core` and `codex/validate-lua-client` worktrees were created, preserving each branch's server/client split and existing license/logo/history. The Lua/combat cycle was published as `841ef3c` / `4674ce9`, respawn as `60f93c3` / `19a0ce5`, and revival as `bece394` / `6e192c0` on `RappelzCore` / `RappelzRust`; this follow-up continues those worktrees. The combined local folder remains intact; its Git state is not evidence of missing source progress. Retained artifacts corroborate earlier development but do not identify its authoring tool independently.
 
 Original assets, databases and converted files remain under ignored `Rappelz NoLimits/`, `client-data/`, `target/`. No original game code/assets or public emulator code was copied into the implementation.
 
@@ -41,13 +43,14 @@ Original assets, databases and converted files remain under ignored `Rappelz NoL
 - Follow-up: corrected server level-change HP/MP synchronization and cached ENTER stats through a shared GM/XP helper; suppressed unknown-target vitals events; added an opt-in native online runner and Lua-side diagnostic traces. See LIVE_SERVER_VALIDATION for the negative control and passing final run.
 - Latest follow-up: gate QUERY and player attacks on current announced visibility; stop cross-layer monster retaliation. Extend the existing native runner with an optional second kill after corpse LEAVE/respawn ENTER, and include every packet category in trace capacity accounting. See RESPAWN_VALIDATION for the failing native baseline and corrected pair.
 - Death/revival follow-up: clear revived client corpse markers, refresh continuing teleport observers and recalculate old/new visibility immediately; clear remaining aggressor targets on revival. Add a guarded native scenario reusing the existing host/trace, real PLAYER_DEAD/PLAYER_ALIVE transitions and RappelzDebug target-health diagnostics. See REVIVAL_VALIDATION for two native negative controls and the corrected pair.
+- Movement/visibility follow-up: accompany moving player/monster snapshots with only the unfinished route, using the current packet clock. Reuse normal client movement prediction in a guarded round-trip scenario, trace bounded MOVE order/routes, and independently compare late entry, arrival, range removal, hidden query and server-confirmed home position. See VISIBILITY_VALIDATION for the failing native baseline and corrected pair.
 
 ## Verification
 
 | Check | Result |
 |---|---|
 | Baseline `cargo test --workspace --all-targets` | 63 passed, 0 failed, 1 ignored; supplied original assets present. |
-| Final combined workspace tests | **91 passed, 0 failed, 1 ignored**, including 15 Lua integration tests plus client vitals/trace/revival, server level/visibility/lifecycle/teleport and MPQ tests. The comparison tools add 10 passing Python tests. |
+| Final combined workspace tests | **94 passed, 0 failed, 1 ignored**, including 15 Lua integration tests plus client vitals/trace/revival, server level/visibility/lifecycle/teleport/remaining-route and MPQ tests. The comparison tools add 14 passing Python tests. |
 | `cargo build --workspace --release` | All six executables build for native Windows x64. |
 | Clippy on addon/client/extractor/MPQ all targets | Completed; no rz-addon warnings. Existing style/large-enum warnings remain in older crates/client code. |
 | `rz-extractor verify` | **125,212 files identical, 0 errors**. Excludes original DB resources converted separately; this is not complete generated-DBC semantic validation. |
@@ -58,10 +61,11 @@ Original assets, databases and converted files remain under ignored `Rappelz NoL
 | Two native clients / XP combat | Passed: 12 identical attack records, damage HPMP equality, kill-driven level 2→3/XP 4/JP 3, live target HP/MP, fresh queries and leave/logout. Witness XP/JP remains zero. |
 | Two native clients / respawn and second kill | Passed: 22 identical attack records, hidden-corpse QUERY rejected, same-handle respawn, second reward once, XP 9/JP 6 and final target HP 80/140, MP 70/70. All pre-cycle records including earlier test characters remain unchanged. |
 | Two native clients / player death and revival | Passed: real lethal retaliation, HP 0→100/MP 50, automatic return to 8330/7167, continued observer visibility after 3.5 seconds before any query, real Lua death/alive/target-health events, fresh ENTER, logout and saved offline state. No XP/JP reward or level change. |
+| Two native clients / moving visibility | Passed: actual mid-route ENTER plus remaining MOVE, arrival without observer QUERY, identical return broadcast, bilateral range LEAVE, cleared target, denied hidden QUERY and server-confirmed/saved home position. 25 comparison checks pass. |
 
 Screenshot: local ignored `client-data/shot_lua_addon_final.png` (native offline scene, updated installed executable, persisted click count still 1 after process restart). The demo player values are actual offline state, not evidence of an online server response. Automated tests supply explicit state fixtures; the native production adapter reads existing accepted packets.
 
-The latest optimized client is installed into `client-data/RappelzRust/RappelzRust.exe`, SHA-256 `343BFEFE7937433F75DDA3B27C7C2EF3ABC71951BBB74C7D17C58476A3C4D430`. Its preceding client/server executables and installed addon files are preserved under `client-data/validation/2026-10-31-revival-f624b911/`; older backups also remain. All six release executable PE machine fields are `0x8664` (AMD64). The latest two-client screenshots/reports are under that run's `final/`; earlier combat/respawn and single-client evidence remains available separately.
+The latest optimized client is installed into `client-data/RappelzRust/RappelzRust.exe`, SHA-256 `2E77514372A1800CD5132D53BE55E2E7C0677275590FC97DB081BD3BC8D3EA19`. Its preceding client/server executables are preserved under `client-data/validation/2026-10-31-movement-67322d42/`; older binaries/addon backups also remain. All six release executable PE machine fields are `0x8664` (AMD64). The latest two-client screenshots/reports are under that run's `final/`; earlier combat/respawn/revival and single-client evidence remains available separately.
 
 ## Existing systems and gaps
 
@@ -83,5 +87,6 @@ The original executable's exact official Epic/patch remains **unresolved**: Wind
 - [NEXT_TASKS.md](NEXT_TASKS.md): prioritized concrete restart point.
 - [RESPAWN_VALIDATION.md](RESPAWN_VALIDATION.md): repeated combat, hidden queries, lifecycle synchronization and preserved data.
 - [REVIVAL_VALIDATION.md](REVIVAL_VALIDATION.md): player death, automatic revival, observer rendering/position, Lua transitions and preserved data.
+- [VISIBILITY_VALIDATION.md](VISIBILITY_VALIDATION.md): moving snapshots, unfinished routes, range transitions, hidden queries and preserved data.
 
 Keep `docs/re/` as the detailed existing evidence record. Newly retained REA files under `client-data/proto-re/` are ignored and local, with their incomplete Ghidra coverage explicitly recorded.

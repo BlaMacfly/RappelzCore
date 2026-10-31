@@ -71,6 +71,8 @@ The [respawn regression](RESPAWN_VALIDATION.md) additionally verifies ordered mo
 
 The [player revival regression](REVIVAL_VALIDATION.md) verifies lethal attack/HPMP 0 followed by full HPMP and owner WARP. Teleport now recalculates visibility immediately and refreshes continuing observers with current ENTER/wear data, while former/new viewers receive LEAVE/ENTER. The native observer waits beyond the corpse timeout before QUERY so that a manual refresh cannot mask stale rendering or position.
 
+The [movement/visibility regression](VISIBILITY_VALIDATION.md) verifies that a moving player's snapshot is followed by a current-clock MOVE containing only unfinished waypoints. Player QUERY/new visibility and monster snapshots share this projection; completed/stationary routes emit no MOVE. The native pair verifies default-speed, layer-0 entry/arrival and bilateral range removal without using QUERY to repair the observer's motion.
+
 Existing protocol tests cover cipher vectors, framing/dummy packets, fixed strings, observed packet lengths, message round trips, entity IDs and RSA/AES round trips. Their latest executed results are recorded in [DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md). A round trip between two Rust endpoints can share the same mistake; retain independent binary offsets/vectors and add captured fixtures when available.
 
 Historical `client-data/bot1.log` and `bot2.log` show simultaneous local login, world entry, nearby NPC/player visibility, movement, chat and clean disconnect. They are useful restart evidence, not a fresh test run or coverage of all gameplay. Further work includes original-client interoperability evidence, explicit protocol-profile fixtures, parser robustness checks and verification of inferred gameplay fields.
