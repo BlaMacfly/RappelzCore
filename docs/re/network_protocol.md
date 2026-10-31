@@ -478,7 +478,7 @@ ci-dessous (i32 utilisés tels quels, i16 via `(short)`) ; getter FUN_00940db0 :
 | Offset | Type | Champ | Offset | Type | Champ |
 |---|---|---|---|---|---|
 | +0x07 | u32 | handle | +0x3d | i16 | avoid |
-| +0x0b | i16 | stat_id | +0x3f | i16 | magic_avoid |
+| +0x0b | i16 | opaque; ancien nom conventionnel stat_id [D] | +0x3f | i16 | magic_avoid |
 | +0x0d | i16 | strength | +0x41 | i16 | block_chance |
 | +0x0f | i16 | vital | +0x43 | i16 | move_speed |
 | +0x11 | i16 | dexterity | +0x45 | i16 | attack_speed |
@@ -495,13 +495,13 @@ ci-dessous (i32 utilisés tels quels, i16 via `(short)`) ; getter FUN_00940db0 :
 | **+0x2f** | **i32** | magic_point | +0x5b | i16 | magic_penetration |
 | **+0x33** | **i32** | magic_defence | +0x5d | i16 | physical_penetration |
 | +0x37 | i16 | accuracy_right | +0x5f..+0x6c | 14 o. | inconnus (7 × i16 ?) [?] — mettre 0 |
-| +0x39 | i16 | accuracy_left | **+0x6d** | **u8** | **type** (0 = total, 1 = bonus/équipement) [D] |
+| +0x39 | i16 | accuracy_left | **+0x6d** | **u8** | **type** (0 = copie principale, 1 = contribution séparée puis soustractions ; provenance équipement seule non établie) |
 | +0x3b | i16 | magic_accuracy | | | |
 
 Les six champs i32 (+0x1f..+0x36) sont confirmés par la largeur des lectures de l'IHM (`static_basic01_value` =
 attaque droite, `static_basic01_left_value` = attaque gauche, `basic03` = défense, `basic08` = magie,
 `basic10` = défense magique, `basic14` = block_defence) ; les i16 par les lectures `(short)`. Les noms suivent
-l'ordre rzemu / epic 9 ; l'ordre des 8 stats (+0x0b..+0x1a, 16 o. copiés en bloc) n'est pas vérifié individuellement.
+l'ordre rzemu / epic 9 pour ces noms historiques. Le suivi [des banques et de l’IHM](../SFRAME_STAT_BANKS_RE.md) corrobore désormais les sept attributs primaires par lectures signées16bits, permutation IHM et tooltips identiques archive/loose/DBC. Le premier mot+0x0b reste opaque dans les consommateurs examinés.
 
 ### 8.9 Adresses ajoutées
 | Adresse | Rôle |
@@ -649,3 +649,7 @@ Hits de TS_SC_SKILL (FIRE), taille de chaque entrée selon l'octet `type` en tê
 ## 10. Propriétés métier/historique et banques de statistiques, 31/10/2026
 
 La [nouvelle investigation native](../SFRAME_PROGRESSION_RE.md) conserve neuf dossiers REA6.4.0/Ghidra12.1.4, SHA SFrame inchangé. Le parseur PROPERTY0xa29150 lit les deux dwords paquet+0x1c/+0x20 et construit une chaîne `%I64d` dans le message interne kind0x36. Le récepteur joueur0x6cdd70 garde JP sur64bits ; job/JLV et les trois couples job_0/jlv_0…job_2/jlv_2 sont des affectations32bits indépendantes protégées par le handle joueur. Les offsets internes exacts et les Evidence IDs figurent dans le rapport : ce ne sont pas des offsets réseau.0x6afd90 transmet job/JLV aux deux couches de setters0x95cf80→0x941760 et0x95cfa0→0x941780. Le traitement STAT_INFO0x6d2b70 est vérifié séparément. `CHANGE_JOB` dans0x6f5360 appartient au traitement des groupes ; il ne prouve aucune promotion PNJ. Les resets, débits JP, chronologie d’historique et coefficients de bonus serveur restent inconnus.37 repères d’octets/chaînes du PE correspondent ; l’ancienne analyse du constructeur de table0xa1f9f0 est identifiée comme historique. Aucun SFrame exécuté ni protocole Rust modifié dans cette passe.
+
+## 11. Type0/type1 et affichage des statistiques, suivi du 01/11/2026
+
+[SFRAME_STAT_BANKS_RE.md](../SFRAME_STAT_BANKS_RE.md) conserve11 nouveaux dossiers REA/Ghidra liés au SHA original.0x7056e0 et0x7116d0 copient les deux blocs16+82octets : type0 vers A, type1 vers B puis soustraction de7words primaires,6dwords dérivés et27words dérivés dans A. Le premier word et les words dérivés+0x2e/+0x30 restent hors soustraction. Les autres types ne modifient pas ces banques.0x95db50 vérifie handle/type0/pointeur avant0x940f90.0x8a1dd0 appelle les slots+f0/+f4 pour type0 ; type1 ajoute+f8/+fc, pointant vers89b7e0/89d9b0/89a390/89c2c0. Les contrôles status01…07 suivent une permutation distincte de l’ordre mémoire Force,Vitalité,Dextérité,Agilité,Intelligence,Sagesse,Chance. L’ordre des messages, les sources/calculs serveur de contributions et le filtrage amont de l’IHM restent inconnus.54 repères PE et sept textes originaux/convertis concordent. Aucun nouveau comportement Rust ou serveur n’est ajouté.

@@ -31,7 +31,9 @@ See [version evidence and interpretation](docs/VERSIONS.md). The launcher, PE me
 
 **Latest follow-up:** the [C character sheet](docs/CHARACTER_STATS_VALIDATION.md) now shows own attack/defence/speed from actual server combat state, refreshed after XP level-up and reentry. Two real clients pass **35 checks**, including a wrong-stat old-server control and direct SQL reward checks. **196 Rust + 123 Python tests pass** (one Rust ignored, 24 Lua included). Existing data/settings and primary services are preserved. Verified job-bonus/promotion rules remain separate.
 
-A new [static SFrame decompilation pass](docs/SFRAME_PROGRESSION_RE.md) documents numeric PROPERTY width, independently received current/previous job state, stat snapshot dispatch and the party `CHANGE_JOB` false lead. Nine fresh REA/Ghidra function dossiers and37 original byte anchors are retained; server promotion policy and bonus coefficients remain unresolved. Original files, installed gameplay, services and data are preserved.
+The latest [stat-bank decompilation](docs/SFRAME_STAT_BANKS_RE.md) follows **11 original-client functions**: type 0 copies a stat bank; type 1 copies a separate contribution and subtracts selected fields, with order-sensitive behavior. Original UI/tooltips corroborate all seven primary attribute positions. **54 PE anchors**, seven archive/loose/DBC text comparisons and nine preservation checks pass. Versions above remain unchanged; original server bonus formulas remain unresolved.
+
+The previous [static SFrame decompilation pass](docs/SFRAME_PROGRESSION_RE.md) documents numeric PROPERTY width, independently received current/previous job state, stat snapshot dispatch and the party `CHANGE_JOB` false lead. Nine fresh REA/Ghidra function dossiers and37 original byte anchors are retained; server promotion policy and bonus coefficients remain unresolved. Original files, installed gameplay, services and data are preserved.
 
 Current continuation: a working **Lua 5.1 addon foundation**, native addon manager, XML subset and
 persistent RappelzDebug demonstration are included. See [development status](docs/DEVELOPMENT_STATUS.md)
