@@ -1,5 +1,7 @@
 # Ground detail and two-client GPU memory validation
 
+This records the earlier camera-culling/memory cycle. The latest [warm terrain motion validation](TERRAIN_STREAMING_VALIDATION.md) adds bounded CPU pixel reuse and measures rotations/movement; counts, hashes and timings below belong to the earlier cycle.
+
 Verified **2026-10-31** with two ordinary native x64 clients connected concurrently to the existing local authentication/world services. The server and original assets were retained. The optimized renderer preserves the detailed ground image while allocating fewer full-resolution textures.
 
 ## Earlier detail correction
@@ -48,7 +50,7 @@ The independent comparer passes **39/39 checks**: both clients complete all view
 
 A **18,907,725-byte** SQL backup precedes the run; SHA-256 `36c15f06980f2f1b79cb18cce1a9b7b247be7225b7c9afdf28cb7023ae7a5451`. Selected account/character records through **21**, items through **4**, all world INSERTs and installed WTF files compare unchanged: **9/9 preservation checks**. Both new fixtures return home with original stats/settings and save offline. No schema, world content, original texture, MPQ or normal/companion DBC is replaced. Database/auth/world services remain running.
 
-Current verification: **142 Rust tests passed, 0 failed, 1 ignored**, including 22 Lua integration tests; **38 Python tests passed**. Both separate branch workspaces are tested and built independently. The native-tested installed client SHA-256 is `c9313be7994f5e4c68dc2f820de3a1f815e1426e3f99553aaf6fd5b7201bf78a`.
+Verification for this earlier cycle: **142 Rust tests passed, 0 failed, 1 ignored**, including 22 Lua integration tests; **38 Python tests passed**. Both separate branch workspaces are tested and built independently. The native-tested client SHA-256 for this earlier cycle is `c9313be7994f5e4c68dc2f820de3a1f815e1426e3f99553aaf6fd5b7201bf78a`.
 
 Run each pair with fresh report directories, dedicated LUA*/Lua* test accounts, independent roots and a loopback server:
 

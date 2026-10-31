@@ -65,3 +65,5 @@ The normal RDB collector deliberately lets Resource loose files replace archive 
 The floor-quality correction changes runtime blending resolution/filtering, not packaged textures or DETAIL repeat distances. Matched native captures demonstrate128²→1024² ground detail and record the additional construction/storage cost in [TERRAIN_RENDERING_VALIDATION.md](TERRAIN_RENDERING_VALIDATION.md). No full archive repack/reimport was needed.
 
 The two-client terrain follow-up keeps the 1024² blend and original source data unchanged. Conservative camera bounds and per-frame texture eviction reduce the observed baked-texture peak from 252 to 84 MiB per client. All 12 ground captures match exactly; see [TERRAIN_RENDERING_VALIDATION.md](TERRAIN_RENDERING_VALIDATION.md) for separate Windows GPU accounting and warmup/hardware limits.
+
+[Warm terrain streaming](TERRAIN_STREAMING_VALIDATION.md) caches exact runtime RGBA images in bounded host memory. It retains original source assets, 1024² sampling and visible-only GPU texture lifetime; it introduces no resource-format or packaging change.
