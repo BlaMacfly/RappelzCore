@@ -15,6 +15,20 @@ par rétro-ingénierie (REA / Ghidra) du client **Rappelz NoLimits** (`Rappelz N
 Le lanceur indique 1.3.60 ; l'Epic et le patch exacts du binaire restent indéterminés
 (voir les [preuves relevées](docs/CLIENT_REVERSE_ENGINEERING.md)).
 
+## Versions et jeu ciblé
+
+| Composant | Version / cible |
+|---|---|
+| Notre client RappelzRust (Windows x64) | **0.1.0 — développement** |
+| Serveur RappelzCore | **0.1.0 — développement** |
+| Jeu d’origine | **Rappelz NoLimits**, client x86 personnalisé |
+| Lanceur / paquet d’origine | **1.3.60** |
+| Métadonnées fichier/produit de SFrame | **9.1.0.0** |
+| Lignée de compilation / protocole d’origine | **Source9.5.2** / **201507080** |
+| Epic / patch officiel exact du jeu | **Non établis** |
+
+Voir les [preuves et explications des versions](docs/VERSIONS.md). Les numéros du lanceur, du fichier PE et du dossier de compilation ont des sens distincts ; ils ne suffisent pas à identifier un patch officiel exact.
+
 **Dernier ajout :** la [fiche personnage C](docs/CHARACTER_STATS_VALIDATION.md) affiche attaque, défense et vitesse reçues du serveur, actualisées après un niveau gagné par EXP et une reconnexion. Deux clients réels passent **35 contrôles**, avec comparaison à l’ancien serveur et vérifications SQL des gains. **196 tests Rust + 123 Python réussissent** (un Rust ignoré, 24 Lua inclus). Données, réglages et services initiaux préservés. Les règles de bonus métier et de promotion restent à établir.
 
 Une nouvelle [passe de décompilation statique de SFrame](docs/SFRAME_PROGRESSION_RE.md) précise les propriétés numériques, le métier courant et ses historiques, la réception des statistiques et la fausse piste `CHANGE_JOB` des groupes. Neuf fonctions REA/Ghidra et37 repères d’octets sont conservés. Les règles serveur de promotion et les coefficients de bonus restent à établir ; fichiers d’origine, jeu installé, services et données sont préservés.
