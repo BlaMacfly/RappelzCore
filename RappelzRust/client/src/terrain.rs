@@ -16,6 +16,8 @@ use rz_texture::Rgba;
 use crate::assets::Assets;
 use crate::models::{self, ModelCache};
 
+mod audit;
+pub(crate) use audit::AuditHandle;
 mod bake;
 mod pixels;
 mod worker;
@@ -234,6 +236,7 @@ impl Terrain {
             images.insert(id, value);
         }
         bake::Input {
+            progress: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             map,
             ox,
             oy,
@@ -398,6 +401,10 @@ impl Terrain {
         self.validation_capture = Some(path);
     }
 
+    pub(crate) fn validation_audit(&self) -> Option<AuditHandle> {
+        self.worker.as_ref().map(|w| w.audit())
+    }
+
     pub(crate) fn cache_snapshot(&self) -> serde_json::Value {
         serde_json::json!({"bake_px":BAKE_PX,"bytes_per_chunk":BAKE_PX*BAKE_PX*4,
             "candidates":self.stats.candidates,"wanted":self.stats.wanted,"resident":self.chunks.len(),
@@ -411,6 +418,7 @@ impl Terrain {
             "cpu_pixel_bytes":self.pixels.bytes(),"cpu_pixel_limit":self.pixels.limit(),
             "async_enabled":self.async_enabled && self.worker.is_some(),"worker_error":self.worker_error,
             "job_active":self.worker.as_ref().is_some_and(|w|!w.idle()),
+            "active_job":self.worker.as_ref().map(|w|w.active_snapshot()),
             "submitted":self.stats.submitted,"completed":self.stats.completed,"cancelled":self.stats.cancelled,
             "last_submits":self.stats.last_submits,"last_completed_uploads":self.stats.last_completed_uploads,
             "worker_us":self.stats.worker_us})
@@ -462,11 +470,26 @@ impl Terrain {
                     && !self.chunks.contains_key(&result.key)
             }) {
                 self.stats.completed += 1;
+                if let Some(w) = &self.worker {
+                    w.audit().record(
+                        "cache_accept",
+                        result.id,
+                        result.key,
+                        1024,
+                        false,
+                        true,
+                        false,
+                    );
+                }
                 let image = self.pixels.insert(result.key, image);
                 if let Some(chunk) =
                     self.build_chunk(assets, result.key.0, result.key.1, Some(image))
                 {
                     self.chunks.insert(result.key, chunk);
+                    if let Some(w) = &self.worker {
+                        w.audit()
+                            .record("uploaded", result.id, result.key, 1024, false, true, false);
+                    }
                     self.stats.built += 1;
                 }
             } else {
@@ -499,7 +522,12 @@ impl Terrain {
                                 key.1.rem_euclid(per_map) as f32 * CHUNK,
                             );
                             let input = self.bake_input(assets, map, ox, oy);
-                            if self.worker.as_mut().unwrap().submit(key, input) {
+                            let progress = input.progress.clone();
+                            if self.worker.as_mut().unwrap().submit_tracked(
+                                key,
+                                input,
+                                Some(progress),
+                            ) {
                                 self.stats.submitted += 1;
                                 self.stats.last_submits += 1;
                             }

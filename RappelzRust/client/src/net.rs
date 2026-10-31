@@ -21,6 +21,8 @@ pub enum NetCmd {
     Move { x: f32, y: f32, points: Vec<msg::MovePoint> },
     Chat { chat_type: u8, target: String, message: String },
     ReturnLobby,
+    /// Close the current transport; the existing outer loop then accepts a fresh Login.
+    Disconnect,
     /// Message de gameplay déjà construit (rz_proto::msg_game).
     Raw(rz_proto::RawPacket),
 }
@@ -241,6 +243,7 @@ async fn game_loop(
                         w.send(&msg::CsChatRequest { target, request_id: 0, chat_type, message }).await?
                     }
                     NetCmd::ReturnLobby => w.send(&msg::Empty::<{ id::TS_CS_RETURN_LOBBY }>).await?,
+                    NetCmd::Disconnect => return Ok(()),
                     NetCmd::Raw(p) => w.send_raw(&p).await?,
                     NetCmd::Login { .. } | NetCmd::SelectServer(_) => {}
                 }

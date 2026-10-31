@@ -21,6 +21,7 @@ pub(super) mod visibility;
 
 #[derive(Default)]
 pub struct PacketTrace {
+    disconnects: Vec<String>,
     hits: Vec<Value>,
     hpmp: Vec<Value>,
     levels: Vec<Value>,
@@ -45,6 +46,7 @@ pub struct PacketTrace {
 impl PacketTrace {
     pub fn observe(&mut self, event: &NetEvent) {
         if self.hits.len()
+            + self.disconnects.len()
             + self.hpmp.len()
             + self.cast_events.len()+self.cast_results.len()
             + self.enters.len()
@@ -71,6 +73,7 @@ impl PacketTrace {
         self.order = self.order.saturating_add(1);
         let result: Result<()> = (|| {
             match event {
+                NetEvent::Disconnected(reason) => self.disconnects.push(reason.clone()),
                 NetEvent::Enter(e) => {
                     let (name, creature, kind) = match &e.kind {
                         EnterKind::Player(p) => (p.name.as_str(), &p.creature, "player"),
@@ -161,7 +164,7 @@ impl PacketTrace {
     }
 
     pub(super) fn json(&self) -> Value {
-        json!({"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
+        json!({"disconnects":self.disconnects,"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
             "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors,
             "logins":self.logins,"dialogs":self.dialogs,"denied_attacks":self.denied_attacks,"targets":self.targets,
             "party_states":self.party_states,"party_chats":self.party_chats,"skill_lists":self.skill_lists,"skill_catalogs":self.skill_catalogs,"learn_results":self.learn_results,"cast_events":self.cast_events,"cast_results":self.cast_results})
@@ -170,6 +173,15 @@ impl PacketTrace {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transport_disconnects_are_recorded_and_share_the_trace_capacity() {
+        let mut trace=PacketTrace::default();
+        for _ in 0..2050 {trace.observe(&NetEvent::Disconnected("closed".into()));}
+        assert_eq!(trace.disconnects.len(),2048);
+        assert_eq!(trace.errors,["combat trace capacity exceeded"]);
+        assert_eq!(trace.json()["disconnects"][0],"closed");
+    }
+
     use super::*;
 
     #[test]

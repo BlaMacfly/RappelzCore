@@ -4,12 +4,13 @@ use rz_terrain::NfmMap;
 use rz_texture::Rgba;
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
 
 pub(super) struct Input {
     pub map: Arc<NfmMap>,
+    pub progress: Arc<AtomicUsize>,
     pub ox: f32,
     pub oy: f32,
     pub images: HashMap<u16, Option<(Arc<Rgba>, f32)>>,
@@ -59,6 +60,7 @@ pub(super) fn run(input: Input, cancel: &AtomicBool) -> Option<Vec<u8>> {
             let o = (py * BAKE_PX + pxx) * 4;
             px[o..o + 4].copy_from_slice(&[c[0] as u8, c[1] as u8, c[2] as u8, 255]);
         }
+        input.progress.store(py + 1, Ordering::Relaxed);
     }
     Some(px)
 }
