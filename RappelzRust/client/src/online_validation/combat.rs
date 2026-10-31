@@ -25,9 +25,12 @@ pub struct PacketTrace {
     network_errors: Vec<String>,
     disconnects: Vec<String>,
     hits: Vec<Value>,
+    hit_orders: Vec<u64>,
     hpmp: Vec<Value>,
+    vitals_orders: Vec<u64>,
     levels: Vec<Value>,
     experience: Vec<Value>,
+    experience_orders: Vec<u64>,
     enters: Vec<Value>,
     leaves: Vec<u32>,
     lifecycle: Vec<Value>,
@@ -99,7 +102,7 @@ impl PacketTrace {
                         .push(json!({"event":"leave","handle":handle}));
                 }
                 NetEvent::Warp { x, y, z, layer } => self.warps.push(json!({"x":x,"y":y,"z":z,"layer":layer})),
-                NetEvent::LoginResult(l) => self.logins.push(json!({"handle":l.handle,"name":l.name,"layer":l.layer,"x":l.x,"y":l.y,"order":self.order})),
+                NetEvent::LoginResult(l) => self.logins.push(json!({"handle":l.handle,"name":l.name,"layer":l.layer,"x":l.x,"y":l.y,"hp":l.hp,"mp":l.mp,"max_hp":l.max_hp,"max_mp":l.max_mp,"order":self.order})),
                 NetEvent::Chat {sender,chat_type,message} if *chat_type==rz_proto::msg::chat_type::PARTY => {
                     self.party_chats.push(json!({"sender":sender,"message":message}));
                 }
@@ -140,11 +143,13 @@ impl PacketTrace {
                     id::TS_SC_ATTACK_EVENT => {
                         let packet = game::ScAttackEvent::from_packet(p)?;
                         for hit in &packet.attacks {
+                            self.hit_orders.push(self.order);
                             self.hits.push(json!({"attacker":packet.attacker,"target":packet.target,"damage":hit.damage,
                                 "target_hp":hit.target_hp,"target_mp":hit.target_mp,"attacker_hp":hit.attacker_hp,"attacker_mp":hit.attacker_mp}));
                         }
                     }
                     id::TS_SC_HPMP => {
+                        self.vitals_orders.push(self.order);
                         let h = game::ScHpMp::from_packet(p)?;
                         self.hpmp.push(json!({"handle":h.handle,"hp":h.hp,"max_hp":h.max_hp,"mp":h.mp,"max_mp":h.max_mp,"add_hp":h.add_hp}));
                     }
@@ -155,6 +160,7 @@ impl PacketTrace {
                         );
                     }
                     id::TS_SC_EXP_UPDATE => {
+                        self.experience_orders.push(self.order);
                         let e = game::ScExpUpdate::from_packet(p)?;
                         self.experience
                             .push(json!({"handle":e.handle,"xp":e.exp,"jp":e.jp}));
@@ -171,7 +177,7 @@ impl PacketTrace {
     }
 
     pub(super) fn json(&self) -> Value {
-        json!({"chats":self.chats,"network_errors":self.network_errors,"disconnects":self.disconnects,"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
+        json!({"order":self.order,"hit_orders":self.hit_orders,"vitals_orders":self.vitals_orders,"experience_orders":self.experience_orders,"chats":self.chats,"network_errors":self.network_errors,"disconnects":self.disconnects,"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
             "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors,
             "logins":self.logins,"dialogs":self.dialogs,"denied_attacks":self.denied_attacks,"targets":self.targets,
             "party_states":self.party_states,"party_chats":self.party_chats,"skill_lists":self.skill_lists,"skill_catalogs":self.skill_catalogs,"learn_results":self.learn_results,"cast_events":self.cast_events,"cast_results":self.cast_results})
@@ -180,6 +186,16 @@ impl PacketTrace {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn combat_vitals_and_reward_orders_remain_aligned_across_login_epochs() {
+        let mut trace=PacketTrace::default();
+        trace.observe(&NetEvent::LoginResult(rz_proto::msg::ScLoginResult{handle:1,hp:83,mp:50,..Default::default()}));
+        trace.observe(&NetEvent::Packet(game::ScAttackEvent{attacker:1,target:2,attacks:vec![game::AttackInfo{damage:4,target_hp:96,..Default::default()}],..Default::default()}.to_packet()));
+        trace.observe(&NetEvent::Packet(game::ScHpMp{handle:1,hp:83,max_hp:100,mp:50,max_mp:50,add_hp:0,add_mp:0,need_to_display:false}.to_packet()));
+        trace.observe(&NetEvent::Packet(game::ScExpUpdate{handle:1,exp:5,jp:3}.to_packet()));
+        assert_eq!(trace.hit_orders.len(),trace.hits.len());assert_eq!(trace.vitals_orders.len(),trace.hpmp.len());assert_eq!(trace.experience_orders.len(),trace.experience.len());
+        assert!(trace.hit_orders[0]<trace.vitals_orders[0] && trace.vitals_orders[0]<trace.experience_orders[0]);assert_eq!(trace.logins[0]["hp"],83);
+    }
     #[test]
     fn repeated_handles_after_server_restart_keep_distinct_login_order() {
         let mut trace=PacketTrace::default();

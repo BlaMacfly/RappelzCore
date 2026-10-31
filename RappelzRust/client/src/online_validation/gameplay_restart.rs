@@ -1,0 +1,650 @@
+//! Real movement/combat, durable checkpoints, owned server death and recovery.
+use crate::{terrain::AuditHandle, App, NetCmd, Screen};
+use anyhow::{ensure, Context, Result};
+use rz_proto::{msg::MovePoint,Message};
+use serde_json::{json, Value};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+#[derive(Debug, PartialEq)]
+enum Stage {
+    Join,
+    CheckpointMove,
+    CheckpointWait,
+    Initial,
+    Active,
+    Down,
+    Reconnect,
+    Rejoin,
+    Quiet,
+    Recovered,
+    PostFight,
+    SaveLobby,
+    Lobby,
+    Durable,
+    Logout,
+    Done,
+}
+pub struct GameplayRestartValidation {
+    directory: PathBuf,
+    role: String,
+    peer: String,
+    character: String,
+    password: String,
+    stage: Stage,
+    started: Instant,
+    since: Instant,
+    own: u32,
+    peer_handle: u32,
+    monster: u32,
+    monster_hp: i32,
+    announced: bool,
+    boundary: u64,
+    audits: Vec<AuditHandle>,
+    steps: Vec<Value>,
+    samples: Vec<Value>,
+    events: BTreeMap<String, usize>,
+    failure: Option<String>,
+}
+impl GameplayRestartValidation {
+    pub fn new(plan: PathBuf, app: &App) -> Result<Self> {
+        super::guard(app)?;
+        let (_, port) = crate::config::realmlist(&app.root, &app.config.get("locale", "frFR"));
+        ensure!(
+            port != 4615 && crate::arg_value("-validate-world-proxy").is_none(),
+            "separate auth and direct world sockets required"
+        );
+        let p: Value = serde_json::from_slice(&std::fs::read(plan)?)?;
+        let role = p["role"].as_str().context("role")?.to_owned();
+        ensure!(role == "owner" || role == "witness", "role");
+        let peer = p["peer"].as_str().context("peer")?.to_owned();
+        ensure!(peer.starts_with("Lua"), "dedicated peer");
+        let directory = PathBuf::from(p["directory"].as_str().context("directory")?);
+        ensure!(
+            directory.is_dir() && !directory.join(format!("{role}.json")).exists(),
+            "fresh report"
+        );
+        let login = crate::arg_value("-login").context("login")?;
+        let (account, password) = login.split_once(':').context("login format")?;
+        ensure!(account == app.account, "login mismatch");
+        Ok(Self {
+            directory,
+            role,
+            peer,
+            character: app.auto_enter.clone().context("character")?,
+            password: password.to_owned(),
+            stage: Stage::Join,
+            started: Instant::now(),
+            since: Instant::now(),
+            own: 0,
+            peer_handle: 0,
+            monster: 0,
+            monster_hp: 0,
+            announced: false,
+            boundary: 0,
+            audits: Vec::new(),
+            steps: Vec::new(),
+            samples: Vec::new(),
+            events: BTreeMap::new(),
+            failure: None,
+        })
+    }
+    pub(super) fn before_draw(&self, app: &mut App) {
+        if let Some(w) = &mut app.world {
+            w.terrain_validation_policy(false, true, true);
+        }
+    }
+    fn other(&self) -> &str {
+        if self.role == "owner" {
+            "witness"
+        } else {
+            "owner"
+        }
+    }
+    fn checkpoint(role: &str) -> [f32; 2] {
+        [8452., if role == "owner" { 7235. } else { 7255. }]
+    }
+    fn final_position(role: &str) -> [f32; 2] {
+        let mut p = Self::checkpoint(role);
+        if role == "witness" {
+            p[0] += 16.;
+        }
+        p
+    }
+    fn ready(&self, name: &str) -> bool {
+        self.directory.join(name).exists()
+    }
+    fn read(&self, name: &str) -> Option<Value> {
+        serde_json::from_slice(&std::fs::read(self.directory.join(name)).ok()?).ok()
+    }
+    fn write(&self, name: &str, value: Value) -> Result<()> {
+        std::fs::write(
+            self.directory.join(name),
+            serde_json::to_vec_pretty(&value)?,
+        )?;
+        Ok(())
+    }
+    fn trace(&self, app: &App) -> Value {
+        app.combat_trace.as_ref().unwrap().json()
+    }
+    fn advance(&mut self, stage: Stage) {
+        self.stage = stage;
+        self.since = Instant::now();
+        self.announced = false;
+    }
+    fn current_hits(&self, app: &App) -> Vec<Value> {
+        let t = self.trace(app);
+        let first = t["logins"]
+            .as_array()
+            .unwrap()
+            .last()
+            .and_then(|v| v["order"].as_u64())
+            .unwrap_or(0);
+        t["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(t["hit_orders"].as_array().unwrap())
+            .filter(|(_, o)| o.as_u64().unwrap_or(0) > first)
+            .map(|(h, _)| h.clone())
+            .collect()
+    }
+    fn current_moves(&self, app: &App) -> Vec<Value> {
+        let t = self.trace(app);
+        let first = t["logins"]
+            .as_array()
+            .unwrap()
+            .last()
+            .and_then(|v| v["order"].as_u64())
+            .unwrap_or(0);
+        t["moves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| {
+                v["order"].as_u64().unwrap_or(0) > first
+                    && (v["handle"] == self.own || v["handle"] == self.peer_handle)
+            })
+            .cloned()
+            .collect()
+    }
+    fn record(&mut self, app: &App, label: &str) {
+        let w = app.world.as_ref();
+        let s = w.map(|w| w.addon_state()).unwrap_or_default();
+        self.steps.push(json!({"stage":label,"elapsed_ms":self.started.elapsed().as_millis(),"stage_ms":self.since.elapsed().as_millis(),"own":self.own,"peer_handle":self.peer_handle,"monster":self.monster,"boundary":self.boundary,
+            "player":s.player.as_ref().map(|p|json!({"handle":p.handle,"name":p.name,"level":p.level,"hp":p.health,"mp":p.mana})),"position":w.and_then(|w|w.unit_position(self.own)),
+            "motion":w.and_then(|w|w.validation_motion(self.own)),"peer_motion":w.and_then(|w|w.validation_motion(self.peer_handle)),"target":s.target.map(|p|json!({"handle":p.handle,"hp":p.health})),
+            "monster_hp":w.and_then(|w|w.unit(self.monster)).and_then(|p|p.health),"xp_jp":w.map(|w|w.experience()),"money":s.money,"layer":w.map(|w|w.layer()),
+            "hits":self.current_hits(app),"moves":self.current_moves(app),"order":self.trace(app)["order"],"events":self.events,"audit_instance":self.audits.last().map(|a|a.instance()),"error":app.error}));
+    }
+    fn move_to(&self, app: &mut App, position: [f32; 2]) -> Result<()> {
+        let cmd = app
+            .world
+            .as_mut()
+            .context("world")?
+            .move_path(vec![MovePoint {
+                x: position[0],
+                y: position[1],
+            }])
+            .context("move")?;
+        app.send(cmd);
+        Ok(())
+    }
+    fn at(&self, app: &App, role: &str, pos: [f32; 2]) -> bool {
+        let h = if role == self.role {
+            self.own
+        } else {
+            self.peer_handle
+        };
+        app.world
+            .as_ref()
+            .and_then(|w| w.unit_position(h))
+            .is_some_and(|(x, y)| (x - pos[0]).abs() < 0.05 && (y - pos[1]).abs() < 0.05)
+    }
+    fn begin_attack(&mut self, app: &mut App) -> Result<()> {
+        let w = app.world.as_mut().context("world")?;
+        let m = w.living_monster().context("living monster")?;
+        self.monster = m.handle;
+        self.monster_hp = m.max_health.context("monster max HP")?;
+        ensure!(self.monster_hp == 105, "verified local monster required");
+        let select = w.select_target(self.monster).context("select")?;
+        let attack = w.attack_target(self.monster).context("attack")?;
+        app.send(select);
+        app.send(attack);
+        Ok(())
+    }
+    fn capture(&self, app: &mut App, label: &str) -> Result<bool> {
+        let path = self
+            .directory
+            .join(format!("{}-{label}.ground.png", self.role));
+        if !path.exists() {
+            app.world
+                .as_mut()
+                .context("world")?
+                .terrain_validation_capture(path);
+            return Ok(false);
+        }
+        macroquad::prelude::get_screen_data().export_png(
+            self.directory
+                .join(format!("{}-{label}.png", self.role))
+                .to_str()
+                .context("path")?,
+        );
+        Ok(true)
+    }
+    pub fn message(&mut self, m: &str) {
+        if let Some(e) = m
+            .strip_prefix("[RappelzDebug] EVENT ")
+            .and_then(|m| m.split_whitespace().next())
+        {
+            *self.events.entry(e.to_owned()).or_default() += 1;
+        }
+    }
+    pub fn tick(&mut self, app: &mut App) -> Result<bool> {
+        ensure!(
+            self.started.elapsed() < Duration::from_secs(220),
+            "gameplay restart timeout at {:?}",
+            self.stage
+        );
+        if let Some(c) = self.read("server-process.json") {
+            ensure!(c["success"] == true, "server controller failed");
+        }
+        ensure!(
+            app.addons.error.is_none() && app.addons.runtime.errors().is_empty(),
+            "addon errors"
+        );
+        if !matches!(self.stage, Stage::Active | Stage::Down) {
+            ensure!(app.error.is_none(), "unexpected error {:?}", app.error);
+        }
+        ensure!(
+            self.trace(app)["errors"].as_array().unwrap().is_empty(),
+            "trace decoding error"
+        );
+        if let Some(w) = &app.world {
+            if let Some(a) = w.terrain_validation_audit() {
+                if !self.audits.iter().any(|v| v.instance() == a.instance()) {
+                    ensure!(self.audits.len() < 3, "extra world");
+                    self.audits.push(a);
+                }
+            }
+            let c = w.terrain_cache_snapshot();
+            ensure!(c["worker_error"].is_null(), "worker error");
+            if !c.is_null() {
+                self.samples.push(c);
+                ensure!(self.samples.len() < 16000, "sample bound");
+            }
+        }
+        match self.stage {
+            Stage::Join => {
+                if app.loading.is_some() {
+                    return Ok(false);
+                }
+                let Some(w) = &app.world else {
+                    return Ok(false);
+                };
+                let Some(p) = w.addon_state().player else {
+                    return Ok(false);
+                };
+                let Some(peer) = w.visible_player(&self.peer) else {
+                    return Ok(false);
+                };
+                ensure!(
+                    p.level == Some(1)
+                        && p.health == Some(100)
+                        && p.mana == Some(50)
+                        && w.experience() == (0, 0),
+                    "fresh level-one fixtures required"
+                );
+                self.own = p.handle;
+                self.peer_handle = peer.handle;
+                app.auto_enter = None;
+                self.record(app, "Joined");
+                self.move_to(app, Self::checkpoint(&self.role))?;
+                self.advance(Stage::CheckpointMove);
+            }
+            Stage::CheckpointMove => {
+                if self.at(app, &self.role, Self::checkpoint(&self.role))
+                    && self.at(app, &self.peer_role(), Self::checkpoint(self.other()))
+                {
+                    self.record(app, "CheckpointArrived");
+                    self.write(
+                        &format!("{}.checkpoint-ready", self.role),
+                        json!({"position":Self::checkpoint(&self.role),"handle":self.own}),
+                    )?;
+                    self.advance(Stage::CheckpointWait);
+                }
+            }
+            Stage::CheckpointWait => {
+                if self.ready("checkpoint-verified") {
+                    self.advance(Stage::Initial);
+                }
+            }
+            Stage::Initial | Stage::Recovered => {
+                if !app
+                    .world
+                    .as_ref()
+                    .is_some_and(|w| w.terrain_cache_snapshot()["ready"] == true)
+                    || self.since.elapsed() < Duration::from_millis(300)
+                {
+                    return Ok(false);
+                }
+                let label = if self.stage == Stage::Initial {
+                    "initial"
+                } else {
+                    "recovered"
+                };
+                if !self.announced && self.capture(app, label)? {
+                    self.record(
+                        app,
+                        if label == "initial" {
+                            "CheckpointSaved"
+                        } else {
+                            "RecoveredQuiet"
+                        },
+                    );
+                    self.write(&format!("{}.{label}", self.role), json!({"ready":true}))?;
+                    self.announced = true;
+                }
+                if self.announced
+                    && self.ready(&format!("{}.{label}", self.other()))
+                    && self.ready(&format!("release-{label}"))
+                {
+                    if self.stage == Stage::Initial && self.ready("actions-release") {
+                        let [x, y] = Self::checkpoint(&self.role);
+                        let circuit = vec![
+                            MovePoint { x: x + 24., y },
+                            MovePoint {
+                                x: x + 24.,
+                                y: y + 24.,
+                            },
+                            MovePoint { x, y: y + 24. },
+                            MovePoint { x, y },
+                        ];
+                        let route=circuit.iter().cloned().cycle().take(16).collect();
+                        let cmd = app
+                            .world
+                            .as_mut()
+                            .unwrap()
+                            .move_path(route)
+                            .context("active route")?;
+                        app.send(cmd);
+                        self.begin_attack(app)?;
+                        self.record(app, "ActionsStarted");
+                        self.advance(Stage::Active);
+                    } else if self.stage == Stage::Recovered {
+                        self.boundary = self.trace(app)["order"].as_u64().unwrap();
+                        self.record(app, "PostActionsStarted");
+                        if self.role == "owner" {
+                            self.begin_attack(app)?;
+                        } else {
+                            self.move_to(app, Self::final_position(&self.role))?;
+                            self.begin_attack(app)?;
+                        }
+                        self.advance(Stage::PostFight);
+                    }
+                }
+            }
+            Stage::Active => {
+                if self.ready("server-killed.json") {
+                    self.record(app, "ServerKilled");
+                    self.advance(Stage::Down);
+                } else if let Some(w) = &app.world {
+                    let hits = self.current_hits(app);
+                    let own_hits = hits
+                        .iter()
+                        .filter(|h| h["attacker"] == self.own && h["target"] == self.monster)
+                        .count();
+                    let peer_hits = hits
+                        .iter()
+                        .filter(|h| {
+                            h["attacker"] == self.peer_handle && h["target"] == self.monster
+                        })
+                        .count();
+                    let retaliations = hits
+                        .iter()
+                        .filter(|h| {
+                            h["attacker"] == self.monster
+                                && (h["target"] == self.own || h["target"] == self.peer_handle)
+                        })
+                        .count();
+                    let pos = w.unit_position(self.own).context("position")?;
+                    let cp = Self::checkpoint(&self.role);
+                    let state = w.addon_state();
+                    let monster = w.unit(self.monster).context("monster")?;
+                    let moving = w.validation_motion(self.own).unwrap()["moving"].clone();
+                    let peer_moving =
+                        w.validation_motion(self.peer_handle).unwrap()["moving"].clone();
+                    self.write(&format!("{}.activity.json",self.role),json!({"role":self.role,"unix_ms":SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis(),"instance":self.audits[0].instance(),"own":self.own,"peer":self.peer_handle,"monster":self.monster,
+                        "moving":moving,"peer_moving":peer_moving,"position":pos,"checkpoint":cp,"distance_from_checkpoint":((pos.0-cp[0]).powi(2)+(pos.1-cp[1]).powi(2)).sqrt(),
+                        "own_hits":own_hits,"peer_hits":peer_hits,"retaliations":retaliations,"route_acks":self.current_moves(app).iter().filter(|m|m["handle"]==self.own).count(),"own_hp":state.player.unwrap().health,"monster_hp":monster.health,"monster_max_hp":monster.max_health}))?;
+                }
+            }
+            Stage::Down => {
+                if app.world.is_none() {
+                    ensure!(
+                        matches!(app.screen, Screen::Login)
+                            && self.events.get("PLAYER_LOGOUT") == Some(&1),
+                        "missing crash logout"
+                    );
+                    ensure!(
+                        self.audits[0].snapshot()["events"]
+                            .as_array()
+                            .unwrap()
+                            .last()
+                            .is_some_and(|e| e["event"] == "joined"),
+                        "old worker alive"
+                    );
+                    self.record(app, "WorldDropped");
+                    app.error = None;
+                    self.write(&format!("{}.dropped", self.role), json!({"joined":true}))?;
+                    self.advance(Stage::Reconnect);
+                }
+            }
+            Stage::Reconnect => {
+                ensure!(app.world.is_none(), "phantom world");
+                if self.ready("clients-reconnect") && self.ready("server-up-1.json") {
+                    self.record(app, "DowntimeHeld");
+                    let (host, port) =
+                        crate::config::realmlist(&app.root, &app.config.get("locale", "frFR"));
+                    app.auto_enter = Some(self.character.clone());
+                    app.send(NetCmd::Login {
+                        host,
+                        port,
+                        account: app.account.clone(),
+                        password: self.password.clone(),
+                    });
+                    self.advance(Stage::Rejoin);
+                }
+            }
+            Stage::Rejoin => {
+                if app.loading.is_some() {
+                    return Ok(false);
+                }
+                let Some(w) = &app.world else {
+                    return Ok(false);
+                };
+                let Some(p) = w.addon_state().player else {
+                    return Ok(false);
+                };
+                let Some(peer) = w.visible_player(&self.peer) else {
+                    return Ok(false);
+                };
+                self.own = p.handle;
+                self.peer_handle = peer.handle;
+                self.monster = w.living_monster().context("fresh monster")?.handle;
+                app.auto_enter = None;
+                ensure!(
+                    self.audits.len() == 2
+                        && self.audits[0].instance() != self.audits[1].instance(),
+                    "stale world"
+                );
+                ensure!(
+                    self.at(app, &self.role, Self::checkpoint(&self.role))
+                        && self.at(app, self.other(), Self::checkpoint(self.other()))
+                        && p.health == Some(100)
+                        && w.experience() == (0, 0),
+                    "last durable checkpoint not restored"
+                );
+                self.record(app, "CheckpointRestored");
+                self.write(
+                    &format!("{}.reentered", self.role),
+                    json!({"handle":self.own}),
+                )?;
+                self.advance(Stage::Quiet);
+            }
+            Stage::Quiet => {
+                let w = app.world.as_ref().context("world")?;
+                ensure!(
+                    self.current_hits(app).is_empty() && self.current_moves(app).is_empty(),
+                    "old movement or attack replayed after reboot"
+                );
+                ensure!(
+                    w.validation_motion(self.own).unwrap()["moving"] == false
+                        && w.addon_state().target.is_none()
+                        && w.unit(self.monster).and_then(|m| m.health) == Some(105),
+                    "stale transient state"
+                );
+                if self.since.elapsed() >= Duration::from_millis(3200)
+                    && self.ready(&format!("{}.reentered", self.other()))
+                {
+                    self.record(app, "NoReplay");
+                    self.advance(Stage::Recovered);
+                }
+            }
+            Stage::PostFight => {
+                if self.role=="witness" && !self.announced && self.current_hits(app).iter().filter(|h|h["attacker"]==self.own && h["target"]==self.monster).count()>=3 {
+                    app.send(NetCmd::Raw(rz_proto::msg_game::CsCancelAction{0:self.own}.to_packet()));
+                    self.record(app,"AssistStopped");self.announced=true;
+                }
+                let w = app.world.as_ref().context("world")?;
+                let hits = self.current_hits(app);
+                let owner = if self.role == "owner" {
+                    self.own
+                } else {
+                    self.peer_handle
+                };
+                if !hits.iter().any(|h| {
+                    h["attacker"] == owner && h["target"] == self.monster && h["target_hp"] == 0
+                }) {
+                    return Ok(false);
+                }
+                if self.role == "owner" {
+                    if w.experience() != (5, 3) {
+                        return Ok(false);
+                    }
+                    self.write("owner.rewarded", json!({"xp":5,"jp":3}))?;
+                } else {
+                    ensure!(w.experience() == (0, 0), "private reward leaked");
+                }
+                if !self.at(app, &self.role, Self::final_position(&self.role))
+                    || !self.at(app, self.other(), Self::final_position(self.other()))
+                    || !self.ready("owner.rewarded")
+                {
+                    return Ok(false);
+                }
+                self.record(app, "CombatRecovered");
+                self.write(
+                    &format!("{}.finish-ready", self.role),
+                    json!({"ready":true}),
+                )?;
+                self.advance(Stage::SaveLobby);
+            }
+            Stage::SaveLobby => {
+                if self.ready(&format!("{}.finish-ready", self.other())) {
+                    self.record(app, "BeforeDurableSave");
+                    app.send(NetCmd::ReturnLobby);
+                    self.advance(Stage::Lobby);
+                }
+            }
+            Stage::Lobby => {
+                if app.world.is_none() && self.events.get("PLAYER_LOGOUT") == Some(&2) {
+                    if !self.announced {
+                        self.record(app, "SavedLobby");
+                        self.write(&format!("{}.saved-lobby", self.role), json!({"saved":true}))?;
+                        self.announced = true;
+                    }
+                    if self.ready("saved-lobby-verified") {
+                        app.send(NetCmd::EnterWorld(self.character.clone()));
+                        self.advance(Stage::Durable);
+                    }
+                }
+            }
+            Stage::Durable => {
+                if app.loading.is_some() {
+                    return Ok(false);
+                }
+                let Some(w) = &app.world else {
+                    return Ok(false);
+                };
+                let Some(p) = w.addon_state().player else {
+                    return Ok(false);
+                };
+                let Some(peer) = w.visible_player(&self.peer) else {
+                    return Ok(false);
+                };
+                self.own = p.handle;
+                self.peer_handle = peer.handle;
+                let expected = if self.role == "owner" { (5, 3) } else { (0, 0) };
+                if w.experience() != expected {
+                    return Ok(false);
+                }
+                let saved = self.read("saved-lobby-verified").context("saved profile")?;
+                let t = self.trace(app);
+                let login = t["logins"].as_array().unwrap().last().unwrap();
+                ensure!(
+                    login["hp"] == saved[&self.role]["health"]
+                        && login["mp"] == saved[&self.role]["mp"],
+                    "saved vitals not loaded by actual login"
+                );
+                ensure!(
+                    self.at(app, &self.role, Self::final_position(&self.role))
+                        && self.at(app, self.other(), Self::final_position(self.other()))
+                        && self.current_hits(app).is_empty()
+                        && self.current_moves(app).is_empty()
+                        && w.addon_state().target.is_none(),
+                    "stale state after durable re-entry"
+                );
+                if !self.announced {
+                    self.record(app, "DurableReentry");
+                    self.write(&format!("{}.durable", self.role), json!({"verified":true}))?;
+                    self.announced = true;
+                }
+                if self.ready(&format!("{}.durable", self.other())) {
+                    app.send(NetCmd::ReturnLobby);
+                    self.advance(Stage::Logout);
+                }
+            }
+            Stage::Logout => {
+                if app.world.is_none() && self.events.get("PLAYER_LOGOUT") == Some(&3) {
+                    ensure!(
+                        self.audits.len() == 3
+                            && self.audits.iter().all(|a| a.snapshot()["events"]
+                                .as_array()
+                                .unwrap()
+                                .last()
+                                .is_some_and(|e| e["event"] == "joined")),
+                        "worker not joined"
+                    );
+                    self.advance(Stage::Done);
+                    return Ok(true);
+                }
+            }
+            Stage::Done => return Ok(true),
+        }
+        Ok(false)
+    }
+    fn peer_role(&self) -> String {
+        self.other().to_owned()
+    }
+    pub fn fail(&mut self, e: anyhow::Error) {
+        self.failure = Some(format!("{e:#}"));
+    }
+    pub fn finish(&self, app: &App) -> Result<bool> {
+        let success = self.stage == Stage::Done && self.failure.is_none();
+        self.write(&format!("{}.json",self.role),json!({"scenario":"gameplay-restart","success":success,"failure":self.failure,"role":self.role,"character":self.character,"steps":self.steps,"samples":self.samples,"events":self.events,"audits":self.audits.iter().map(|a|a.snapshot()).collect::<Vec<_>>(),"trace":self.trace(app)}))?;
+        Ok(success)
+    }
+}

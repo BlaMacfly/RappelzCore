@@ -5,9 +5,25 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch,MagicMock
-from terrain_server_restart import validate,candidates,server_environment,boot
+from terrain_server_restart import validate,candidates,gameplay_candidates,server_environment,boot
 
 class ServerRestartControlTests(unittest.TestCase):
+    def activity(self,root):
+        for role,own,peer,y in [('owner',1,2,7235),('witness',2,1,7255)]:
+            value=dict(role=role,own=own,peer=peer,unix_ms=1000,moving=True,peer_moving=True,route_acks=2,own_hits=1,peer_hits=1,retaliations=1,
+                monster=536870912,monster_hp=80,monster_max_hp=105,own_hp=82,instance=1,distance_from_checkpoint=10,position=[8462,y],checkpoint=[8452,y])
+            (root/(role+'.activity.json')).write_text(json.dumps(value),encoding='utf-8')
+    def test_live_gameplay_candidates_require_both_real_moving_combatants(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);self.activity(root);self.assertEqual(set(gameplay_candidates(root,1032)),{'owner','witness'})
+    def test_stale_stationary_unacknowledged_or_dead_combat_is_rejected(self):
+        for key,value in [('unix_ms',990),('moving',False),('peer_moving',False),('route_acks',0),('own_hits',0),('peer_hits',0),('retaliations',0),('monster_hp',0),('own_hp',0),('distance_from_checkpoint',0),('peer',999)]:
+            with self.subTest(key=key),tempfile.TemporaryDirectory() as temp:
+                root=Path(temp);self.activity(root);p=root/'owner.activity.json';v=json.loads(p.read_text());v[key]=value;p.write_text(json.dumps(v),encoding='utf-8');self.assertIsNone(gameplay_candidates(root,1032))
+    def test_unknown_scenario_cannot_fall_back_to_a_kill_strategy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            p=self.plan(Path(temp));p['scenario']='unknown'
+            with self.assertRaises(ValueError):validate(p)
     def plan(self,root):
         workspace=root/'terrain-restart-deadbeef';workspace.mkdir();directory=workspace/'attempt';directory.mkdir()
         exe=workspace/'worldserver.exe';exe.write_bytes(b'unit-test executable placeholder')

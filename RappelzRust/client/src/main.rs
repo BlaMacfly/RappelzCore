@@ -152,8 +152,8 @@ async fn main() {
     let sfx_volume = config.get("Sound_SFXVolume", "0.7").parse().unwrap_or(0.7);
     let rzui = assets.as_mut().map(|a| rzui::RzUi::new(a, font.clone()));
     let mut app = App {
-        validation_input_locked:arg_value("-validate-corpse-skill").is_some() || arg_value("-validate-terrain").is_some() || arg_value("-validate-terrain-cancel").is_some() || arg_value("-validate-terrain-warp").is_some() || arg_value("-validate-terrain-network").is_some() || arg_value("-validate-terrain-restart").is_some(),
-        combat_trace: ["-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting","-validate-corpse-skill","-validate-terrain","-validate-terrain-cancel","-validate-terrain-warp","-validate-terrain-network","-validate-terrain-restart"].iter().any(|flag|arg_value(flag).is_some()).then(Default::default),
+        validation_input_locked:arg_value("-validate-corpse-skill").is_some() || arg_value("-validate-terrain").is_some() || arg_value("-validate-terrain-cancel").is_some() || arg_value("-validate-terrain-warp").is_some() || arg_value("-validate-terrain-network").is_some() || arg_value("-validate-terrain-restart").is_some() || arg_value("-validate-gameplay-restart").is_some(),
+        combat_trace: ["-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting","-validate-corpse-skill","-validate-terrain","-validate-terrain-cancel","-validate-terrain-warp","-validate-terrain-network","-validate-terrain-restart","-validate-gameplay-restart"].iter().any(|flag|arg_value(flag).is_some()).then(Default::default),
         addons: addons::Addons::new(&root),
         addon_realm: "offline".into(),
         rzui,
@@ -199,7 +199,7 @@ async fn main() {
         app.send(NetCmd::Login { host, port, account: account.to_string(), password: password.to_string() });
     }
     let screenshot = arg_value("-screenshot");
-    let validation_flags: Vec<_> = ["-validate-addons","-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting","-validate-corpse-skill","-validate-terrain","-validate-terrain-cancel","-validate-terrain-warp","-validate-terrain-network","-validate-terrain-restart"]
+    let validation_flags: Vec<_> = ["-validate-addons","-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting","-validate-corpse-skill","-validate-terrain","-validate-terrain-cancel","-validate-terrain-warp","-validate-terrain-network","-validate-terrain-restart","-validate-gameplay-restart"]
         .into_iter().filter_map(|flag|arg_value(flag).map(|path|(flag,path))).collect();
     let validation_args = match validation_flags.as_slice() {
         [] => None,
@@ -220,6 +220,7 @@ async fn main() {
                 "-validate-terrain-warp"=>online_validation::OnlineValidation::terrain_warp(plan,&app),
                 "-validate-terrain-network"=>online_validation::OnlineValidation::terrain_network(plan,&app),
                 "-validate-terrain-restart"=>online_validation::OnlineValidation::terrain_restart(plan,&app),
+                "-validate-gameplay-restart"=>online_validation::OnlineValidation::gameplay_restart(plan,&app),
                 _=>unreachable!("validation flag comes from the fixed list"),
             })
         }

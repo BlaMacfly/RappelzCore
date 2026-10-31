@@ -33,6 +33,13 @@ mod addon_vitals_tests {
     use super::*;
 
     #[test]
+    fn loop_routes_remain_moving_until_the_whole_path_is_consumed() {
+        let route=Motion{x:0.0,y:0.0,start:0.0,speed:10.0,points:vec![MovePoint{x:10.0,y:0.0},MovePoint{x:0.0,y:0.0},MovePoint{x:10.0,y:0.0},MovePoint{x:0.0,y:0.0}]};
+        assert!(route.is_moving(0.0));assert!(route.is_moving(2.0));assert!(route.is_moving(3.5));
+        assert!(!route.is_moving(4.0));assert!(!Motion{speed:0.0,..route.clone()}.is_moving(1.0));
+    }
+
+    #[test]
     fn known_entity_vitals_reach_addon_target_and_preserve_zero_mana() {
         let mut entity = Entity::new("Peer".into(), Kind::Player, 0.0, 0.0, 2, None);
         assert_eq!((entity.unit(7).health, entity.unit(7).mana), (None, None));
@@ -172,10 +179,13 @@ impl Motion {
     }
 
     fn is_moving(&self, now: f64) -> bool {
-        self.points.last().is_some_and(|last| {
-            let (x, y) = self.position(now);
-            (last.x - x).abs() > 0.5 || (last.y - y).abs() > 0.5
-        })
+        if self.speed <= 0.0 { return false; }
+        let (mut x,mut y)=(self.x,self.y);
+        let length:f32=self.points.iter().map(|p|{
+            let distance=((p.x-x).powi(2)+(p.y-y).powi(2)).sqrt();(x,y)=(p.x,p.y);distance
+        }).sum();
+        // A loop can visit its final coordinate before the route is exhausted.
+        self.speed*(now-self.start).max(0.0) as f32+0.5 < length
     }
 
     /// Direction du déplacement en cours (pour l'orientation du modèle).
@@ -483,6 +493,12 @@ impl WorldState {
     pub fn unit_position(&self, handle: u32) -> Option<(f32, f32)> {
         let entity = if handle == self.handle { Some(&self.me) } else { self.entities.get(&handle) }?;
         Some(entity.motion.position(self.now()))
+    }
+
+    pub(crate) fn validation_motion(&self,handle:u32)->Option<serde_json::Value>{
+        let e=if handle==self.handle{&self.me}else{self.entities.get(&handle)?};
+        Some(serde_json::json!({"position":e.motion.position(self.now()),"moving":e.motion.is_moving(self.now()),
+            "goal":e.motion.points.last().map(|p|[p.x,p.y]),"selected_target":if handle==self.handle{self.target}else{None}}))
     }
 
     /// Same corpse-visibility predicate used by the actual creature render loop.
