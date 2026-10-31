@@ -192,6 +192,92 @@ fn unknown_target_vitals_do_not_emit_fabricated_health_or_mana_changes() {
 }
 
 #[test]
+fn debug_addon_observes_death_and_revival_once_even_in_one_frame() {
+    let dir = tempfile::tempdir().unwrap();
+    debug_addon(dir.path());
+    let mut rt = AddonRuntime::new(dir.path());
+    rt.load().unwrap();
+    let mut s = state();
+    s.player.as_mut().unwrap().health = Some(1);
+    rt.update_state(s.clone());
+    rt.drain_messages();
+    s.player.as_mut().unwrap().health = Some(0);
+    rt.update_state(s.clone());
+    rt.update_state(s.clone());
+    s.player.as_mut().unwrap().health = Some(1000);
+    rt.update_state(s.clone());
+    rt.update_state(s);
+    let messages = rt.drain_messages();
+    for (event, hp) in [("PLAYER_DEAD", 0), ("PLAYER_ALIVE", 1000)] {
+        let matching: Vec<_> = messages
+            .iter()
+            .filter(|m| m.contains(&format!("EVENT {event} ")))
+            .collect();
+        assert_eq!(matching.len(), 1, "{messages:?}");
+        assert!(
+            matching[0].contains(&format!("HP={hp}/1000")),
+            "{matching:?}"
+        );
+    }
+    let dead = messages
+        .iter()
+        .position(|m| m.contains("EVENT PLAYER_DEAD "))
+        .unwrap();
+    let alive = messages
+        .iter()
+        .position(|m| m.contains("EVENT PLAYER_ALIVE "))
+        .unwrap();
+    assert!(dead < alive);
+    assert!(rt.errors().is_empty());
+}
+
+#[test]
+fn death_events_ignore_unknown_health_new_players_targets_and_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    addon(
+        dir.path(),
+        "Life",
+        "",
+        r#"
+        local f = CreateFrame("Frame")
+        f:RegisterEvent("PLAYER_DEAD")
+        f:RegisterEvent("PLAYER_ALIVE")
+        f:SetScript("OnEvent", function(self, event) print(event) end)
+    "#,
+    );
+    let mut rt = AddonRuntime::new(dir.path());
+    rt.load().unwrap();
+    let mut s = state();
+    s.player.as_mut().unwrap().health = None;
+    rt.update_state(s.clone());
+    s.player.as_mut().unwrap().health = Some(0);
+    rt.update_state(s.clone());
+    s.player.as_mut().unwrap().handle = 8;
+    s.player.as_mut().unwrap().health = Some(100);
+    rt.update_state(s.clone());
+    s.target = Some(UnitState {
+        handle: 9,
+        health: Some(0),
+        ..Default::default()
+    });
+    rt.update_state(s.clone());
+    assert!(rt.drain_messages().is_empty());
+    s.player.as_mut().unwrap().health = Some(0);
+    rt.update_state(s);
+    assert_eq!(
+        rt.drain_messages()
+            .iter()
+            .filter(|m| m.contains("PLAYER_DEAD"))
+            .count(),
+        1
+    );
+    rt.reload().unwrap();
+    rt.update_state(GameState::default());
+    rt.update_state(state());
+    assert!(rt.drain_messages().is_empty());
+}
+
+#[test]
 fn failures_are_attributed_and_isolated_and_instruction_limit_cannot_be_swallowed() {
     let dir = tempfile::tempdir().unwrap();
     addon(

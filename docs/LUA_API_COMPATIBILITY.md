@@ -1,8 +1,8 @@
 # Lua API compatibility matrix
 
-Verified: 2026-10-30. `## Interface: 30300` preserves a familiar manifest convention; it does not promise automatic WoW addon compatibility. Lua 5.1 executes real scripts. Separate addon VMs deliberately do not share globals.
+Verified through 2026-10-31. `## Interface: 30300` preserves a familiar manifest convention; it does not promise automatic WoW addon compatibility. Lua 5.1 executes real scripts. Separate addon VMs deliberately do not share globals.
 
-All listed implemented lifecycle/state events were subsequently observed in the actual native/local-server session; see [LIVE_SERVER_VALIDATION.md](LIVE_SERVER_VALIDATION.md). Unknown `(nil, nil)` target vitals no longer generate fabricated health/mana changes. Missing level-change HP/MP server broadcasts were corrected for both GM and XP callers.
+Core lifecycle/state events were observed in the actual native/local-server session; see [LIVE_SERVER_VALIDATION.md](LIVE_SERVER_VALIDATION.md). Death/alive transitions and target HP 0→100 were subsequently verified with two native clients in [REVIVAL_VALIDATION.md](REVIVAL_VALIDATION.md). Unknown `(nil, nil)` target vitals do not generate fabricated health/mana changes. Missing level-change HP/MP server broadcasts were corrected for both GM and XP callers.
 
 ## Game APIs
 
@@ -26,6 +26,8 @@ All listed implemented lifecycle/state events were subsequently observed in the 
 | `PLAYER_LOGIN` | Transition into a player state; replayed after UI reload with an active player. |
 | `PLAYER_ENTERING_WORLD` | Follows login/active-world UI reload. |
 | `PLAYER_LOGOUT` | Player state removed or graceful client shutdown, with the last player state still readable. |
+| `PLAYER_DEAD` | Same player's known positive HP becomes nonpositive; no arguments; new state readable. Initial/unknown health and target changes do not trigger it. |
+| `PLAYER_ALIVE` | Same player's known nonpositive HP becomes positive; no arguments. Describes implemented automatic revival, not full WoW ghost semantics. Login/UI reload do not fabricate it. |
 | `UNIT_HEALTH` | Known health/max-health tuple changes; `"player"` or `"target"`. |
 | `UNIT_MANA` | Mana/max-mana tuple changes; unit token. |
 | `PLAYER_LEVEL_UP` | Known player level increases; new level. Initial level discovery is not a fabricated level-up. |

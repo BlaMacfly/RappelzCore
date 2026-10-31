@@ -30,6 +30,8 @@ function RappelzDebugOnLoad(self)
     self:RegisterEvent("PLAYER_LOGIN")
     self:RegisterEvent("PLAYER_ENTERING_WORLD")
     self:RegisterEvent("PLAYER_LOGOUT")
+    self:RegisterEvent("PLAYER_DEAD")
+    self:RegisterEvent("PLAYER_ALIVE")
     self:RegisterEvent("UNIT_HEALTH")
     self:RegisterEvent("UNIT_MANA")
     self:RegisterEvent("PLAYER_LEVEL_UP")
@@ -48,7 +50,9 @@ function RappelzDebugOnEvent(self, event, ...)
         name = UnitName("player"), level = UnitLevel("player"),
         hp = UnitHealth("player"), maxHP = UnitHealthMax("player"),
         mp = UnitMana("player"), maxMP = UnitManaMax("player"),
-        money = GetMoney(), target = UnitName("target")
+        money = GetMoney(), target = UnitName("target"),
+        targetHP = UnitHealth("target"), targetMaxHP = UnitHealthMax("target"),
+        targetMP = UnitMana("target"), targetMaxMP = UnitManaMax("target")
     }
     table.insert(RappelzDebugDB.recent, snapshot)
     if #RappelzDebugDB.recent > 32 then table.remove(RappelzDebugDB.recent, 1) end
@@ -56,7 +60,7 @@ function RappelzDebugOnEvent(self, event, ...)
     print("EVENT " .. event .. " " .. known(arg) ..
         " HP=" .. known(snapshot.hp) .. "/" .. known(snapshot.maxHP) ..
         " MP=" .. known(snapshot.mp) .. "/" .. known(snapshot.maxMP) ..
-        " money=" .. known(snapshot.money))
+        " money=" .. known(snapshot.money) .. " targetHP=" .. known(snapshot.targetHP))
     if event == "ADDON_LOADED" and select(1, ...) == "RappelzDebug" then
         RappelzDebugDB.loads = (RappelzDebugDB.loads or 0) + 1
         print("ADDON_LOADED; Lua " .. _VERSION)

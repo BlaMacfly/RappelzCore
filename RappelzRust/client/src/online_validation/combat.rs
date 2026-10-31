@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 
 use crate::{App, NetCmd, NetEvent};
 
+pub(super) mod revival;
+
 #[derive(Default)]
 pub struct PacketTrace {
     hits: Vec<Value>,
@@ -20,6 +22,7 @@ pub struct PacketTrace {
     enters: Vec<Value>,
     leaves: Vec<u32>,
     lifecycle: Vec<Value>,
+    warps: Vec<Value>,
     errors: Vec<String>,
 }
 
@@ -31,6 +34,7 @@ impl PacketTrace {
             + self.leaves.len()
             + self.levels.len()
             + self.experience.len()
+            + self.warps.len()
             + self.errors.len()
             >= 2048
         {
@@ -48,7 +52,8 @@ impl PacketTrace {
                         _ => return Ok(()),
                     };
                     self.enters.push(json!({"handle":e.handle,"name":name,"kind":kind,"level":creature.level,
-                        "hp":creature.hp,"max_hp":creature.max_hp,"mp":creature.mp,"max_mp":creature.max_mp}));
+                        "hp":creature.hp,"max_hp":creature.max_hp,"mp":creature.mp,"max_mp":creature.max_mp,
+                        "x":e.x,"y":e.y,"z":e.z,"layer":e.layer}));
                     self.lifecycle.push(json!({"event":"enter","handle":e.handle,"hp":creature.hp,"mp":creature.mp}));
                 }
                 NetEvent::Leave(handle) => {
@@ -56,6 +61,7 @@ impl PacketTrace {
                     self.lifecycle
                         .push(json!({"event":"leave","handle":handle}));
                 }
+                NetEvent::Warp { x, y, z } => self.warps.push(json!({"x":x,"y":y,"z":z})),
                 NetEvent::Packet(p) => match p.id {
                     id::TS_SC_ATTACK_EVENT => {
                         let packet = game::ScAttackEvent::from_packet(p)?;
@@ -92,7 +98,7 @@ impl PacketTrace {
 
     fn json(&self) -> Value {
         json!({"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
-            "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"errors":self.errors})
+            "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"errors":self.errors})
     }
 }
 
@@ -200,6 +206,14 @@ fn read(path: &Path) -> Option<Value> {
         .and_then(|text| serde_json::from_str(&text).ok())
 }
 
+fn mark(directory: &Path, name: &str, data: Value) -> Result<()> {
+    let path = directory.join(name);
+    let temporary = path.with_extension("tmp");
+    std::fs::write(&temporary, serde_json::to_vec_pretty(&data)?)?;
+    std::fs::rename(temporary, path)?;
+    Ok(())
+}
+
 impl CombatValidation {
     pub fn new(plan: PathBuf, app: &App) -> Result<Self> {
         super::guard(app)?;
@@ -254,11 +268,7 @@ impl CombatValidation {
         }
     }
     fn mark(&self, name: &str, data: Value) -> Result<()> {
-        let path = self.directory.join(name);
-        let temporary = path.with_extension("tmp");
-        std::fs::write(&temporary, serde_json::to_vec_pretty(&data)?)?;
-        std::fs::rename(temporary, path)?;
-        Ok(())
+        mark(&self.directory, name, data)
     }
     fn advance(&mut self, stage: Stage) {
         self.stage = stage;

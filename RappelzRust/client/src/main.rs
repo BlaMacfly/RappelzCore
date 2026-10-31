@@ -150,7 +150,7 @@ async fn main() {
     let sfx_volume = config.get("Sound_SFXVolume", "0.7").parse().unwrap_or(0.7);
     let rzui = assets.as_mut().map(|a| rzui::RzUi::new(a, font.clone()));
     let mut app = App {
-        combat_trace: arg_value("-validate-combat").is_some().then(Default::default),
+        combat_trace: (arg_value("-validate-combat").is_some() || arg_value("-validate-revival").is_some()).then(Default::default),
         addons: addons::Addons::new(&root),
         addon_realm: "offline".into(),
         rzui,
@@ -196,11 +196,12 @@ async fn main() {
         app.send(NetCmd::Login { host, port, account: account.to_string(), password: password.to_string() });
     }
     let screenshot = arg_value("-screenshot");
-    let validation_args = match (arg_value("-validate-addons"), arg_value("-validate-combat")) {
-        (Some(_), Some(_)) => { tracing::error!("Choose only one validation scenario"); std::process::exit(2) },
-        (Some(path), None) => Some(online_validation::OnlineValidation::new(PathBuf::from(path), &app)),
-        (None, Some(path)) => Some(online_validation::OnlineValidation::combat(PathBuf::from(path), &app)),
-        _ => None,
+    let validation_args = match (arg_value("-validate-addons"), arg_value("-validate-combat"), arg_value("-validate-revival")) {
+        (Some(path), None, None) => Some(online_validation::OnlineValidation::new(PathBuf::from(path), &app)),
+        (None, Some(path), None) => Some(online_validation::OnlineValidation::combat(PathBuf::from(path), &app)),
+        (None, None, Some(path)) => Some(online_validation::OnlineValidation::revival(PathBuf::from(path), &app)),
+        (None, None, None) => None,
+        _ => { tracing::error!("Choose only one validation scenario"); std::process::exit(2) },
     };
     let mut validation = validation_args.map(|result| {
         result

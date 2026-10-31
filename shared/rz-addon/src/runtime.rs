@@ -606,6 +606,18 @@ impl AddonRuntime {
             }
         }
         if let (Some(before), Some(after)) = (&old.player, &state.player) {
+            // Only a known transition of the same player is a death/revival.
+            if before.handle == after.handle {
+                match (before.health, after.health) {
+                    (Some(a), Some(b)) if a > 0 && b <= 0 => {
+                        self.dispatch(Event::new("PLAYER_DEAD", vec![]))
+                    }
+                    (Some(a), Some(b)) if a <= 0 && b > 0 => {
+                        self.dispatch(Event::new("PLAYER_ALIVE", vec![]))
+                    }
+                    _ => {}
+                }
+            }
             if let (Some(a), Some(b)) = (before.level, after.level) {
                 if b > a {
                     self.dispatch(Event::new(

@@ -37,6 +37,19 @@ mod addon_vitals_tests {
         entity.set_vitals(100, 120, 0, 0);
         assert_eq!((entity.unit(7).mana, entity.unit(7).max_mana), (Some(0), Some(0)));
     }
+
+    #[test]
+    fn revived_entity_remains_renderable_after_the_corpse_timeout() {
+        let mut entity = Entity::new("Peer".into(), Kind::Player, 0.0, 0.0, 1, None);
+        entity.apply_hpmp(0, 100, 1, 50, 1.0);
+        assert!(entity.renderable(2.0));
+        assert!(!entity.renderable(3.1));
+        entity.apply_hpmp(100, 100, 50, 50, 4.0);
+        assert!(entity.renderable(10.0), "revived player disappeared after corpse timeout");
+        assert_eq!(entity.dead_at, None);
+        entity.apply_hpmp(0, 100, 0, 50, 12.0);
+        assert_eq!(entity.dead_at, Some(12.0));
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -115,6 +128,15 @@ struct Entity {
 }
 
 impl Entity {
+    fn renderable(&self, now: f64) -> bool {
+        !self.dead_at.is_some_and(|d| now - d > 2.0)
+    }
+
+    fn apply_hpmp(&mut self, hp: i32, max_hp: i32, mp: i32, max_mp: i32, now: f64) {
+        self.set_vitals(hp, max_hp, mp, max_mp);
+        if hp > 0 { self.dead_at = None; }
+        else if self.dead_at.is_none() { self.dead_at = Some(now); }
+    }
     fn set_vitals(&mut self, hp: i32, max_hp: i32, mp: i32, max_mp: i32) {
         self.hp = hp;
         self.max_hp = max_hp.max(1);
@@ -297,6 +319,17 @@ impl WorldState {
 
     pub fn unit(&self, handle: u32) -> Option<rz_addon::UnitState> {
         self.entities.get(&handle).map(|entity| entity.unit(handle))
+    }
+
+    pub fn unit_position(&self, handle: u32) -> Option<(f32, f32)> {
+        let entity = if handle == self.handle { Some(&self.me) } else { self.entities.get(&handle) }?;
+        Some(entity.motion.position(self.now()))
+    }
+
+    /// Same corpse-visibility predicate used by the actual creature render loop.
+    pub fn unit_renderable(&self, handle: u32) -> Option<bool> {
+        if handle == self.handle { return Some(true); }
+        self.entities.get(&handle).map(|entity| entity.renderable(self.now()))
     }
 
     pub fn visible_player(&self, name: &str) -> Option<rz_addon::UnitState> {
@@ -497,10 +530,7 @@ impl WorldState {
                     if h.handle == self.handle {
                         (self.hp, self.max_hp, self.mp, self.max_mp) = (h.hp, h.max_hp.max(1), h.mp, h.max_mp.max(1));
                     } else if let Some(e) = self.entities.get_mut(&h.handle) {
-                        e.set_vitals(h.hp, h.max_hp, h.mp, h.max_mp);
-                        if h.hp <= 0 && e.dead_at.is_none() {
-                            e.dead_at = Some(now);
-                        }
+                        e.apply_hpmp(h.hp, h.max_hp, h.mp, h.max_mp, now);
                     }
                 }
             }
@@ -686,7 +716,7 @@ impl WorldState {
         let mut screen_labels: Vec<(u32, Vec3)> = Vec::new();
         for &(h, _) in &handles {
             let e = self.entities.get_mut(&h).unwrap();
-            if e.dead_at.is_some_and(|d| now - d > 2.0) {
+            if !e.renderable(now) {
                 continue;
             }
             let (x, y) = e.motion.position(now);
