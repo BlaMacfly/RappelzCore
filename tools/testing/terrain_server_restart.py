@@ -19,6 +19,7 @@ def config_values(path):
         if line.strip() and not line.lstrip().startswith(('#','[')) and '=' in line for k,v in [line.split('=',1)]}
 
 def validate(plan):
+    if plan.get('scenario','terrain') not in ('terrain','gameplay'):raise ValueError('unsupported restart scenario')
     workspace=Path(plan['workspace']).resolve();directory=Path(plan['directory']).resolve()
     match=re.search(r'terrain-restart-([a-f0-9]{8})$',workspace.name)
     if not match or not directory.is_relative_to(workspace):raise ValueError('dedicated restart workspace required')
@@ -43,6 +44,22 @@ def candidates(root,now_ms):
         if (value.get('role')!=role or not 0<=now_ms-value.get('unix_ms',0)<=8 or value.get('running') is not True
             or not 0<value.get('rows',0)<256 or value.get('id',0)<=0 or value.get('instance',0)<=0):return None
         found[role]=value
+    return found
+
+def gameplay_candidates(root,now_ms):
+    found={}
+    for role in ('owner','witness'):
+        try:v=json.loads((root/(role+'.activity.json')).read_text(encoding='utf-8'))
+        except (OSError,ValueError):return None
+        if not isinstance(v,dict):return None
+        if (v.get('role')!=role or not 0<=now_ms-v.get('unix_ms',0)<=32
+            or v.get('moving') is not True or v.get('peer_moving') is not True or v.get('route_acks',0)<1
+            or min(v.get('own_hits',0),v.get('peer_hits',0),v.get('retaliations',0))<1
+            or not 0<v.get('monster_hp',0)<v.get('monster_max_hp',0) or v.get('own_hp',0)<=0
+            or v.get('distance_from_checkpoint',0)<=3 or v.get('instance',0)<=0):return None
+        found[role]=v
+    a,b=found['owner'],found['witness']
+    if a.get('own')!=b.get('peer') or b.get('own')!=a.get('peer') or a.get('monster',0)<=0 or a.get('monster')!=b.get('monster'):return None
     return found
 
 def write(path,value):
@@ -82,14 +99,23 @@ def run(plan):
     if (root/'server-up-0.json').exists():raise ValueError('fresh attempt required')
     # Do not start on a port owned by any existing process.
     with socket.socket() as probe:probe.bind(('127.0.0.1',port))
-    proc=None;record=dict(success=False,boots=[],executable_sha256=plan['executable_sha256'])
+    scenario=plan.get('scenario','terrain')
+    proc=None;record=dict(success=False,boots=[],executable_sha256=plan['executable_sha256'],scenario=scenario)
     try:
         proc,info=boot(exe,cfg,root,port,0);record['boots'].append(info)
-        chosen=wait_until(lambda:candidates(root,time.time_ns()//1_000_000) if (root/'release-initial').exists() else None,90,'two fresh partial jobs not observed together')
+        if scenario=='gameplay':
+            wait_until(lambda:all((root/(r+'.checkpoint-ready')).exists() for r in ('owner','witness')),70,'movement checkpoint missing')
+            proc.stdin.write(b'saveall\n');proc.stdin.flush()
+            write(root/'checkpoint-requested.json',dict(pid=proc.pid,unix_ms=time.time_ns()//1_000_000,method='console saveall'))
+            wait_until(lambda:(root/'checkpoint-verified').exists() and (root/'release-initial').exists(),35,'durable movement checkpoint and initial capture not verified')
+            write(root/'actions-release',dict(ready=True))
+            chosen=wait_until(lambda:gameplay_candidates(root,time.time_ns()//1_000_000),15,'two moving combatants not observed together')
+        else:
+            chosen=wait_until(lambda:candidates(root,time.time_ns()//1_000_000) if (root/'release-initial').exists() else None,90,'two fresh partial jobs not observed together')
         # The Popen object owns the exact process handle. It cannot target the
         # user's running server even if a numeric PID is later reused.
         if proc.poll() is not None:raise RuntimeError('world already stopped')
-        killed=dict(pid=proc.pid,unix_ms=time.time_ns()//1_000_000,jobs=chosen,method='owned Popen.kill',graceful=False)
+        killed=dict(pid=proc.pid,unix_ms=time.time_ns()//1_000_000,**({'activity':chosen} if scenario=='gameplay' else {'jobs':chosen}),method='owned Popen.kill',graceful=False)
         proc.kill();killed['exit_code']=proc.wait(timeout=5);record['kill']=killed
         if killed['exit_code']==0:raise RuntimeError('force-killed process unexpectedly exited cleanly')
         write(root/'server-killed.json',killed)

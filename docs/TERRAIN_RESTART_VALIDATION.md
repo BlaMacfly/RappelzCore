@@ -1,5 +1,7 @@
 # Terrain recovery after forced worldserver termination and restart
 
+Historical terrain-only restart cycle. The later [movement/combat restart validation](GAMEPLAY_RESTART_VALIDATION.md) covers live moving combatants, verified durable checkpoints, no stale action replay and new rewards retained through normal save/re-entry. Counts, hashes and untested limits below belong to this earlier terrain cycle.
+
 Verified **2026-10-31** with two real Windows x64 clients and an actual RappelzCore worldserver process kill/restart. The test uses cloned data, a separate MariaDB instance at **127.0.0.1:3331**, isolated authentication at **24615** and a worldserver at **24514**. The existing database/auth/world processes at 3310/4615/4514 remain running and unchanged. This follows [stalled/reset TCP validation](TERRAIN_NETWORK_VALIDATION.md); no relay is used here.
 
 ## Server defects corrected
