@@ -487,6 +487,93 @@ fn party_unit_tokens_preserve_unknown_and_zero_and_reject_unsupported_indices() 
 }
 
 #[test]
+fn learned_skill_and_jp_events_follow_confirmed_state_once_and_survive_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    debug_addon(dir.path());
+    let mut rt = AddonRuntime::new(dir.path());
+    rt.load().unwrap();
+    let mut s = state();
+    rt.update_state(s.clone());
+    rt.drain_messages();
+    assert!(text(&rt).contains("Skills: ?  JP: ?"));
+    s.learned_skills = Some(Default::default());
+    s.job_points = Some(18);
+    rt.update_state(s.clone());
+    rt.update_state(s.clone());
+    let m = rt.drain_messages();
+    assert_eq!(
+        m.iter()
+            .filter(|s| s.contains("EVENT SKILL_LINES_CHANGED "))
+            .count(),
+        1
+    );
+    assert_eq!(
+        m.iter()
+            .filter(|s| s.contains("EVENT RAPPELZ_JP_CHANGED 18 "))
+            .count(),
+        1
+    );
+    assert!(text(&rt).contains("Skills: 0  JP: 18"));
+    s.learned_skills.as_mut().unwrap().insert(42, 1);
+    s.job_points = Some(14);
+    rt.update_state(s.clone());
+    assert!(text(&rt).contains("Skills: 1  JP: 14"));
+    rt.drain_messages();
+    s.learned_skills.as_mut().unwrap().insert(42, 2);
+    s.job_points = Some(0);
+    rt.update_state(s.clone());
+    rt.update_state(s);
+    let m = rt.drain_messages();
+    assert_eq!(
+        m.iter()
+            .filter(|s| s.contains("EVENT SKILL_LINES_CHANGED "))
+            .count(),
+        1
+    );
+    assert_eq!(
+        m.iter()
+            .filter(|s| s.contains("EVENT RAPPELZ_JP_CHANGED 0 "))
+            .count(),
+        1
+    );
+    rt.reload().unwrap();
+    assert!(!rt.drain_messages().iter().any(
+        |s| s.contains("EVENT SKILL_LINES_CHANGED ") || s.contains("EVENT RAPPELZ_JP_CHANGED ")
+    ));
+    assert!(text(&rt).contains("Skills: 1  JP: 0"));
+    assert!(rt.errors().is_empty());
+}
+
+#[test]
+fn skill_apis_distinguish_unknown_from_unlearned_and_known_zero_jp() {
+    let dir = tempfile::tempdir().unwrap();
+    addon(
+        dir.path(),
+        "Skills",
+        "",
+        r#"
+        local f=CreateFrame("Frame");f:RegisterEvent("CHECK")
+        f:SetScript("OnEvent",function() print(GetNumKnownSkills(),GetSkillLevel(42),GetSkillLevel(99),GetJobPoints()) end)
+    "#,
+    );
+    let mut rt = AddonRuntime::new(dir.path());
+    rt.load().unwrap();
+    rt.dispatch(Event::new("CHECK", vec![]));
+    assert!(rt.drain_messages()[0].contains("nil nil nil nil"));
+    let mut s = state();
+    s.learned_skills = Some(Default::default());
+    s.job_points = Some(0);
+    rt.update_state(s.clone());
+    rt.dispatch(Event::new("CHECK", vec![]));
+    assert!(rt.drain_messages().iter().any(|m| m.contains("0 0 0 0")));
+    s.learned_skills.as_mut().unwrap().insert(42, 2);
+    rt.update_state(s);
+    rt.dispatch(Event::new("CHECK", vec![]));
+    assert!(rt.drain_messages().iter().any(|m| m.contains("1 2 0 0")));
+    assert!(rt.errors().is_empty());
+}
+
+#[test]
 fn failures_are_attributed_and_isolated_and_instruction_limit_cannot_be_swallowed() {
     let dir = tempfile::tempdir().unwrap();
     addon(

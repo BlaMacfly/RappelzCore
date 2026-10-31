@@ -19,6 +19,7 @@ pub struct Assets {
     pub jobs: Option<NamedDbc>,
     pub items: Option<NamedDbc>,
     pub monsters: Option<NamedDbc>,
+    pub skills:Option<NamedDbc>,
     /// `ItemResource.dbc` : noms de fichiers référencés par les champs i16 d'Item.dbc.
     pub item_res: Vec<String>,
 }
@@ -49,6 +50,7 @@ impl Assets {
         let jobs = dbc("job", "Job.dbc");
         let items = dbc("item", "Item.dbc");
         let monsters = dbc("monster", "Monster.dbc");
+        let skills=dbc("skill","Skill.dbc");
         let item_res = chain
             .read_file(r"DBFilesClient\ItemResource.dbc")
             .ok()
@@ -61,7 +63,7 @@ impl Assets {
             by_basename.len(),
             strings.len()
         );
-        Ok(Self { chain, by_basename, textures: HashMap::new(), strings, npcs, jobs, items, monsters, item_res })
+        Ok(Self { chain, by_basename, textures: HashMap::new(), strings, npcs, jobs, items, monsters,skills, item_res })
     }
 
     /// Lit un fichier par chemin MPQ complet ou par nom Rappelz d'origine.
@@ -140,6 +142,18 @@ impl Assets {
             .map(|r| self.strings.get(r.int("text_id")).to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| format!("Métier {job}"))
+    }
+    pub fn skill_name(&self,id:u32)->String {
+        let raw=self.skills.as_ref().and_then(|s|s.by_id(id as i32)).map(|s|self.strings.get(s.int("text_id"))).unwrap_or("");
+        let resolved:String=rz_ui::parse_caption(raw).resolve(|code|{
+            let text=self.strings.get(code as i32);(!text.is_empty()).then(||text.to_string())
+        }).into_iter().map(|run|run.text).collect();
+        let name=resolved.split_whitespace().collect::<Vec<_>>().join(" ");
+        if name.is_empty(){format!("Compétence {id}")}else{name}
+    }
+    pub fn skill_icon(&mut self,id:u32)->Option<Texture2D> {
+        let name=self.skills.as_ref()?.by_id(id as i32)?.str("icon_file_name").to_string();
+        if name.is_empty(){None}else{self.texture(&name)}
     }
 }
 

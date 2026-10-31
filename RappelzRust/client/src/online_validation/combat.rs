@@ -13,6 +13,7 @@ use crate::{App, NetCmd, NetEvent};
 
 pub(super) mod layer;
 pub(super) mod party;
+pub(super) mod learning;
 pub(super) mod revival;
 pub(super) mod visibility;
 
@@ -34,6 +35,7 @@ pub struct PacketTrace {
     targets: Vec<u32>,
     party_states: Vec<Value>,
     party_chats: Vec<Value>,
+    skill_lists:Vec<Value>,skill_catalogs:Vec<Value>,learn_results:Vec<u16>,skill_rows:usize,
     errors: Vec<String>,
 }
 
@@ -53,6 +55,7 @@ impl PacketTrace {
             + self.targets.len()
             + self.party_states.len()
             + self.party_chats.len()
+            + self.skill_lists.len()+self.skill_catalogs.len()+self.learn_results.len()+self.skill_rows
             + self.errors.len()
             >= 2048
         {
@@ -86,9 +89,18 @@ impl PacketTrace {
                 NetEvent::Chat {sender,chat_type,message} if *chat_type==rz_proto::msg::chat_type::PARTY => {
                     self.party_chats.push(json!({"sender":sender,"message":message}));
                 }
+                NetEvent::Result {request,result} if *request==id::TS_CS_LEARN_SKILL=>self.learn_results.push(*result),
                 NetEvent::Move(m) => self.moves.push(json!({"handle":m.handle,"time":m.start_time,
                     "layer":m.tlayer,"speed":m.speed,"points":m.points.iter().map(|p|[p.x,p.y]).collect::<Vec<_>>(),"order":self.order})),
                 NetEvent::Packet(p) => match p.id {
+                    rz_proto::skills::SC_SKILL_CATALOG=>{
+                        let state=rz_proto::skills::ScSkillCatalog::from_packet(p)?;self.skill_rows+=state.entries.len();
+                        ensure!(self.skill_rows<=1024,"skill trace row capacity exceeded");self.skill_catalogs.push(skill_catalog(&state));
+                    }
+                    id::TS_SC_SKILL_LIST=>{
+                        let list=game::ScSkillList::from_packet(p)?;self.skill_rows+=list.skills.len();ensure!(self.skill_rows<=1024,"skill trace row capacity exceeded");
+                        self.skill_lists.push(json!({"target":list.target,"modification":list.modification_type,"levels":list.skills.iter().map(|s|json!({"id":s.skill_id,"base":s.base_skill_level,"current":s.current_skill_level})).collect::<Vec<_>>()}));
+                    }
                     rz_proto::party::SC_PARTY_STATE=>self.party_states.push(party_state(&rz_proto::party::ScPartyState::from_packet(p)?)),
                     id::TS_SC_DIALOG => {
                         let d = game::ScDialog::from_packet(p)?;
@@ -140,7 +152,7 @@ impl PacketTrace {
         json!({"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
             "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors,
             "logins":self.logins,"dialogs":self.dialogs,"denied_attacks":self.denied_attacks,"targets":self.targets,
-            "party_states":self.party_states,"party_chats":self.party_chats})
+            "party_states":self.party_states,"party_chats":self.party_chats,"skill_lists":self.skill_lists,"skill_catalogs":self.skill_catalogs,"learn_results":self.learn_results})
     }
 }
 
@@ -268,6 +280,15 @@ mod tests {
         assert_eq!(trace.dialogs.len(), 2044);
         assert_eq!(trace.errors, ["combat trace capacity exceeded"]);
     }
+
+    #[test]
+    fn learned_skill_wire_trace_retains_levels_and_bounds_nested_rows(){
+        let event=NetEvent::Packet(game::ScSkillList {target:7,modification_type:0,skills:vec![game::SkillInfo {skill_id:42,base_skill_level:2,current_skill_level:2,..Default::default()}]}.to_packet());
+        let mut trace=PacketTrace::default();for _ in 0..3000 {trace.observe(&event);}
+        assert_eq!(trace.skill_rows,1024);assert_eq!(trace.skill_lists.len(),1024);
+        assert_eq!(trace.skill_lists[0]["target"],7);assert_eq!(trace.skill_lists[0]["levels"][0]["base"],2);
+        assert_eq!(trace.errors,["combat trace capacity exceeded"]);
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -315,6 +336,12 @@ fn party_state(state:&rz_proto::party::ScPartyState) -> Value {
     json!({"id":state.party_id,"leader":state.leader,"members":state.members.iter().map(|m|
         json!({"handle":m.handle,"name":m.name,"level":m.level,"layer":m.layer,"hp":m.hp,"max_hp":m.max_hp,"mp":m.mp,"max_mp":m.max_mp})).collect::<Vec<_>>(),
         "invite":state.invite.as_ref().map(|i|json!({"inviter":i.inviter,"name":i.name,"seconds":i.seconds_left}))})
+}
+
+fn skill_catalog(s:&rz_proto::skills::ScSkillCatalog)->Value {
+    json!({"target":s.target,"job":s.job,"job_level":s.job_level,"player_level":s.player_level,"jp":s.jp,"status":s.status,
+        "entries":s.entries.iter().map(|e|json!({"id":e.id,"learned":e.learned,"next":e.next,"maximum":e.maximum,"cost":e.cost,
+            "player_level":e.player_level,"job_level":e.job_level,"prerequisites":e.prerequisites,"passive":e.passive,"reason":e.reason})).collect::<Vec<_>>()})
 }
 
 fn read(path: &Path) -> Option<Value> {

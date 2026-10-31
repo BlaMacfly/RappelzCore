@@ -35,6 +35,8 @@ pub struct GameState {
     pub party: Option<Vec<UnitState>>,
     pub party_leader: Option<u32>,
     pub party_invite: Option<String>,
+    pub learned_skills: Option<BTreeMap<u32, u8>>,
+    pub job_points: Option<i64>,
     /// Incremented by the client only after a changed inventory is accepted.
     pub bag_revision: u64,
 }
@@ -453,6 +455,37 @@ impl AddonRuntime {
             "GetPartyInviteName",
             lua.create_function(move |_, ()| Ok(state.borrow().party_invite.clone()))?,
         )?;
+        let state = self.state.clone();
+        globals.raw_set(
+            "GetNumKnownSkills",
+            lua.create_function(move |_, ()| {
+                Ok(state
+                    .borrow()
+                    .learned_skills
+                    .as_ref()
+                    .map(|s| s.len() as u32))
+            })?,
+        )?;
+        let state = self.state.clone();
+        globals.raw_set(
+            "GetSkillLevel",
+            lua.create_function(move |_, id: u32| {
+                Ok(if id == 0 {
+                    None
+                } else {
+                    state
+                        .borrow()
+                        .learned_skills
+                        .as_ref()
+                        .map(|s| s.get(&id).copied().unwrap_or(0))
+                })
+            })?,
+        )?;
+        let state = self.state.clone();
+        globals.raw_set(
+            "GetJobPoints",
+            lua.create_function(move |_, ()| Ok(state.borrow().job_points))?,
+        )?;
         let start = self.start;
         globals.raw_set(
             "GetTime",
@@ -701,6 +734,17 @@ impl AddonRuntime {
         }
         if old.money != state.money {
             self.dispatch(Event::new("PLAYER_MONEY", vec![]));
+        }
+        if state.learned_skills.is_some() && old.learned_skills != state.learned_skills {
+            self.dispatch(Event::new("SKILL_LINES_CHANGED", vec![]));
+        }
+        if old.job_points != state.job_points {
+            if let Some(jp) = state.job_points {
+                self.dispatch(Event::new(
+                    "RAPPELZ_JP_CHANGED",
+                    vec![EventArg::Number(jp as f64)],
+                ));
+            }
         }
     }
 

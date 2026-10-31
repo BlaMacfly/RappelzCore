@@ -1,7 +1,7 @@
 //! Monde en jeu : terrain Rappelz (relief, textures de sol, décors), créatures 3D animées,
 //! HUD et fenêtres d'origine (`.nui`), inventaire, dialogues PNJ, boutique, combat et chat.
 
-use std::collections::HashMap;
+use std::collections::{HashMap,BTreeMap};
 use std::time::Instant;
 
 use macroquad::prelude::*;
@@ -17,6 +17,7 @@ use crate::rzui::RzUi;
 use crate::terrain::Terrain;
 
 mod party_ui;
+mod skills_ui;
 
 const MAP_TILE: f32 = 16128.0;
 const MINIMAP_PIECES: i32 = 16;
@@ -100,6 +101,29 @@ mod addon_vitals_tests {
         world.on_packet(ScPartyState::default().to_packet(),0.0);assert_eq!(world.addon_state().party_members,Some(0));
         assert!(matches!(WorldState::parse_chat("/p hello"),Some(NetCmd::Chat {chat_type:chat_type::PARTY,message,..}) if message=="hello"));
         assert!(WorldState::parse_chat("/party ").is_none());
+    }
+
+    #[test]
+    fn skill_adapter_and_learning_command_wait_for_private_server_acknowledgements(){
+        use rz_proto::skills::{ScSkillCatalog,SkillOffer,catalog,reason};
+        let mut w=WorldState::from_login(&msg::ScLoginResult {handle:7,..Default::default()},Vec2::ZERO);
+        assert!(w.addon_state().learned_skills.is_none());assert!(w.addon_state().job_points.is_none());
+        w.on_packet(game::ScSkillList {target:7,modification_type:0,skills:vec![]}.to_packet(),0.0);
+        w.on_packet(game::ScExpUpdate {handle:7,exp:0,jp:12}.to_packet(),0.0);
+        let catalog=ScSkillCatalog {target:7,job:100,job_level:1,player_level:1,jp:12,status:catalog::READY,entries:vec![SkillOffer {id:42,learned:0,next:1,maximum:3,cost:Some(4),player_level:1,job_level:1,prerequisites:[(0,0);3],passive:false,reason:reason::READY}]};
+        w.on_packet(catalog.to_packet(),0.0);
+        let NetCmd::Raw(packet)=w.learn_skill(42,1).unwrap() else {panic!("expected learning request")};
+        assert_eq!(game::CsLearnSkill::from_packet(&packet).unwrap(),game::CsLearnSkill {target:7,skill_id:42,base_random_skill_id:0,skill_level:1});
+        assert!(w.learn_skill(42,2).is_none());assert_eq!(w.addon_state().job_points,Some(12));assert!(w.learned_skills().unwrap().is_empty());
+        let skill=game::SkillInfo {skill_id:42,base_skill_level:1,current_skill_level:1,..Default::default()};
+        w.on_packet(game::ScExpUpdate {handle:7,exp:0,jp:8}.to_packet(),0.0);
+        w.on_packet(game::ScSkillList {target:7,modification_type:0,skills:vec![skill.clone()]}.to_packet(),0.0);
+        assert_eq!(w.addon_state().learned_skills,Some(BTreeMap::from([(42,1)])));
+        w.on_packet(game::ScSkillList {target:8,modification_type:0,skills:vec![]}.to_packet(),0.0);
+        w.on_packet(game::ScSkillList {target:7,modification_type:0,skills:vec![skill.clone(),skill]}.to_packet(),0.0);
+        assert_eq!(w.learned_skills().unwrap(),&BTreeMap::from([(42,1)]));
+        let mut other=catalog.clone();other.target=8;w.on_packet(other.to_packet(),0.0);assert_eq!(w.skill_catalog(),Some(&catalog));
+        w.apply_warp(0.0,0.0,0.0,1);assert_eq!(w.addon_state().job_points,Some(8));assert_eq!(w.learned_skills().unwrap().len(),1);
     }
 }
 
@@ -241,6 +265,11 @@ struct FloatText {
 }
 
 pub struct WorldState {
+    learned_skills:Option<BTreeMap<u32,u8>>,
+    skill_catalog:Option<rz_proto::skills::ScSkillCatalog>,
+    addon_jp:Option<i64>,
+    show_skills:bool,
+    skill_page:usize,
     party: Option<rz_proto::party::ScPartyState>,
     show_party: bool,
     clock: Instant,
@@ -298,6 +327,7 @@ impl WorldState {
         Self {
             clock: Instant::now(),
             handle: lr.handle,
+            learned_skills:None,skill_catalog:None,addon_jp:None,show_skills:false,skill_page:0,
             party:None,show_party:true,
             layer: lr.layer,
             name: lr.name.clone(),
@@ -382,6 +412,7 @@ impl WorldState {
             party_leader:self.party.as_ref().and_then(|p|(p.leader!=0).then_some(p.leader)),
             party_invite:self.party.as_ref().and_then(|p|p.invite.as_ref().map(|i|i.name.clone())),
             bag_revision: self.bag_revision,
+            learned_skills:self.learned_skills.clone(),job_points:self.addon_jp,
         }
     }
 
@@ -415,6 +446,14 @@ impl WorldState {
     }
 
     pub fn experience(&self) -> (i64, i64) { (self.exp, self.jp) }
+    pub fn learned_skills(&self)->Option<&BTreeMap<u32,u8>> {self.learned_skills.as_ref()}
+    pub fn skill_catalog(&self)->Option<&rz_proto::skills::ScSkillCatalog>{self.skill_catalog.as_ref()}
+    pub fn show_skills(&mut self,show:bool){self.show_skills=show;}
+    pub fn learn_skill(&self,id:u32,next:u8)->Option<NetCmd> {
+        let catalog=self.skill_catalog.as_ref()?;
+        if catalog.status!=rz_proto::skills::catalog::READY || !catalog.entries.iter().any(|e|e.id==id && e.id<=i32::MAX as u32 && e.next==next && e.reason==rz_proto::skills::reason::READY){return None;}
+        Some(NetCmd::Raw(game::CsLearnSkill {target:self.handle,skill_id:id as i32,base_random_skill_id:0,skill_level:i16::from(next)}.to_packet()))
+    }
     pub fn party_state(&self) -> Option<&rz_proto::party::ScPartyState> {self.party.as_ref()}
     pub fn party_action(action:&str) -> NetCmd {
         NetCmd::Chat {chat_type:chat_type::NORMAL,target:String::new(),message:format!(".party {action}")}
@@ -559,6 +598,12 @@ impl WorldState {
         let previous_inventory = matches!(p.id, gid::TS_SC_INVENTORY | gid::TS_SC_DESTROY_ITEM | gid::TS_SC_ITEM_WEAR_INFO)
             .then(|| self.inventory.clone());
         match p.id {
+            rz_proto::skills::SC_SKILL_CATALOG=>{
+                if let Ok(state)=rz_proto::skills::ScSkillCatalog::from_packet(&p){if state.target==self.handle {self.skill_catalog=Some(state);}}
+            }
+            gid::TS_SC_SKILL_LIST=>{
+                if let Ok(list)=game::ScSkillList::from_packet(&p){self.apply_skill_list(list);}
+            }
             rz_proto::party::SC_PARTY_STATE => {
                 if let Ok(state)=rz_proto::party::ScPartyState::from_packet(&p) {
                     if state.members.is_empty() || state.members.iter().any(|m|m.handle==self.handle) {self.party=Some(state);}
@@ -613,6 +658,7 @@ impl WorldState {
                     if e.handle == self.handle {
                         self.exp = e.exp;
                         self.jp = e.jp;
+                        self.addon_jp=Some(e.jp);
                     }
                 }
             }
@@ -690,6 +736,15 @@ impl WorldState {
 
     fn apply_server_target(&mut self, handle:u32) {
         self.target=self.entities.contains_key(&handle).then_some(handle);
+    }
+
+    fn apply_skill_list(&mut self,list:game::ScSkillList) {
+        if list.target!=self.handle || list.modification_type!=0 || list.skills.len()>rz_proto::skills::MAX_ENTRIES {return;}
+        let mut accepted=BTreeMap::new();
+        for skill in list.skills {
+            if skill.skill_id<=0 || skill.base_skill_level==0 || skill.base_skill_level>50 || accepted.insert(skill.skill_id as u32,skill.base_skill_level).is_some(){return;}
+        }
+        self.learned_skills=Some(accepted);
     }
 
     fn apply_warp(&mut self, x: f32, y: f32, _z: f32, layer: u8) {
@@ -1055,9 +1110,11 @@ impl WorldState {
         self.draw_minimap(assets, now);
 
         // Fenêtres ouvertes.
+        if is_key_pressed(KeyCode::K) && !self.chat_open {self.show_skills = !self.show_skills;}
+        if self.show_skills {over |= self.draw_skills(assets,ui,out);}
         if is_key_pressed(KeyCode::P) && !self.chat_open {self.show_party = !self.show_party;}
         if self.party.as_ref().is_some_and(|p|p.invite.is_some()) {self.show_party=true;}
-        if self.show_party {over |= self.draw_party(ui,out);}
+        if self.show_party && !self.show_skills {over |= self.draw_party(ui,out);}
         if is_key_pressed(KeyCode::I) && !self.chat_open {
             self.show_inventory = !self.show_inventory;
         }
