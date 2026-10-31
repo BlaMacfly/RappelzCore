@@ -2,6 +2,8 @@
 
 Verified **2026-10-31** with two ordinary native Windows x64 clients, real combat, an actual database row-lock wait, worldserver process kill and restart on persistent isolated cloned data. The successful final attempt passes **49/49 checks**. A real old-server control fails because it announces XP/JP while the save cannot commit.
 
+Subsequent native coverage: [positive currency and level-up after crash](MONEY_LEVEL_RESTART_VALIDATION.md) validates +14 rupees, level 2→3, EXP rollover and 140/70 saved vitals with 57 checks. The zero-gold/level-1 evidence below remains historical.
+
 ## Production change
 
 `Session::handle_world_event(Reward)` now builds a candidate from the live character snapshot, applies EXP/level, JP and currency to that candidate, and awaits the existing transactional `characters::save`. Only after successful COMMIT does it replace the session character, send private EXP/JP/gold packets and publish level/stat/reward notices. A level-up candidate includes the same full HP/MP that the existing world level update applies. Normal saves therefore cannot later overwrite the reward with an older in-memory total. No world mutex is held across database I/O; the normal session event loop serializes rewards and saves.
