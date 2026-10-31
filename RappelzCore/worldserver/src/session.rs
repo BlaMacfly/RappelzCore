@@ -34,6 +34,8 @@ pub struct Session {
     pub events_rx: Option<mpsc::UnboundedReceiver<WorldEvent>>,
     /// PNJ avec lequel un dialogue est ouvert.
     pub dialog_npc: Option<u32>,
+    /// None until the native client opts into the learning-catalog extension.
+    pub skill_catalog:Option<rz_proto::skills::ScSkillCatalog>,
 }
 
 pub async fn run(ctx: Arc<Ctx>, addr: SocketAddr, mut reader: PacketReader, mut writer: PacketWriter) {
@@ -47,7 +49,7 @@ pub async fn run(ctx: Arc<Ctx>, addr: SocketAddr, mut reader: PacketReader, mut 
         let _ = writer.shutdown().await;
     });
 
-    let mut session = Session { ctx: ctx.clone(), addr, tx, account: None, gm_level: 0, in_game: None, events_rx: None, dialog_npc: None };
+    let mut session = Session { ctx: ctx.clone(), addr, tx, account: None, gm_level: 0, in_game: None, events_rx: None, dialog_npc: None,skill_catalog:None };
     let mut save_timer = tokio::time::interval(ctx.settings.save_interval);
     save_timer.tick().await;
     let mut save_all = ctx.save_all.subscribe();
@@ -134,6 +136,10 @@ impl Session {
                 let version=rz_proto::party::CsPartyHello::from_packet(&p)?.0;
                 let handle=self.in_game.as_ref().unwrap().handle;
                 self.ctx.world.lock().unwrap().enable_party(handle,version);
+            }
+            rz_proto::skills::CS_SKILLS_HELLO if self.in_game.is_some()=>{
+                let version=rz_proto::skills::CsSkillsHello::from_packet(&p)?.0;
+                self.enable_skills(version);
             }
             id if crate::gameplay::handles(id) => self.handle_gameplay(p).await?,
             other => tracing::trace!("{} : paquet {other} non géré", self.addr),
@@ -431,21 +437,29 @@ impl Session {
 
     /// Met à jour le personnage depuis l'état du monde et le sauvegarde (Player::SaveToDB).
     pub async fn save(&mut self) -> Result<()> {
-        let Some(g) = &mut self.in_game else { return Ok(()) };
+        let Some(character)=self.character_snapshot() else {return Ok(())};
+        characters::save(&self.ctx.chars,&character).await?;
+        if let Some(g)=&mut self.in_game {g.character=character;}
+        Ok(())
+    }
+
+    /// Capture a candidate without changing session state before a durable write succeeds.
+    pub fn character_snapshot(&self)->Option<Character> {
+        let g=self.in_game.as_ref()?;
+        let mut character=g.character.clone();
         {
             let w = self.ctx.world.lock().unwrap();
-            if let Some(p) = w.players.get(&g.handle) {
+            if let Some(p) = w.players.get(&g.handle).filter(|p|p.guid==g.character.guid && p.account_id==g.character.account) {
                 let (x, y) = p.motion.position(w.now());
-                g.character.position_x = x;
-                g.character.position_y = y;
-                g.character.position_z = p.z;
-                g.character.set_extra("layer",p.layer);
-                g.character.health = p.hp.max(1) as u32;
-                g.character.power1 = p.mp.max(0) as u32;
+                character.position_x = x;
+                character.position_y = y;
+                character.position_z = p.z;
+                character.set_extra("layer",p.layer);
+                character.health = p.hp.max(1) as u32;
+                character.power1 = p.mp.max(0) as u32;
             }
         }
-        characters::save(&self.ctx.chars, &g.character).await?;
-        Ok(())
+        Some(character)
     }
 
     pub async fn leave_world(&mut self) -> Result<()> {
@@ -456,6 +470,7 @@ impl Session {
         let g = self.in_game.take().unwrap();
         self.events_rx = None;
         self.dialog_npc = None;
+        self.skill_catalog=None;
         let mut c = g.character;
         c.online = false;
         self.ctx.world.lock().unwrap().remove_player(g.handle);
@@ -492,7 +507,9 @@ impl Session {
         let name = g.character.name.clone();
         let text = req.message.trim().to_string();
         if text.starts_with('.') || (text.starts_with('/') && self.gm_level > 0) {
-            return commands::handle(self, &text[1..]).await;
+            commands::handle(self, &text[1..]).await?;
+            self.send_skill_catalog();
+            return Ok(());
         }
         let world = self.ctx.world.lock().unwrap();
         match req.chat_type {

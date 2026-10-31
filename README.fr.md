@@ -27,7 +27,7 @@ vérifie désormais son rendu et sa position chez l'observateur ainsi que les é
 Le [suivi des déplacements](docs/VISIBILITY_VALIDATION.md) reprend les trajets lors des apparitions et vérifie les sorties de portée.
 Les [changements de couche](docs/LAYER_VALIDATION.md) vérifient la séparation, le refus des interactions masquées et la couche sauvegardée au retour du personnage avec deux clients.
 Les [groupes de joueurs](docs/PARTY_VALIDATION.md) ajoutent invitations avec acceptation, gestion du chef, discussion privée et PV/PM synchronisés,
-vérifiés après dégâts réels et changement de couche. L'espace combiné passe 110 tests Rust et 22 tests Python ; chaque branche conserve son périmètre serveur/client compilable.
+vérifiés après dégâts réels et changement de couche. L’[apprentissage des compétences](docs/SKILL_LEARNING_VALIDATION.md) ajoute la fenêtre K, les coûts/prérequis réels, les niveaux et JP sauvegardés et les événements Lua, avec 40 contrôles à deux clients. L'espace combiné passe 124 tests Rust et 26 tests Python ; chaque branche conserve son périmètre serveur/client compilable.
 La [feuille de route du jeu](docs/GAMEPLAY_ROADMAP.md) recense les systèmes encore incomplets.
 
 - **RappelzCore** utilise **exactement le schéma SQL d'AzerothCore** (`acore_auth`, `acore_characters`,
@@ -196,7 +196,7 @@ mots de passe de 16 caractères max (règle AzerothCore).
 ## Vérifications des développements précédents
 
 Cette liste contient des résultats conservés des travaux précédents. Les vérifications du
-30–31/10/2026 (110 tests Rust et 22 tests Python réussis, compilation optimisée et 125 212 ressources identiques) sont séparées
+30–31/10/2026 (124 tests Rust et 26 tests Python réussis, compilation optimisée et 125 212 ressources identiques) sont séparées
 des anciens résultats serveur/base de données dans [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md).
 
 Pour installer l'addon sur un client déjà converti :
@@ -229,8 +229,7 @@ Voir [LUA_ADDON_SYSTEM.md](docs/LUA_ADDON_SYSTEM.md) pour le périmètre pris en
   RappelzRust (le client d'origine les fixe dans son code) ; l'écran de création de personnage, la
   boutique et l'équipement détaillé utilisent encore des panneaux simples.
 - Gameplay serveur : combat au corps à corps avec formules provisoires (en attendant db_BasicStat /
-  db_Exp), récompenses EXP/JP/rupees, mort et réapparition ; pas encore de compétences, de quêtes,
-  de groupe, de butin au sol ni d'IA de monstres agressifs.
+  db_Exp), récompenses EXP/JP/rupees, mort et réapparition ; apprentissage des compétences et groupes temporaires disponibles ; lancement/effets des compétences, évolution de classe, quêtes, butin au sol et IA de monstres agressifs restent à compléter.
 - Le client NoLimits d'origine n'a pas été testé contre RappelzCore. Il doit être lancé par son
   launcher (`<process>_RUNNER`). Le KSA RC4 a été lu en assembleur sans capture réelle pour le
   confirmer. Plusieurs champs de paquets de gameplay sont déduits (marqués [D] dans la doc).

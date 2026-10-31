@@ -999,6 +999,19 @@ impl Message for ScSkillList {
     }
 }
 
+/// TS_CS_LEARN_SKILL (402), 21 bytes. Size/three u32 + i16 observed locally;
+/// field semantics corroborated by pinned rzu/NGemity >=8.2 headers, not a retail capture.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CsLearnSkill { pub target:u32, pub skill_id:i32, pub base_random_skill_id:u32, pub skill_level:i16 }
+impl Message for CsLearnSkill {
+    const ID:u16=id::TS_CS_LEARN_SKILL;
+    fn write(&self,w:&mut Writer){w.u32(self.target).i32(self.skill_id).u32(self.base_random_skill_id).u16(self.skill_level as u16);}
+    fn read(r:&mut Reader)->Result<Self>{
+        let request=Self {target:r.u32()?,skill_id:r.i32()?,base_random_skill_id:r.u32()?,skill_level:r.u16()? as i16};
+        if r.remaining()!=0{return Err(crate::packet::PacketError::Invalid {id:Self::ID,field:"learn request length"});}Ok(request)
+    }
+}
+
 /// Quête active de TS_SC_QUEST_LIST, 61 octets [O offsets] (FUN_00a29430).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct QuestInfo {

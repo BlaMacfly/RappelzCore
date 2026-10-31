@@ -875,31 +875,66 @@ mod tests {
         assert!(!world.party_clients.contains(&1));assert!(!world.party_sent.contains_key(&1));
     }
 
-    #[tokio::test]
-    async fn unsupported_ground_drop_keeps_inventory_and_never_attempts_a_database_mutation() {
+    fn isolated_session(skills:Option<rz_rappelz::skills::SkillBook>)->(crate::session::Session,tokio::sync::mpsc::UnboundedReceiver<RawPacket>) {
         use crate::{Ctx,Settings,session::{Session,InGame},gameplay::InvItem};
         use std::{sync::{Arc,Mutex,RwLock,atomic::AtomicU32},time::Duration};
         let (world,mut receivers)=test_world();let tx=world.players[&1].tx.clone();
         // No real database is reachable by this fixture; any SQL path is a test failure.
         let pool=rz_database::sqlx::mysql::MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(20))
             .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused").unwrap();
-        let data=GameData {jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
+        let data=GameData {skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
             monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![]};
         let settings=Settings {realm_id:1,network_key:vec![],characters_per_realm:1,start_level:1,start_money:0,start_positions:[(0.0,0.0);3],
             region_size:180,cell_size:6,move_speed:120,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
         let ctx=Arc::new(Ctx {login:pool.clone(),chars:pool.clone(),world_db:pool,data,world:Mutex::new(world),settings,
             save_all:tokio::sync::broadcast::channel(4).0,shutdown:tokio::sync::watch::channel(false).0,
             character_guid:AtomicU32::new(1),item_guid:AtomicU32::new(99),creature_guid:AtomicU32::new(0)});
-        let item=InvItem {guid:99,entry:500,count:7,slot:28};let item_handle=item.handle();
-        let mut session=Session {ctx,addr:"127.0.0.1:1".parse().unwrap(),tx,account:None,gm_level:0,events_rx:None,dialog_npc:None,
-            in_game:Some(InGame {handle:1,character:rz_database::characters::Character::default(),items:vec![item]})};
+        let item=InvItem {guid:99,entry:500,count:7,slot:28};
+        let character=rz_database::characters::Character {guid:1,account:1,level:1,health:100,power1:50,..Default::default()};
+        let session=Session {ctx,addr:"127.0.0.1:1".parse().unwrap(),tx,account:None,gm_level:0,events_rx:None,dialog_npc:None,skill_catalog:None,
+            in_game:Some(InGame {handle:1,character,items:vec![item]})};
+        (session,receivers.remove(0))
+    }
+
+    #[tokio::test]
+    async fn unsupported_ground_drop_keeps_inventory_and_never_attempts_a_database_mutation() {
+        let (mut session,mut rx)=isolated_session(None);
+        let item_handle=session.in_game.as_ref().unwrap().items[0].handle();
         for (handle,count) in [(item_handle,1),(item_handle,0),(item_handle,u32::MAX),(123,1)] {
             session.handle_gameplay(game::CsDropItem {item_handle:handle,count}.to_packet()).await.unwrap();
             let items=&session.in_game.as_ref().unwrap().items;
             assert_eq!(items.len(),1);assert_eq!((items[0].guid,items[0].entry,items[0].count,items[0].slot),(99,500,7,28));
-            let notice=msg::ScChat::from_packet(&receivers[0].try_recv().unwrap()).unwrap();
-            assert!(notice.message.contains("L'objet reste dans le sac"));assert!(receivers[0].try_recv().is_err());
+            let notice=msg::ScChat::from_packet(&rx.try_recv().unwrap()).unwrap();
+            assert!(notice.message.contains("L'objet reste dans le sac"));assert!(rx.try_recv().is_err());
         }
+    }
+
+    #[tokio::test]
+    async fn failed_learning_commit_keeps_jp_skills_and_session_snapshot_unchanged() {
+        use rz_rappelz::skills::{SkillBook,SkillDefinition,LearningRule};
+        let book=SkillBook::from_parts(vec![SkillDefinition {id:42,valid:true,passive:false,learning_jp:[3;50]}],
+            vec![LearningRule {tree:10,skill:42,group:0,min:1,max:3,player_level:1,job_level:1,ratio:1.0,prerequisites:[(0,0);3],enhance_min:0,enhance_max:5}],vec![(100,10)]);
+        let (mut session,mut rx)=isolated_session(Some(book));
+        let c=&mut session.in_game.as_mut().unwrap().character;c.set_extra("job",100);c.set_extra("jlv",1);c.set_extra("jp",10);
+        let before=c.clone();
+        session.learn_skill(game::CsLearnSkill {target:1,skill_id:42,base_random_skill_id:0,skill_level:1}).await.unwrap();
+        let after=&session.in_game.as_ref().unwrap().character;
+        assert_eq!(after.extra,before.extra);assert_eq!(after.health,before.health);assert_eq!(after.power1,before.power1);
+        let packets:Vec<_>=std::iter::from_fn(||rx.try_recv().ok()).collect();
+        assert_eq!(packets.len(),2);assert!(packets.iter().all(|p|p.id!=game::ScSkillList::ID && p.id!=game::ScExpUpdate::ID));
+        let result=msg::ScResult::from_packet(&packets[0]).unwrap();assert_eq!(result.request,game::id::TS_CS_LEARN_SKILL);assert_ne!(result.result,0);
+        assert!(msg::ScChat::from_packet(&packets[1]).unwrap().message.contains("aucun JP débité"));
+    }
+
+    #[tokio::test]
+    async fn reward_keeps_wide_job_points_nonnegative_without_integer_wrap() {
+        let (mut session,mut rx)=isolated_session(None);
+        session.in_game.as_mut().unwrap().character.set_extra("jp",i64::MAX-1);
+        session.handle_world_event(WorldEvent::Reward {exp:0,jp:3,gold:0,monster:"Fixture".into()}).await.unwrap();
+        assert_eq!(session.in_game.as_ref().unwrap().character.extra_i64("jp",0),i64::MAX);
+        let packets:Vec<_>=std::iter::from_fn(||rx.try_recv().ok()).collect();
+        let exp=game::ScExpUpdate::from_packet(packets.iter().find(|p|p.id==game::ScExpUpdate::ID).unwrap()).unwrap();
+        assert_eq!(exp.jp,i64::MAX);
     }
 
     #[test]

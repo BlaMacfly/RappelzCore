@@ -48,7 +48,9 @@ UTF-8 with an optional BOM, CRLF/LF, `#` comments, `## key: value` metadata and 
 
 APIs return `nil` for unavailable units/fields. The client waits for a level/money update rather than presenting startup defaults as server data. Party membership now comes from the opt-in authoritative roster: nil until confirmation, zero when solo, and actual other-member count/`party1`–`party7` units when grouped. See [PARTY_VALIDATION.md](PARTY_VALIDATION.md) for real damage, hidden-layer party vitals, invitations, chat and disconnect cleanup. Target mana/max mana come from known ENTER/HPMP values, including genuine zeros; see [COMBAT_VALIDATION.md](COMBAT_VALIDATION.md). Offline demo values remain actual offline WorldState values, separate from online evidence.
 
-Implemented event names/arguments are in [LUA_API_COMPATIBILITY.md](LUA_API_COMPATIBILITY.md). Pet, summon, skill and other gameplay events must be connected when their state models exist; the runtime does not generate them artificially.
+Implemented event names/arguments are in [LUA_API_COMPATIBILITY.md](LUA_API_COMPATIBILITY.md). Pet, summon, casting and other gameplay events must be connected when their state models exist; the runtime does not generate them artificially.
+
+[SKILL_LEARNING_VALIDATION.md](SKILL_LEARNING_VALIDATION.md) adds actual private learned lists and own EXP_UPDATE JP to the production adapter: GetNumKnownSkills, GetSkillLevel, GetJobPoints, SKILL_LINES_CHANGED and RAPPELZ_JP_CHANGED. RappelzDebug displays/logs those values. Forty native comparison checks cover learning/refusal, privacy and saved character re-entry. The native K panel uses the same learning helper as the driver; physical K/button activation remains a manual check.
 
 ## UI/XML subset
 
@@ -60,7 +62,7 @@ The strict XML subset accepts `<Ui>` and these widgets, `<Size x="..." y="..."/>
 
 ## SavedVariables
 
-Only declared variables persist. Storage is non-executable tagged JSON representing Lua nil/booleans/finite numbers/UTF-8 strings/tables, including numeric and boolean table keys. Functions/userdata/threads, cyclic tables and invalid values are rejected. Shared acyclic table references are serialized as independent copies. Lua 5.1 numbers have double precision; large integer identifiers/currency may lose precision beyond 2^53.
+Only declared variables persist. Storage is non-executable tagged JSON representing Lua nil/booleans/finite numbers/UTF-8 strings/tables, including numeric and boolean table keys. Functions/userdata/threads, cyclic tables and invalid values are rejected. Shared acyclic table references are serialized as independent copies. Lua 5.1 numbers have double precision; large integer identifiers/currency/JP may lose precision beyond 2^53.
 
 Account settings: `WTF/Account/<hex-account>/SavedVariables/<Addon>.json`.
 Character settings: `WTF/Account/<hex-account>/SavedVariables/Characters/<hex-realm>/<hex-character>/<Addon>.json`.
@@ -70,7 +72,7 @@ Hex encodes complete identity bytes so account/realm/character strings cannot cr
 
 ## Verification
 
-`cargo test -p rz-addon` executes **19 integration tests** against the vendored Lua 5.1 runtime, including the actual TOC/Lua/XML example. Coverage includes party roster/invitation/vitals and initial known-zero readiness, known death/revival transitions even within one rendered frame, known-zero versus unknown layers, layer-event deduplication without discovery/new-identity/reload fabrication, suppression on unknown health/new identity/target/reload, lifecycle/state arguments, change deduplication, unknown-vitals suppression, click hit testing, reload, account/character/realm separation, numeric keys, enable persistence, dependencies/cycles/load-on-demand, version rejection, traversal, unsupported XML, isolated startup/event errors, memory/instruction/widget limits and preservation of previously saved data after a cyclic-table save failure.
+`cargo test -p rz-addon` executes **21 integration tests** against the vendored Lua 5.1 runtime, including the actual TOC/Lua/XML example. Coverage includes private learned skill/JP state, initial empty/zero discovery and deduplication across reload, party roster/invitation/vitals and initial known-zero readiness, known death/revival transitions even within one rendered frame, known-zero versus unknown layers, layer-event deduplication without discovery/new-identity/reload fabrication, suppression on unknown health/new identity/target/reload, lifecycle/state arguments, change deduplication, unknown-vitals suppression, click hit testing, reload, account/character/realm separation, numeric keys, enable persistence, dependencies/cycles/load-on-demand, version rejection, traversal, unsupported XML, isolated startup/event errors, memory/instruction/widget limits and preservation of previously saved data after a cyclic-table save failure.
 
 [REVIVAL_VALIDATION.md](REVIVAL_VALIDATION.md) verifies PLAYER_DEAD and PLAYER_ALIVE against actual lethal damage/automatic revival with two native clients. RappelzDebug also records actual target HP/MP in its bounded diagnostics. These events follow known health transitions of the same player and are not synthesized for initial discovery or UI reload.
 

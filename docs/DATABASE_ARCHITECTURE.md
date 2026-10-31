@@ -43,6 +43,7 @@ The Rappelz client does **not** perform a WoW SRP challenge/proof exchange. `rz-
 |---|---|
 | Character race, base class, sex, level, XP, rupees, HP/MP, position | `characters`; MP uses `power1`, sex uses the local gender conversion. |
 | Exact job, job level, JP, layer, appearance/model fields | `character_settings`, `source = 'rappelz'`, a `key=value;...` serialization. |
+| Learned skill base levels | Existing Rappelz settings keys `learned_skill_<positive-id>`, canonical IDs and levels 1–50, bounded to 512 entries. |
 | Items and ownership | `item_instance` joined through `character_inventory`. |
 | Equipment versus bag | Local convention: `bag = 0`, slots 0–27 are Rappelz worn slots; slots 28 and above are bag positions. This is not WoW inventory behavior. |
 | Monsters and NPCs | `creature_template`; NPC entries are `1_000_000 + NpcResource id` to avoid overlapping Rappelz IDs. Placements use `creature`, currently map 0. |
@@ -53,9 +54,11 @@ The [layer validation](LAYER_VALIDATION.md) exposed that saving a character omit
 
 [Player groups](PARTY_VALIDATION.md) are ephemeral world state; they add no database tables or settings. Logout/disconnect/restart clears membership and pending invitations. Shared rewards and persistent groups remain future work. Ground-drop requests now retain inventory items while world loot is absent; intentional erasure remains separate. The group cycle's selected pre-existing records through ID/GUID 13 and all world INSERTs compare unchanged.
 
+[Skill learning](SKILL_LEARNING_VALIDATION.md) stores JP and learned levels together through the existing character-save SQL transaction. A candidate snapshot copies live position/layer/vitals; memory and success packets update only after SQL commit. A failed-commit regression preserves JP, skills and the prior snapshot. Invalid stored skill keys/values fail closed. No table/import/migration was needed; all pre-cycle character/account records through 15, items through 4, world INSERTs and installed WTF hashes compare unchanged. New GM-0 fixtures 16/17 remain with their final learned state.
+
 `rz-dbimport` reads `DataDir/dbc` and writes SQL for item templates, monster templates, NPC templates/placements, quests and world locations. Its generated SQL contains DELETE statements for those imported datasets; `--apply` is a data replacement/import operation, not a schema migration. Do not apply it to existing production data without reviewing the output and import behavior. This audit did not run it.
 
-Character names currently inherit the 12-character schema limit. Rust storage also uses narrow numeric types, including `u8` level and `u32` rupees/XP; faithful late-game Rappelz limits need explicit evaluation. The settings blob is suitable for the existing small extras, but full pet, skill, quest-progress, party/guild, trade/economy and instance persistence are not established by the mere presence of WoW tables. Add explicit Rappelz extension tables/migrations when their semantics require them, preserving existing data.
+Character names currently inherit the 12-character schema limit. Rust storage also uses narrow numeric types, including `u8` level and `u32` rupees/XP; faithful late-game Rappelz limits need explicit evaluation. The settings blob is suitable for the existing small extras, but full pet, skill-casting/job-growth, quest-progress, party/guild, trade/economy and instance persistence are not established by the mere presence of WoW tables. Add explicit Rappelz extension tables/migrations when their semantics require them, preserving existing data.
 
 ## Validation boundary and next work
 

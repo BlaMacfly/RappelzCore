@@ -9,6 +9,7 @@ mod data;
 mod gameplay;
 mod party;
 mod session;
+mod skills;
 mod world;
 
 use std::path::PathBuf;

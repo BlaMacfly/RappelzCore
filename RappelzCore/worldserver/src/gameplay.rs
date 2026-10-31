@@ -40,6 +40,7 @@ pub fn handles(id: u16) -> bool {
     matches!(
         id,
         gid::TS_CS_PUTON_ITEM
+            | gid::TS_CS_LEARN_SKILL
             | gid::TS_CS_PUTOFF_ITEM
             | gid::TS_CS_DROP_ITEM
             | gid::TS_CS_ERASE_ITEM
@@ -115,7 +116,7 @@ impl Session {
         }
         self.send(&game::ScWearInfo { handle: g.handle, wear_info: Self::wear_array(&g.items), ..Default::default() });
         self.send(&game::ScGoldUpdate { gold: g.character.money as i64, chaos: 0 });
-        self.send(&game::ScSkillList { target: g.handle, modification_type: 0, skills: Vec::new() });
+        self.send_learned_skills();
         self.send(&game::ScQuestList::default());
         let c = &g.character;
         self.send(&game::ScExpUpdate { handle: g.handle, exp: c.xp as i64, jp: c.extra_i64("jp", 0) });
@@ -175,6 +176,7 @@ impl Session {
     pub async fn handle_gameplay(&mut self, p: RawPacket) -> Result<()> {
         let Some(handle) = self.in_game.as_ref().map(|g| g.handle) else { return Ok(()) };
         match p.id {
+            gid::TS_CS_LEARN_SKILL=>self.learn_skill(game::CsLearnSkill::from_packet(&p)?).await?,
             gid::TS_CS_PUTON_ITEM => {
                 let req = game::CsPutOnItem::from_packet(&p)?;
                 self.put_on(handle, req.position, req.item_handle).await?;
@@ -371,7 +373,7 @@ impl Session {
                     leveled = true;
                 }
                 c.xp = total as u32;
-                let jp_total = c.extra_i64("jp", 0) + jp;
+                let jp_total = c.extra_i64("jp", 0).saturating_add(jp);
                 c.set_extra("jp", jp_total);
                 let (level, xp, money) = (c.level, c.xp, c.money as i64 + gold);
                 let jlv = c.extra_i64("jlv", 1) as i32;
@@ -393,6 +395,7 @@ impl Session {
                 w.revive(handle, x, y);
             }
         }
+        self.send_skill_catalog();
         Ok(())
     }
 }

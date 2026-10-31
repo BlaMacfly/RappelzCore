@@ -44,6 +44,7 @@ pub struct Teleport {
 }
 
 pub struct GameData {
+    pub skills:Option<rz_rappelz::skills::SkillBook>,
     pub jobs: HashMap<i32, JobInfo>,
     pub npcs: Vec<NpcSpawn>,
     pub teleports: Vec<Teleport>,
@@ -115,6 +116,10 @@ impl GameData {
             Err(e) => tracing::warn!("Job.dbc : {e}"),
         }
         tracing::info!(">> {} métiers chargés (Job.dbc)", jobs.len());
+        let skills=match rz_rappelz::skills::SkillBook::open(&dbc_dir) {
+            Ok(book)=>{tracing::info!(">> apprentissage : {:?} compétences/règles/métiers",book.counts());Some(book)},
+            Err(error)=>{tracing::warn!("Apprentissage indisponible : {error}");None},
+        };
 
         let npc_res = NamedDbc::open(&dbc_dir, "npcresource").ok();
         let rows = sqlx::query(
@@ -215,7 +220,7 @@ impl GameData {
         let monster_spawns = rz_database::world::monster_spawns(world, NPC_ENTRY_OFFSET).await?;
         tracing::info!(">> {} monstres placés (acore_world.creature)", monster_spawns.len());
 
-        Ok(Self { jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns })
+        Ok(Self { skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns })
     }
 
     pub fn find_teleport(&self, name: &str) -> Option<&Teleport> {
