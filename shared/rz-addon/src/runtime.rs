@@ -18,6 +18,7 @@ pub struct UnitState {
     pub handle: u32,
     pub name: String,
     pub level: Option<i32>,
+    pub layer: Option<u8>,
     pub health: Option<i32>,
     pub max_health: Option<i32>,
     pub mana: Option<i32>,
@@ -398,6 +399,7 @@ impl AddonRuntime {
             "UnitMana",
             "UnitManaMax",
             "UnitLevel",
+            "UnitLayer",
         ] {
             let state = self.state.clone();
             globals.raw_set(
@@ -420,6 +422,7 @@ impl AddonRuntime {
                                 "UnitHealthMax" => u.max_health,
                                 "UnitMana" => u.mana,
                                 "UnitManaMax" => u.max_mana,
+                                "UnitLayer" => u.layer.map(i32::from),
                                 _ => u.level,
                             })
                             .map_or(Value::Nil, |n| Value::Number(n as f64)),
@@ -608,6 +611,14 @@ impl AddonRuntime {
         if let (Some(before), Some(after)) = (&old.player, &state.player) {
             // Only a known transition of the same player is a death/revival.
             if before.handle == after.handle {
+                if let (Some(a), Some(b)) = (before.layer, after.layer) {
+                    if a != b {
+                        self.dispatch(Event::new(
+                            "RAPPELZ_LAYER_CHANGED",
+                            vec![EventArg::Number(b as f64)],
+                        ));
+                    }
+                }
                 match (before.health, after.health) {
                     (Some(a), Some(b)) if a > 0 && b <= 0 => {
                         self.dispatch(Event::new("PLAYER_DEAD", vec![]))

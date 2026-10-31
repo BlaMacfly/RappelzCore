@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 use crate::{App, NetCmd, NetEvent};
 
+pub(super) mod layer;
 pub(super) mod revival;
 pub(super) mod visibility;
 
@@ -26,6 +27,10 @@ pub struct PacketTrace {
     warps: Vec<Value>,
     moves: Vec<Value>,
     order: u64,
+    logins: Vec<Value>,
+    dialogs: Vec<Value>,
+    denied_attacks: Vec<Value>,
+    targets: Vec<u32>,
     errors: Vec<String>,
 }
 
@@ -39,6 +44,10 @@ impl PacketTrace {
             + self.experience.len()
             + self.warps.len()
             + self.moves.len()
+            + self.logins.len()
+            + self.dialogs.len()
+            + self.denied_attacks.len()
+            + self.targets.len()
             + self.errors.len()
             >= 2048
         {
@@ -54,6 +63,7 @@ impl PacketTrace {
                     let (name, creature, kind) = match &e.kind {
                         EnterKind::Player(p) => (p.name.as_str(), &p.creature, "player"),
                         EnterKind::Monster { creature, .. } => ("", creature, "monster"),
+                        EnterKind::Npc { creature, .. } => ("", creature, "npc"),
                         _ => return Ok(()),
                     };
                     self.enters.push(json!({"handle":e.handle,"name":name,"kind":kind,"level":creature.level,
@@ -66,10 +76,24 @@ impl PacketTrace {
                     self.lifecycle
                         .push(json!({"event":"leave","handle":handle}));
                 }
-                NetEvent::Warp { x, y, z } => self.warps.push(json!({"x":x,"y":y,"z":z})),
+                NetEvent::Warp { x, y, z, layer } => self.warps.push(json!({"x":x,"y":y,"z":z,"layer":layer})),
+                NetEvent::LoginResult(l) => self.logins.push(json!({"handle":l.handle,"name":l.name,"layer":l.layer,"x":l.x,"y":l.y})),
                 NetEvent::Move(m) => self.moves.push(json!({"handle":m.handle,"time":m.start_time,
                     "layer":m.tlayer,"speed":m.speed,"points":m.points.iter().map(|p|[p.x,p.y]).collect::<Vec<_>>(),"order":self.order})),
                 NetEvent::Packet(p) => match p.id {
+                    id::TS_SC_DIALOG => {
+                        let d = game::ScDialog::from_packet(p)?;
+                        self.dialogs.push(json!({"npc":d.npc_handle,"kind":"dialog","order":self.order}));
+                    }
+                    id::TS_SC_MARKET => {
+                        let d = game::ScMarket::from_packet(p)?;
+                        self.dialogs.push(json!({"npc":d.npc_handle,"kind":"market","order":self.order}));
+                    }
+                    id::TS_SC_CANT_ATTACK => {
+                        let d = game::ScCantAttack::from_packet(p)?;
+                        self.denied_attacks.push(json!({"attacker":d.attacker,"target":d.target,"reason":d.reason}));
+                    }
+                    id::TS_SC_TARGET => self.targets.push(game::Handle::<{id::TS_SC_TARGET}>::from_packet(p)?.0),
                     id::TS_SC_ATTACK_EVENT => {
                         let packet = game::ScAttackEvent::from_packet(p)?;
                         for hit in &packet.attacks {
@@ -105,7 +129,8 @@ impl PacketTrace {
 
     fn json(&self) -> Value {
         json!({"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
-            "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors})
+            "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors,
+            "logins":self.logins,"dialogs":self.dialogs,"denied_attacks":self.denied_attacks,"targets":self.targets})
     }
 }
 
@@ -187,6 +212,52 @@ mod tests {
         assert!(trace.moves[1]["order"].as_u64() > trace.moves[0]["order"].as_u64());
         assert_eq!(trace.errors, ["combat trace capacity exceeded"]);
     }
+
+    #[test]
+    fn layer_trace_retains_login_warp_and_denial_fields_and_bounds_dialogs() {
+        let mut trace = PacketTrace::default();
+        trace.observe(&NetEvent::LoginResult(rz_proto::msg::ScLoginResult {
+            handle: 7,
+            layer: 1,
+            ..Default::default()
+        }));
+        trace.observe(&NetEvent::Warp {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+            layer: 1,
+        });
+        trace.observe(&NetEvent::Packet(
+            game::ScCantAttack {
+                attacker: 7,
+                target: 8,
+                reason: 1,
+            }
+            .to_packet(),
+        ));
+        trace.observe(&NetEvent::Packet(
+            game::Handle::<{ id::TS_SC_TARGET }>(0).to_packet(),
+        ));
+        let dialog = NetEvent::Packet(
+            game::ScDialog {
+                dialog_type: 0,
+                npc_handle: 9,
+                title: String::new(),
+                text: String::new(),
+                menu: Vec::new(),
+            }
+            .to_packet(),
+        );
+        for _ in 0..3000 {
+            trace.observe(&dialog);
+        }
+        assert_eq!(trace.logins[0]["layer"], 1);
+        assert_eq!(trace.warps[0]["layer"], 1);
+        assert_eq!(trace.denied_attacks[0]["target"], 8);
+        assert_eq!(trace.targets, [0]);
+        assert_eq!(trace.dialogs.len(), 2044);
+        assert_eq!(trace.errors, ["combat trace capacity exceeded"]);
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -227,7 +298,7 @@ pub struct CombatValidation {
 }
 
 fn unit(unit: &UnitState) -> Value {
-    json!({"handle":unit.handle,"name":unit.name,"level":unit.level,"hp":unit.health,"max_hp":unit.max_health,"mp":unit.mana,"max_mp":unit.max_mana})
+    json!({"handle":unit.handle,"name":unit.name,"level":unit.level,"layer":unit.layer,"hp":unit.health,"max_hp":unit.max_health,"mp":unit.mana,"max_mp":unit.max_mana})
 }
 
 fn read(path: &Path) -> Option<Value> {

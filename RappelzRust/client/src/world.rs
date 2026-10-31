@@ -50,6 +50,31 @@ mod addon_vitals_tests {
         entity.apply_hpmp(0, 100, 0, 50, 12.0);
         assert_eq!(entity.dead_at, Some(12.0));
     }
+
+    #[test]
+    fn layer_warp_updates_real_adapter_and_clears_previous_layer_ui_without_graphics() {
+        let mut world=WorldState::from_login(&msg::ScLoginResult {
+            handle:7,name:"LuaLayer".into(),layer:0,hp:100,max_hp:100,mp:50,max_mp:50,..Default::default()
+        },Vec2::ZERO);
+        let mut peer=Entity::new("Peer".into(),Kind::Player,10.0,0.0,1,None);
+        peer.layer=Some(0);world.entities.insert(8,peer);world.target=Some(8);
+        world.dialog=Some(game::ScDialog { dialog_type:0,npc_handle:8,title:String::new(),text:String::new(),menu:Vec::new() });
+        world.market=Some(game::ScMarket { npc_handle:8,items:Vec::new() });
+        world.apply_warp(1.0,2.0,0.0,0);
+        assert_eq!(world.addon_state().target.unwrap().layer,Some(0));
+        world.apply_warp(5.0,6.0,0.0,1);
+        assert_eq!(world.addon_state().player.unwrap().layer,Some(1));
+        assert!(world.addon_state().target.is_none());
+        assert_eq!(world.entity_count(),0);assert!(!world.dialog_open());
+        assert_eq!(world.unit_position(7),Some((5.0,6.0)));
+        world.apply_warp(5.0,6.0,0.0,0);
+        assert_eq!(world.addon_state().player.unwrap().layer,Some(0));
+        assert!(world.entities.is_empty(),"return must wait for fresh ENTER, not revive cached objects");
+        world.apply_server_target(8);assert!(world.target.is_none());
+        world.entities.insert(8,Entity::new("Peer".into(),Kind::Player,0.0,0.0,1,None));
+        world.apply_server_target(8);assert_eq!(world.target,Some(8));
+        world.apply_server_target(0);assert!(world.target.is_none());
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -114,6 +139,7 @@ struct Entity {
     kind: Kind,
     motion: Motion,
     level: i32,
+    layer: Option<u8>,
     hp: i32,
     max_hp: i32,
     health_known: bool,
@@ -147,6 +173,7 @@ impl Entity {
     fn unit(&self, handle: u32) -> rz_addon::UnitState {
         rz_addon::UnitState {
             handle, name: self.name.clone(), level: Some(self.level),
+            layer: self.layer,
             health: self.health_known.then_some(self.hp), max_health: self.health_known.then_some(self.max_hp),
             mana: self.mana.map(|(current, _)| current), max_mana: self.mana.map(|(_, maximum)| maximum),
         }
@@ -158,6 +185,7 @@ impl Entity {
             kind,
             motion: Motion::at(x, y),
             level,
+            layer: None,
             hp: 1,
             max_hp: 1,
             health_known: false,
@@ -189,6 +217,7 @@ struct FloatText {
 pub struct WorldState {
     clock: Instant,
     handle: u32,
+    layer: u8,
     name: String,
     me: Entity,
     entities: HashMap<u32, Entity>,
@@ -228,6 +257,10 @@ pub struct WorldState {
 
 impl WorldState {
     pub fn new(lr: &msg::ScLoginResult) -> Self {
+        Self::from_login(lr, mouse_position().into())
+    }
+
+    fn from_login(lr: &msg::ScLoginResult, last_mouse: Vec2) -> Self {
         let chat_log = vec![(YELLOW, "Bienvenue dans RappelzRust. Entrée : chat, .help : commandes, I : inventaire.".to_string())];
         let race = lr.race;
         let sex = lr.sex;
@@ -237,6 +270,7 @@ impl WorldState {
         Self {
             clock: Instant::now(),
             handle: lr.handle,
+            layer: lr.layer,
             name: lr.name.clone(),
             me,
             entities: HashMap::new(),
@@ -244,7 +278,7 @@ impl WorldState {
             cam_yaw: std::f32::consts::FRAC_PI_2 + 0.4,
             cam_pitch: 0.45,
             cam_dist: 140.0,
-            last_mouse: mouse_position().into(),
+            last_mouse,
             press_pos: None,
             last_move_sent: 0.0,
             last_dir: Vec2::ZERO,
@@ -306,6 +340,7 @@ impl WorldState {
         rz_addon::GameState {
             player: Some(rz_addon::UnitState {
                 handle: self.handle, name: self.name.clone(), level: self.addon_level,
+                layer: Some(self.layer),
                 health: Some(self.hp), max_health: Some(self.max_hp), mana: Some(self.mp), max_mana: Some(self.max_mp),
             }),
             target: self.target.and_then(|h| self.unit(h)),
@@ -343,6 +378,12 @@ impl WorldState {
     }
 
     pub fn experience(&self) -> (i64, i64) { (self.exp, self.jp) }
+    pub fn layer(&self) -> u8 { self.layer }
+    pub fn entity_count(&self) -> usize { self.entities.len() }
+    pub fn dialog_open(&self) -> bool { self.dialog.is_some() || self.market.is_some() }
+    pub fn visible_npc(&self) -> Option<rz_addon::UnitState> {
+        self.entities.iter().filter(|(_,e)|e.kind==Kind::Npc).min_by_key(|(h,_)|**h).map(|(h,e)|e.unit(*h))
+    }
 
     /// Programmatic route uses the same local prediction as keyboard/mouse movement.
     pub fn move_path(&mut self, points: Vec<MovePoint>) -> Option<NetCmd> {
@@ -390,7 +431,7 @@ impl WorldState {
                 if e.handle == self.handle {
                     return;
                 }
-                let entity = match &e.kind {
+                let mut entity = match &e.kind {
                     EnterKind::Player(p) => {
                         let mut ent = Entity::new(p.name.clone(), Kind::Player, e.x, e.y, p.creature.level, Some(RigKey::Player { race: p.creature.race as i32, sex: p.sex as i32 }));
                         ent.set_vitals(p.creature.hp, p.creature.max_hp, p.creature.mp, p.creature.max_mp);
@@ -413,6 +454,7 @@ impl WorldState {
                     }
                     EnterKind::Other { obj_type, .. } => Entity::new(format!("Objet {obj_type}"), Kind::Other, e.x, e.y, 0, None),
                 };
+                entity.layer = Some(e.layer);
                 self.entities.insert(e.handle, entity);
             }
             NetEvent::Leave(h) => {
@@ -420,11 +462,14 @@ impl WorldState {
                 if self.target == Some(h) {
                     self.target = None;
                 }
+                if self.dialog.as_ref().is_some_and(|d|d.npc_handle==h) { self.dialog=None; }
+                if self.market.as_ref().is_some_and(|m|m.npc_handle==h) { self.market=None; }
             }
             NetEvent::Move(m) => {
                 let speed = m.speed as f32;
                 if m.handle == self.handle {
                     self.speed = speed.max(1.0);
+                    self.layer = m.tlayer;
                     return;
                 }
                 if let Some(e) = self.entities.get_mut(&m.handle) {
@@ -432,11 +477,7 @@ impl WorldState {
                     e.motion = Motion { x, y, start: now, points: m.points, speed };
                 }
             }
-            NetEvent::Warp { x, y, z } => {
-                let _ = z; // la hauteur est recalculée depuis le terrain
-                self.me.motion = Motion::at(x, y);
-                self.log(YELLOW, format!("Téléporté en {x:.0}, {y:.0}."));
-            }
+            NetEvent::Warp { x, y, z, layer } => self.apply_warp(x, y, z, layer),
             NetEvent::Chat { sender, chat_type: t, message } => {
                 let (color, line) = match t {
                     chat_type::WHISPER => (Color::from_rgba(255, 128, 255, 255), format!("[{sender}] chuchote : {message}")),
@@ -476,6 +517,11 @@ impl WorldState {
         let previous_inventory = matches!(p.id, gid::TS_SC_INVENTORY | gid::TS_SC_DESTROY_ITEM | gid::TS_SC_ITEM_WEAR_INFO)
             .then(|| self.inventory.clone());
         match p.id {
+            gid::TS_SC_TARGET => {
+                if let Ok(target)=game::Handle::<{gid::TS_SC_TARGET}>::from_packet(&p) {
+                    self.apply_server_target(target.0);
+                }
+            }
             gid::TS_SC_INVENTORY => {
                 if let Ok(inv) = game::ScInventory::from_packet(&p) {
                     for it in inv.items {
@@ -593,6 +639,20 @@ impl WorldState {
             self.cam_dist * self.cam_pitch.cos() * self.cam_yaw.sin(),
         );
         Camera3D { position: focus + offset, target: focus + vec3(0.0, 12.0, 0.0), up: Vec3::Y, fovy: 0.9, z_near: 2.0, z_far: 9000.0, ..Default::default() }
+    }
+
+    fn apply_server_target(&mut self, handle:u32) {
+        self.target=self.entities.contains_key(&handle).then_some(handle);
+    }
+
+    fn apply_warp(&mut self, x: f32, y: f32, _z: f32, layer: u8) {
+        // Terrain supplies rendered height. Previous-layer entities/UI cannot survive the transition.
+        if self.layer != layer {
+            self.entities.clear(); self.target=None; self.dialog=None; self.market=None;
+        }
+        self.layer=layer;
+        self.me.motion=Motion::at(x,y);
+        self.log(YELLOW,format!("Téléporté en {x:.0}, {y:.0}."));
     }
 
     fn project(cam: &Camera3D, p: Vec3) -> Option<Vec2> {

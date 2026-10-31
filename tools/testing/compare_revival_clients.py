@@ -58,8 +58,10 @@ def assess(victim, witness):
         expected = 1 if role == "victim" else 0
         check(f"{role} has correct death/alive/logout events", events.get("PLAYER_DEAD", 0) == expected
               and events.get("PLAYER_ALIVE", 0) == expected and events.get("PLAYER_LOGOUT") == 1)
-    check("only the victim receives the spawn WARP", v.get("warps") == [{"x": 8330.0, "y": 7167.0, "z": 0.0}]
-          and w.get("warps") == [])
+    warps = v.get("warps", [])
+    check("only the victim receives the spawn WARP", len(warps) == 1
+          and all(warps[0].get(k) == value for k, value in {"x": 8330.0, "y": 7167.0, "z": 0.0}.items())
+          and warps[0].get("layer", 0) == 0 and w.get("warps") == [])
     messages = victim.get("messages", [])
     dead = [i for i, m in enumerate(messages) if "EVENT PLAYER_DEAD " in m and " HP=0/100 " in m]
     alive = [i for i, m in enumerate(messages) if "EVENT PLAYER_ALIVE " in m and " HP=100/100 " in m]

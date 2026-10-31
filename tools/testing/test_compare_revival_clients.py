@@ -62,6 +62,9 @@ class RevivalComparisonTest(unittest.TestCase):
         v, w = reports()
         w["trace"]["experience"][0]["jp"] = 3
         self.assertFalse(assess(v, w)["success"])
+        v, w = reports()
+        v["trace"]["warps"][0]["layer"] = 1
+        self.assertFalse(assess(v, w)["success"])
 
 
 if __name__ == "__main__":

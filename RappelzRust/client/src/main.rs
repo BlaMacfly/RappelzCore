@@ -150,7 +150,7 @@ async fn main() {
     let sfx_volume = config.get("Sound_SFXVolume", "0.7").parse().unwrap_or(0.7);
     let rzui = assets.as_mut().map(|a| rzui::RzUi::new(a, font.clone()));
     let mut app = App {
-        combat_trace: (arg_value("-validate-combat").is_some() || arg_value("-validate-revival").is_some() || arg_value("-validate-visibility").is_some()).then(Default::default),
+        combat_trace: ["-validate-combat","-validate-revival","-validate-visibility","-validate-layer"].iter().any(|flag|arg_value(flag).is_some()).then(Default::default),
         addons: addons::Addons::new(&root),
         addon_realm: "offline".into(),
         rzui,
@@ -196,12 +196,21 @@ async fn main() {
         app.send(NetCmd::Login { host, port, account: account.to_string(), password: password.to_string() });
     }
     let screenshot = arg_value("-screenshot");
-    let validation_args = match (arg_value("-validate-addons"), arg_value("-validate-combat"), arg_value("-validate-revival"), arg_value("-validate-visibility")) {
-        (Some(path), None, None, None) => Some(online_validation::OnlineValidation::new(PathBuf::from(path), &app)),
-        (None, Some(path), None, None) => Some(online_validation::OnlineValidation::combat(PathBuf::from(path), &app)),
-        (None, None, Some(path), None) => Some(online_validation::OnlineValidation::revival(PathBuf::from(path), &app)),
-        (None, None, None, Some(path)) => Some(online_validation::OnlineValidation::visibility(PathBuf::from(path), &app)),
-        (None, None, None, None) => None,
+    let validation_flags: Vec<_> = ["-validate-addons","-validate-combat","-validate-revival","-validate-visibility","-validate-layer"]
+        .into_iter().filter_map(|flag|arg_value(flag).map(|path|(flag,path))).collect();
+    let validation_args = match validation_flags.as_slice() {
+        [] => None,
+        [(flag,path)] => {
+            let plan=PathBuf::from(path.as_str());
+            Some(match *flag {
+                "-validate-addons"=>online_validation::OnlineValidation::new(plan,&app),
+                "-validate-combat"=>online_validation::OnlineValidation::combat(plan,&app),
+                "-validate-revival"=>online_validation::OnlineValidation::revival(plan,&app),
+                "-validate-visibility"=>online_validation::OnlineValidation::visibility(plan,&app),
+                "-validate-layer"=>online_validation::OnlineValidation::layer(plan,&app),
+                _=>unreachable!("validation flag comes from the fixed list"),
+            })
+        }
         _ => { tracing::error!("Choose only one validation scenario"); std::process::exit(2) },
     };
     let mut validation = validation_args.map(|result| {

@@ -30,6 +30,7 @@ fn state() -> GameState {
             handle: 7,
             name: "Gaia".into(),
             level: Some(42),
+            layer: Some(0),
             health: Some(765),
             max_health: Some(1000),
             mana: Some(50),
@@ -275,6 +276,82 @@ fn death_events_ignore_unknown_health_new_players_targets_and_reload() {
     rt.update_state(GameState::default());
     rt.update_state(state());
     assert!(rt.drain_messages().is_empty());
+}
+
+#[test]
+fn debug_addon_observes_known_layer_changes_including_zero_without_fake_reload_events() {
+    let dir = tempfile::tempdir().unwrap();
+    debug_addon(dir.path());
+    let mut rt = AddonRuntime::new(dir.path());
+    rt.load().unwrap();
+    let mut s = state();
+    rt.update_state(s.clone());
+    rt.drain_messages();
+    assert!(text(&rt).contains("Layer: 0"));
+    s.player.as_mut().unwrap().layer = Some(1);
+    rt.update_state(s.clone());
+    rt.update_state(s.clone());
+    let messages = rt.drain_messages();
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("EVENT RAPPELZ_LAYER_CHANGED 1 "))
+            .count(),
+        1
+    );
+    assert!(text(&rt).contains("Layer: 1"));
+    s.player.as_mut().unwrap().layer = Some(0);
+    rt.update_state(s);
+    assert_eq!(
+        rt.drain_messages()
+            .iter()
+            .filter(|m| m.contains("EVENT RAPPELZ_LAYER_CHANGED 0 "))
+            .count(),
+        1
+    );
+    rt.reload().unwrap();
+    assert!(!rt
+        .drain_messages()
+        .iter()
+        .any(|m| m.contains("EVENT RAPPELZ_LAYER_CHANGED ")));
+}
+
+#[test]
+fn unit_layer_keeps_unknown_nil_known_zero_and_suppresses_identity_discovery_events() {
+    let dir = tempfile::tempdir().unwrap();
+    addon(
+        dir.path(),
+        "Layer",
+        "",
+        r#"
+        local f=CreateFrame("Frame")
+        f:RegisterEvent("CHECK");f:RegisterEvent("RAPPELZ_LAYER_CHANGED")
+        f:SetScript("OnEvent",function(self,event,n) print(event,UnitLayer("player"),UnitLayer("target")) end)
+    "#,
+    );
+    let mut rt = AddonRuntime::new(dir.path());
+    rt.load().unwrap();
+    let mut s = state();
+    s.player.as_mut().unwrap().layer = None;
+    rt.update_state(s.clone());
+    rt.dispatch(Event::new("CHECK", vec![]));
+    assert!(rt.drain_messages()[0].contains("CHECK nil nil"));
+    s.player.as_mut().unwrap().layer = Some(0);
+    rt.update_state(s.clone());
+    assert!(rt.drain_messages().is_empty());
+    s.target = Some(UnitState {
+        handle: 9,
+        layer: Some(0),
+        ..Default::default()
+    });
+    rt.update_state(s.clone());
+    rt.dispatch(Event::new("CHECK", vec![]));
+    assert!(rt.drain_messages()[0].contains("CHECK 0 0"));
+    s.player.as_mut().unwrap().handle = 8;
+    s.player.as_mut().unwrap().layer = Some(1);
+    rt.update_state(s);
+    assert!(rt.drain_messages().is_empty());
+    assert!(rt.errors().is_empty());
 }
 
 #[test]

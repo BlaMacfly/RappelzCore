@@ -36,7 +36,7 @@ pub enum NetEvent {
     Enter(msg::ScEnter),
     Leave(u32),
     Move(msg::ScMove),
-    Warp { x: f32, y: f32, z: f32 },
+    Warp { x: f32, y: f32, z: f32, layer: u8 },
     Chat { sender: String, chat_type: u8, message: String },
     ChatLocal { handle: u32, message: String },
     Property { handle: u32, name: String, value: i64 },
@@ -196,7 +196,7 @@ async fn game_loop(
                     id::TS_SC_MOVE => NetEvent::Move(msg::ScMove::from_packet(&p)?),
                     id::TS_SC_WARP => {
                         let wp = msg::ScWarp::from_packet(&p)?;
-                        NetEvent::Warp { x: wp.x, y: wp.y, z: wp.z }
+                        NetEvent::Warp { x: wp.x, y: wp.y, z: wp.z, layer: wp.layer }
                     }
                     id::TS_SC_CHAT => {
                         let c = msg::ScChat::from_packet(&p)?;
