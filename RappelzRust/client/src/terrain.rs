@@ -93,6 +93,7 @@ struct CacheStats {
     last_submits: usize,
     last_completed_uploads: usize,
     worker_us: u64,
+    wanted_keys: Vec<(i32,i32)>,
 }
 
 pub struct Terrain {
@@ -106,6 +107,10 @@ pub struct Terrain {
     worker: Option<worker::Worker<bake::Input, Vec<u8>>>,
     async_enabled: bool,
     worker_error: Option<String>,
+    warp_cancel_enabled: bool,
+    focus_map: Option<(i32,i32)>,
+    warp_count: usize,
+    map_switches: usize,
     reference_validation: bool,
     validation_capture: Option<std::path::PathBuf>,
     layers: HashMap<String, Option<Arc<Rgba>>>,
@@ -139,6 +144,10 @@ impl Terrain {
             worker: worker::Worker::new(bake::run).ok(),
             async_enabled: true,
             worker_error: None,
+            warp_cancel_enabled: true,
+            focus_map: None,
+            warp_count: 0,
+            map_switches: 0,
             reference_validation: false,
             validation_capture: None,
             layers: HashMap::new(),
@@ -405,6 +414,18 @@ impl Terrain {
         self.worker.as_ref().map(|w| w.audit())
     }
 
+    pub(crate) fn validation_warp_cancel(&mut self, enabled:bool) {self.warp_cancel_enabled=enabled;}
+
+    /// Called from WARP acceptance, before target-map discovery or any new rendering work.
+    pub(crate) fn on_warp(&mut self,x:f32,y:f32) {
+        let map=((x/MAP_SIZE).floor() as i32,(y/MAP_SIZE).floor() as i32);
+        if self.focus_map.is_some_and(|old|old!=map) {self.map_switches+=1;}
+        self.focus_map=Some(map);self.warp_count+=1;
+        if let Some(worker)=&self.worker {
+            worker.warp(((x/CHUNK).floor() as i32,(y/CHUNK).floor() as i32),self.warp_cancel_enabled);
+        }
+    }
+
     pub(crate) fn cache_snapshot(&self) -> serde_json::Value {
         serde_json::json!({"bake_px":BAKE_PX,"bytes_per_chunk":BAKE_PX*BAKE_PX*4,
             "candidates":self.stats.candidates,"wanted":self.stats.wanted,"resident":self.chunks.len(),
@@ -421,12 +442,15 @@ impl Terrain {
             "active_job":self.worker.as_ref().map(|w|w.active_snapshot()),
             "submitted":self.stats.submitted,"completed":self.stats.completed,"cancelled":self.stats.cancelled,
             "last_submits":self.stats.last_submits,"last_completed_uploads":self.stats.last_completed_uploads,
-            "worker_us":self.stats.worker_us})
+            "worker_us":self.stats.worker_us,"focus_map":self.focus_map,"warp_count":self.warp_count,
+            "map_switches":self.map_switches,"warp_cancel_enabled":self.warp_cancel_enabled,
+            "wanted_keys":self.stats.wanted_keys})
     }
 
     /// Construit les morceaux visibles autour de (x, y) et dessine le sol.
     pub fn draw(&mut self, assets: &mut Assets, x: f32, y: f32, clip: Mat4) {
         let prepare = std::time::Instant::now();
+        self.focus_map=Some(((x/MAP_SIZE).floor() as i32,(y/MAP_SIZE).floor() as i32));
         self.stats.last_bakes = 0;
         self.stats.last_restores = 0;
         self.stats.last_submits = 0;
@@ -454,6 +478,7 @@ impl Terrain {
             self.stats.evicted += before - self.chunks.len();
         }
         self.stats.wanted = wanted.len();
+        self.stats.wanted_keys=wanted.clone();
         let keep: HashSet<_> = wanted.iter().copied().collect();
         if let Some(worker) = &self.worker {
             worker.cancel_unless(|key| self.async_enabled && keep.contains(&key));

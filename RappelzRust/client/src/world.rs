@@ -299,6 +299,7 @@ pub struct WorldState {
     props: HashMap<String, i64>,
     terrain: Option<Terrain>,
     terrain_validation_policy: Option<(bool, bool, bool)>,
+    terrain_warp_cancel: bool,
     models: ModelCache,
     hp: i32,
     max_hp: i32,
@@ -328,6 +329,10 @@ impl WorldState {
             terrain.validation_pixel_cache(pixels);
             terrain.validation_async(asynchronous);
         }
+    }
+    pub(crate) fn terrain_validation_warp_cancel(&mut self, enabled:bool) {
+        self.terrain_warp_cancel=enabled;
+        if let Some(terrain)=&mut self.terrain {terrain.validation_warp_cancel(enabled);}
     }
     pub(crate) fn terrain_validation_view(&mut self, reference: bool, view: usize) {
         let yaw = std::f32::consts::FRAC_PI_2 + 0.4;
@@ -395,6 +400,7 @@ impl WorldState {
             props: HashMap::new(),
             terrain: None,
             terrain_validation_policy: None,
+            terrain_warp_cancel: true,
             models: ModelCache::default(),
             hp: lr.hp,
             max_hp: lr.max_hp.max(1),
@@ -805,6 +811,7 @@ impl WorldState {
     }
 
     fn apply_warp(&mut self, x: f32, y: f32, _z: f32, layer: u8) {
+        if let Some(terrain)=&mut self.terrain {terrain.on_warp(x,y);}
         self.casting.clear();
         // Terrain supplies rendered height. Previous-layer entities/UI cannot survive the transition.
         if self.layer != layer {
@@ -891,6 +898,7 @@ impl WorldState {
         let now = self.now();
         if self.terrain.is_none() {
             let mut terrain = Terrain::new(assets);
+            terrain.validation_warp_cancel(self.terrain_warp_cancel);
             if let Some((reference, pixels, asynchronous)) = self.terrain_validation_policy {
                 terrain.validation_reference(reference);
                 terrain.validation_pixel_cache(pixels);

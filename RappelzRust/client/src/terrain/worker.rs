@@ -177,6 +177,10 @@ impl<I: Send + 'static, O: Send + 'static> Worker<I, O> {
     pub fn cancel_unless(&self, keep: impl Fn(Key) -> bool) {
         self.cancel_with("cancel_view", keep);
     }
+    pub fn warp(&self, destination:Key, cancel:bool) {
+        self.audit.record("warp",0,destination,0,false,false,false);
+        if cancel {self.cancel_with("cancel_warp",|_|false);}
+    }
     fn cancel_with(&self, event: &'static str, keep: impl Fn(Key) -> bool) {
         if let Some((id, key, t)) = &self.active {
             if !keep(*key) && !t.cancel.load(Ordering::Relaxed) {
@@ -324,6 +328,30 @@ mod tests {
             .unwrap()
             .iter()
             .any(|e| e["event"] == "polled_cancelled"));
+    }
+
+    #[test]
+    fn warp_discards_finished_work_even_when_the_chunk_remains_visible() {
+        let mut w=Worker::new(|_:(),_|Some(vec![3;16])).unwrap();w.submit((8,7),());
+        let end=Instant::now()+std::time::Duration::from_secs(2);
+        while w.active_snapshot()["finished"]!=true {assert!(Instant::now()<end);std::thread::yield_now();}
+        w.warp((8,7),true);w.cancel_unless(|_|true);
+        assert!(wait(&mut w).value.is_none());
+        assert!(w.audit().snapshot()["events"].as_array().unwrap().iter().any(|e|e["event"]=="cancel_warp"));
+    }
+
+    #[test]
+    fn rapid_warp_return_cannot_revive_an_interrupted_job() {
+        let rows=Arc::new(AtomicUsize::new(0));
+        let mut w=Worker::new(|p:Arc<AtomicUsize>,cancel|{
+            p.store(50,Ordering::Relaxed);while !cancel.load(Ordering::Relaxed){std::thread::yield_now();}None::<Vec<u8>>
+        }).unwrap();w.submit_tracked((8,7),rows.clone(),Some(rows.clone()));
+        let end=Instant::now()+std::time::Duration::from_secs(2);
+        while rows.load(Ordering::Relaxed)==0 {assert!(Instant::now()<end);std::thread::yield_now();}
+        w.warp((20,7),true);w.warp((8,7),true);assert!(wait(&mut w).value.is_none());
+        let audit=w.audit().snapshot();let events=audit["events"].as_array().unwrap();
+        assert_eq!(events.iter().filter(|e|e["event"]=="warp").count(),2);
+        assert_eq!(events.iter().filter(|e|e["event"]=="cancel_warp").count(),1);
     }
 
     #[test]

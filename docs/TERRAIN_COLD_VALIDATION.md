@@ -1,6 +1,6 @@
 # Background cold terrain blending: two-client validation
 
-This records the earlier steady cold-blending cycle. The latest [native cancellation/reconnection validation](TERRAIN_CANCELLATION_VALIDATION.md) now exercises actual partial view/lobby/TCP cancellations; the counts, hashes and untested-cancellation limits below belong to the earlier cycle.
+This records the earlier steady cold-blending cycle. The later [native cancellation/reconnection validation](TERRAIN_CANCELLATION_VALIDATION.md) exercises partial view/lobby/TCP cancellations, and [WARP/map validation](TERRAIN_WARP_VALIDATION.md) covers immediate teleport invalidation; the counts, hashes and untested-cancellation limits below belong to the earlier cycle.
 
 Verified **2026-10-31**, following [warm pixel reuse](TERRAIN_STREAMING_VALIDATION.md). Cached camera returns were already inexpensive, but a first visit still blended a 1024² texture in the rendering thread. This change moves that CPU blend to one background worker per active world while preserving exact pixels and existing cache/GPU limits.
 
