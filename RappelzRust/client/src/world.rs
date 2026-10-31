@@ -21,6 +21,7 @@ mod party_ui;
 mod skills_ui;
 mod casting;
 mod job_ui;
+mod character_ui;
 
 const MAP_TILE: f32 = 16128.0;
 const MINIMAP_PIECES: i32 = 16;
@@ -280,6 +281,8 @@ struct FloatText {
 }
 
 pub struct WorldState {
+    combat_stats:Option<msg::CombatStats>,
+    show_character:bool,
     job_progress:Option<rz_proto::job::ScJobProgress>,
     job_pending:bool,
     casting:HashMap<u32,(u16,u8,f64,u32)>,
@@ -393,7 +396,7 @@ impl WorldState {
             clock: Instant::now(),
             casting:HashMap::new(),skill_cooldowns:BTreeMap::new(),skill_event:None,
             handle: lr.handle,
-            job_progress:None,job_pending:false,learned_skills:None,skill_catalog:None,addon_jp:None,show_skills:false,skill_page:0,
+            combat_stats:None,show_character:false,job_progress:None,job_pending:false,learned_skills:None,skill_catalog:None,addon_jp:None,show_skills:false,skill_page:0,
             party:None,show_party:true,
             layer: lr.layer,
             name: lr.name.clone(),
@@ -465,6 +468,7 @@ impl WorldState {
 
     pub fn addon_state(&self) -> rz_addon::GameState {
         rz_addon::GameState {
+            combat_stats:self.combat_stats.map(|s|rz_addon::CombatStatsState{attack:s.attack,defence:s.defence,move_speed:s.move_speed}),
             player: Some(rz_addon::UnitState {
                 handle: self.handle, name: self.name.clone(), level: self.addon_level,
                 layer: Some(self.layer),
@@ -675,6 +679,9 @@ impl WorldState {
         let previous_inventory = matches!(p.id, gid::TS_SC_INVENTORY | gid::TS_SC_DESTROY_ITEM | gid::TS_SC_ITEM_WEAR_INFO)
             .then(|| self.inventory.clone());
         match p.id {
+            msg::id::TS_SC_STAT_INFO=>{
+                if let Ok(packet)=msg::ScStatInfo::from_packet(&p){if packet.handle==self.handle{if let Some(stats)=packet.combat_stats(){self.combat_stats=Some(stats);}}}
+            }
             rz_proto::job::SC_JOB_PROGRESS=>{
                 if let Ok(state)=rz_proto::job::ScJobProgress::from_packet(&p){if state.target==self.handle{if state.jp>=0{self.jp=state.jp;self.addon_jp=Some(state.jp);}self.job_progress=Some(state);self.job_pending=false;}}
             }
@@ -1205,11 +1212,13 @@ impl WorldState {
         self.draw_minimap(assets, now);
 
         // Fenêtres ouvertes.
-        if is_key_pressed(KeyCode::K) && !self.chat_open {self.show_skills = !self.show_skills;}
+        if is_key_pressed(KeyCode::C)&&!self.chat_open {let show=!self.show_character;self.show_character(show);if show{if let Some(command)=self.request_combat_stats(){out.push(command);}}}
+        if self.show_character {over|=self.draw_character(assets,ui,out);}
+        if is_key_pressed(KeyCode::K) && !self.chat_open {self.show_skills = !self.show_skills;if self.show_skills{self.show_character=false;}}
         if self.show_skills {over |= self.draw_skills(assets,ui,out);}
         if is_key_pressed(KeyCode::P) && !self.chat_open {self.show_party = !self.show_party;}
         if self.party.as_ref().is_some_and(|p|p.invite.is_some()) {self.show_party=true;}
-        if self.show_party && !self.show_skills {over |= self.draw_party(ui,out);}
+        if self.show_party && !self.show_skills && !self.show_character {over |= self.draw_party(ui,out);}
         if is_key_pressed(KeyCode::I) && !self.chat_open {
             self.show_inventory = !self.show_inventory;
         }

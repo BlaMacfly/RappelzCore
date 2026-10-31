@@ -7,5 +7,5 @@ mod ui;
 mod xml;
 
 pub use manifest::{Manifest, INTERFACE_VERSION};
-pub use runtime::{AddonInfo, AddonRuntime, Event, EventArg, GameState, UnitState, SkillEventState};
+pub use runtime::{AddonInfo, AddonRuntime, Event, EventArg, GameState, UnitState, SkillEventState, CombatStatsState};
 pub use ui::{DrawWidget, Rect, Widget, WidgetKind};

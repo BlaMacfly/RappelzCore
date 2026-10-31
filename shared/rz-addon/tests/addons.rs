@@ -53,6 +53,17 @@ fn job_level_callbacks_read_committed_level_and_exact_wide_jp_once(){
     rt.update_state(s.clone());rt.update_state(s.clone());let lines=rt.drain_messages();assert_eq!(lines.len(),1);assert!(lines[0].contains("JOB 1 1 9007199254740993"));
     s.job_level=Some(2);s.job_points=Some(0);rt.update_state(s.clone());rt.update_state(s);let lines=rt.drain_messages();assert_eq!(lines.len(),1);assert!(lines[0].contains("JOB 2 2 0"));assert!(rt.errors().is_empty());
 }
+#[test]
+fn combat_stats_callbacks_use_confirmed_whole_snapshots_and_keep_unknown_nil(){
+    let root=tempfile::tempdir().unwrap();addon(root.path(),"Stats","",r#"
+        print("INITIAL",GetPlayerCombatStat("attack"),GetPlayerCombatStat("target"))
+        local f=CreateFrame("Frame") f:RegisterEvent("RAPPELZ_COMBAT_STATS_CHANGED")
+        f:SetScript("OnEvent",function() print("STATS",GetPlayerCombatStat("attack"),GetPlayerCombatStat("defence"),GetPlayerCombatStat("move_speed")) end)
+    "#);
+    let mut rt=AddonRuntime::new(root.path());rt.load().unwrap();assert!(rt.drain_messages().iter().any(|s|s.contains("INITIAL nil nil")));let mut s=state();rt.update_state(s.clone());assert!(rt.drain_messages().is_empty());
+    s.combat_stats=Some(rz_addon::CombatStatsState{attack:20,defence:8,move_speed:120});rt.update_state(s.clone());rt.update_state(s.clone());let m=rt.drain_messages();assert_eq!(m.len(),1);assert!(m[0].contains("STATS 20 8 120"));
+    s.combat_stats=Some(rz_addon::CombatStatsState{attack:24,defence:10,move_speed:120});rt.update_state(s.clone());rt.update_state(s);let m=rt.drain_messages();assert_eq!(m.len(),1);assert!(m[0].contains("STATS 24 10 120"));assert!(rt.errors().is_empty());
+}
 
 fn text(runtime: &AddonRuntime) -> String {
     runtime

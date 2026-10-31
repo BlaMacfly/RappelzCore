@@ -15,6 +15,8 @@ rebuilt by reverse engineering (REA / Ghidra) the **Rappelz NoLimits** client
 (`Rappelz NoLimits\SFrame.exe`). The launcher label is 1.3.60; the executable's exact Epic/patch
 identity remains unresolved (see [binary evidence](docs/CLIENT_REVERSE_ENGINEERING.md)).
 
+**Latest follow-up:** the [C character sheet](docs/CHARACTER_STATS_VALIDATION.md) now shows own attack/defence/speed from actual server combat state, refreshed after XP level-up and reentry. Two real clients pass **35 checks**, including a wrong-stat old-server control and direct SQL reward checks. **196 Rust + 123 Python tests pass** (one Rust ignored, 24 Lua included). Existing data/settings and primary services are preserved. Verified job-bonus/promotion rules remain separate.
+
 Current continuation: a working **Lua 5.1 addon foundation**, native addon manager, XML subset and
 persistent RappelzDebug demonstration are included. See [development status](docs/DEVELOPMENT_STATUS.md)
 and the [API compatibility matrix](docs/LUA_API_COMPATIBILITY.md) for tested scope and remaining work.

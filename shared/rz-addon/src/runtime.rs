@@ -30,8 +30,14 @@ pub struct SkillEventState {
     pub sequence:u64,pub skill:u16,pub phase:String,pub caster:u32,pub amount:i32,
 }
 
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub struct CombatStatsState {
+    pub attack:i32,pub defence:i32,pub move_speed:i16,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GameState {
+    pub combat_stats:Option<CombatStatsState>,
     pub player: Option<UnitState>,
     pub target: Option<UnitState>,
     pub money: Option<i64>,
@@ -497,6 +503,10 @@ impl AddonRuntime {
         globals.raw_set("GetJobPointsExact",lua.create_function(move |_,()|Ok(state.borrow().job_points.map(|v|v.to_string())))?)?;
         let state=self.state.clone();
         globals.raw_set("GetJobLevel",lua.create_function(move |_,()|Ok(state.borrow().job_level))?)?;
+        let state=self.state.clone();
+        globals.raw_set("GetPlayerCombatStat",lua.create_function(move |_,field:String|{
+            Ok(state.borrow().combat_stats.and_then(|s|match field.as_str(){"attack"=>Some(s.attack),"defence"=>Some(s.defence),"move_speed"=>Some(i32::from(s.move_speed)),_=>None}))
+        })?)?;
         let start = self.start;
         globals.raw_set(
             "GetTime",
@@ -760,6 +770,7 @@ impl AddonRuntime {
         if old.job_level!=state.job_level {
             if let Some(level)=state.job_level {self.dispatch(Event::new("RAPPELZ_JOB_LEVEL_CHANGED",vec![EventArg::Number(f64::from(level))]));}
         }
+        if old.combat_stats!=state.combat_stats && state.combat_stats.is_some(){self.dispatch(Event::new("RAPPELZ_COMBAT_STATS_CHANGED",vec![]));}
         if old.skill_event!=state.skill_event {
             if let Some(e)=&state.skill_event {
                 self.dispatch(Event::new("RAPPELZ_SKILL_EVENT",vec![EventArg::Number(f64::from(e.skill)),e.phase.clone().into(),EventArg::Number(f64::from(e.caster)),EventArg::Number(f64::from(e.amount))]));

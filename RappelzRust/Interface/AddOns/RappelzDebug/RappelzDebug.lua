@@ -13,7 +13,7 @@ function RappelzDebugRefresh()
     if RappelzDebugInfo == nil then return end
     RappelzDebugInfo:SetText(
         "Player: " .. (UnitName("player") or "(not in world)") ..
-        "\nLevel: " .. known(UnitLevel("player")) ..
+        "\nLevel: " .. known(UnitLevel("player")) .. "  AP: " .. known(GetPlayerCombatStat and GetPlayerCombatStat("attack")) .. "  DEF: " .. known(GetPlayerCombatStat and GetPlayerCombatStat("defence")) ..
         "\nLayer: " .. known(UnitLayer("player")) ..
         "\nHP: " .. known(UnitHealth("player")) .. " / " .. known(UnitHealthMax("player")) ..
         "\nMP: " .. known(UnitMana("player")) .. " / " .. known(UnitManaMax("player")) ..
@@ -42,6 +42,7 @@ function RappelzDebugOnLoad(self)
     self:RegisterEvent("SKILL_LINES_CHANGED")
     self:RegisterEvent("RAPPELZ_JP_CHANGED")
     self:RegisterEvent("RAPPELZ_JOB_LEVEL_CHANGED")
+    self:RegisterEvent("RAPPELZ_COMBAT_STATS_CHANGED")
     self:RegisterEvent("RAPPELZ_SKILL_EVENT")
     self:RegisterEvent("PARTY_INVITE_REQUEST")
     self:RegisterEvent("RAPPELZ_PARTY_INVITE_CLOSED")
@@ -64,6 +65,7 @@ function RappelzDebugOnEvent(self, event, ...)
         skillPhase = event == "RAPPELZ_SKILL_EVENT" and select(2, ...) or nil,
         skillCaster = event == "RAPPELZ_SKILL_EVENT" and select(3, ...) or nil,
         skillAmount = event == "RAPPELZ_SKILL_EVENT" and select(4, ...) or nil,
+        attack = GetPlayerCombatStat and GetPlayerCombatStat("attack"), defence = GetPlayerCombatStat and GetPlayerCombatStat("defence"), moveSpeed = GetPlayerCombatStat and GetPlayerCombatStat("move_speed"),
         name = UnitName("player"), level = UnitLevel("player"), layer = UnitLayer("player"),
         hp = UnitHealth("player"), maxHP = UnitHealthMax("player"),
         mp = UnitMana("player"), maxMP = UnitManaMax("player"),
@@ -84,7 +86,7 @@ function RappelzDebugOnEvent(self, event, ...)
         " HP=" .. known(snapshot.hp) .. "/" .. known(snapshot.maxHP) ..
         " MP=" .. known(snapshot.mp) .. "/" .. known(snapshot.maxMP) ..
         " money=" .. known(snapshot.money) .. " targetHP=" .. known(snapshot.targetHP) .. " layer=" .. known(snapshot.layer) ..
-        " party=" .. known(snapshot.party) .. " partyHP=" .. known(snapshot.partyHP) .. " skills=" .. known(snapshot.skills) .. " jp=" .. known(snapshot.jp) .. " jlv=" .. known(snapshot.jobLevel))
+        " party=" .. known(snapshot.party) .. " partyHP=" .. known(snapshot.partyHP) .. " skills=" .. known(snapshot.skills) .. " jp=" .. known(snapshot.jp) .. " jlv=" .. known(snapshot.jobLevel) .. " attack=" .. known(snapshot.attack) .. " defence=" .. known(snapshot.defence) .. " speed=" .. known(snapshot.moveSpeed))
     if event == "ADDON_LOADED" and select(1, ...) == "RappelzDebug" then
         RappelzDebugDB.loads = (RappelzDebugDB.loads or 0) + 1
         print("ADDON_LOADED; Lua " .. _VERSION)

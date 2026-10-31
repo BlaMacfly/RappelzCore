@@ -11,6 +11,7 @@ use std::{
 };
 
 #[path="job_progression.rs"] mod job_progression;
+#[path="character_stats.rs"] mod character_stats;
 
 #[derive(Debug, PartialEq)]
 enum Stage {
@@ -34,6 +35,7 @@ enum Stage {
 }
 pub struct LearningValidation {
     job:Option<job_progression::JobValidation>,
+    stats:Option<character_stats::StatsValidation>,
     directory: PathBuf,
     role: String,
     peer: String,
@@ -66,9 +68,11 @@ impl LearningValidation {
             !directory.join(format!("{role}.json")).exists(),
             "fresh attempt required"
         );
+        ensure!(!(p["job_progression"]==true&&p["character_stats"]==true),"choose one progression scenario");
+        let stats=if p["character_stats"]==true{Some(character_stats::StatsValidation::new(&p,app)?)}else{None};
         let job=if p["job_progression"]==true{Some(job_progression::JobValidation::new(&p,app)?)}else{None};
         Ok(Self {
-            job,
+            job,stats,
             directory,
             role,
             peer,
@@ -89,6 +93,7 @@ impl LearningValidation {
         })
     }
     pub fn message(&mut self, message: &str) {
+        if let Some(stats)=self.stats.as_mut(){stats.message(message);return;}
         if let Some(job)=self.job.as_mut(){job.message(message);return;}
         if let Some(s) = message.strip_prefix("[RappelzDebug] EVENT ") {
             if let Some(e) = s.split_whitespace().next() {
@@ -176,6 +181,7 @@ impl LearningValidation {
         ));
     }
     pub fn tick(&mut self, app: &mut App) -> Result<bool> {
+        if let Some(stats)=self.stats.as_mut(){return stats.tick(app);}
         if let Some(job)=self.job.as_mut(){return job.tick(app);}
         ensure!(
             app.error.is_none()
@@ -450,11 +456,13 @@ impl LearningValidation {
         Ok(false)
     }
     pub fn fail(&mut self, error: anyhow::Error) {
+        if let Some(stats)=self.stats.as_mut(){stats.fail(error);return;}
         if let Some(job)=self.job.as_mut(){job.fail(error);return;}
         self.failure = Some(format!("{error:#}"));
         let _ = self.capture(&format!("{}-failure", self.role));
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
+        if let Some(stats)=self.stats.as_ref(){return stats.finish(app);}
         if let Some(job)=self.job.as_ref(){return job.finish(app);}
         let success = self.stage == Stage::Done && self.failure.is_none();
         mark(
