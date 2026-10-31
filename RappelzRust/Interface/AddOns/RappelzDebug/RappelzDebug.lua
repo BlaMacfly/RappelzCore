@@ -19,7 +19,7 @@ function RappelzDebugRefresh()
         "\nMP: " .. known(UnitMana("player")) .. " / " .. known(UnitManaMax("player")) ..
         "\nMoney: " .. known(GetMoney()) ..
         "\nParty: " .. known(GetNumPartyMembers()) .. "  Member: " .. (UnitName("party1") or "(none)") ..
-        "\nSkills: " .. known(GetNumKnownSkills()) .. "  JP: " .. known(GetJobPoints()) ..
+        "\nJob level: " .. known(GetJobLevel and GetJobLevel()) .. "  Skills: " .. known(GetNumKnownSkills()) .. "  JP: " .. known(GetJobPointsExact and GetJobPointsExact() or GetJobPoints()) ..
         "\nTarget: " .. (UnitName("target") or "(none)") ..
         "\nTarget level: " .. known(UnitLevel("target")) ..
         "\nTarget layer: " .. known(UnitLayer("target")) ..
@@ -41,6 +41,7 @@ function RappelzDebugOnLoad(self)
     self:RegisterEvent("RAPPELZ_PARTY_STATE_READY")
     self:RegisterEvent("SKILL_LINES_CHANGED")
     self:RegisterEvent("RAPPELZ_JP_CHANGED")
+    self:RegisterEvent("RAPPELZ_JOB_LEVEL_CHANGED")
     self:RegisterEvent("RAPPELZ_SKILL_EVENT")
     self:RegisterEvent("PARTY_INVITE_REQUEST")
     self:RegisterEvent("RAPPELZ_PARTY_INVITE_CLOSED")
@@ -69,7 +70,7 @@ function RappelzDebugOnEvent(self, event, ...)
         money = GetMoney(), target = UnitName("target"),
         party = GetNumPartyMembers(), party1 = UnitName("party1"), partyHP = UnitHealth("party1"),
         partyInvite = GetPartyInviteName(),
-        skills = GetNumKnownSkills(), jp = GetJobPoints(),
+        skills = GetNumKnownSkills(), jp = GetJobPointsExact and GetJobPointsExact() or GetJobPoints(), jobLevel = GetJobLevel and GetJobLevel(),
         targetHP = UnitHealth("target"), targetMaxHP = UnitHealthMax("target"),
         targetMP = UnitMana("target"), targetMaxMP = UnitManaMax("target"), targetLayer = UnitLayer("target")
     }
@@ -83,7 +84,7 @@ function RappelzDebugOnEvent(self, event, ...)
         " HP=" .. known(snapshot.hp) .. "/" .. known(snapshot.maxHP) ..
         " MP=" .. known(snapshot.mp) .. "/" .. known(snapshot.maxMP) ..
         " money=" .. known(snapshot.money) .. " targetHP=" .. known(snapshot.targetHP) .. " layer=" .. known(snapshot.layer) ..
-        " party=" .. known(snapshot.party) .. " partyHP=" .. known(snapshot.partyHP) .. " skills=" .. known(snapshot.skills) .. " jp=" .. known(snapshot.jp))
+        " party=" .. known(snapshot.party) .. " partyHP=" .. known(snapshot.partyHP) .. " skills=" .. known(snapshot.skills) .. " jp=" .. known(snapshot.jp) .. " jlv=" .. known(snapshot.jobLevel))
     if event == "ADDON_LOADED" and select(1, ...) == "RappelzDebug" then
         RappelzDebugDB.loads = (RappelzDebugDB.loads or 0) + 1
         print("ADDON_LOADED; Lua " .. _VERSION)

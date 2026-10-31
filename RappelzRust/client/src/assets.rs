@@ -11,6 +11,7 @@ use rz_mpq::MpqChain;
 use rz_rappelz::dbcstore::{NamedDbc, StringTable};
 
 pub struct Assets {
+    pub progression:Option<rz_rappelz::progression::ProgressionBook>,
     chain: MpqChain,
     by_basename: HashMap<String, String>,
     textures: HashMap<String, Option<Texture2D>>,
@@ -53,6 +54,7 @@ impl Assets {
         let monsters = dbc("monster", "Monster.dbc");
         let skills=dbc("skill","Skill.dbc");
         let restoration=rz_rappelz::restoration::RestorationBook::open(data_dir).ok();
+        let progression=rz_rappelz::progression::ProgressionBook::open(data_dir).ok();
         let item_res = chain
             .read_file(r"DBFilesClient\ItemResource.dbc")
             .ok()
@@ -65,7 +67,7 @@ impl Assets {
             by_basename.len(),
             strings.len()
         );
-        Ok(Self { chain, by_basename, textures: HashMap::new(), strings, npcs, jobs, items, monsters,skills,restoration, item_res })
+        Ok(Self { progression,chain, by_basename, textures: HashMap::new(), strings, npcs, jobs, items, monsters,skills,restoration, item_res })
     }
 
     /// Lit un fichier par chemin MPQ complet ou par nom Rappelz d'origine.

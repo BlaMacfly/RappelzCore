@@ -18,7 +18,9 @@ Core lifecycle/state events were observed in the actual native/local-server sess
 | `GetPartyInviteName()` | Read-only Rappelz extension; actual pending inviter name, otherwise nil. No invitation/group action APIs are exposed. |
 | `GetNumKnownSkills()` | Read-only Rappelz extension: nil until a private full skill list is accepted, then actual distinct learned count, including zero. |
 | `GetSkillLevel(id)` | Read-only Rappelz extension: learned base level; nil for unavailable state/invalid ID, zero for a positive unlearned ID in a known list. |
-| `GetJobPoints()` | Read-only Rappelz extension: actual own EXP_UPDATE JP, nil until received; known zero is preserved. |
+| `GetJobPoints()` | Read-only Rappelz extension: accepted own EXP_UPDATE/private job-preview JP, nil until known; zero is preserved. Numeric Lua 5.1 precision limits apply. |
+| `GetJobPointsExact()` | Read-only exact decimal string of the same signed-64-bit JP balance; nil until known, `"0"` for known zero. No double conversion. |
+| `GetJobLevel()` | Read-only own level from the accepted private job preview; nil when unavailable. Initial/reentry state and confirmed purchases are verified with two native clients. |
 | `GetTime()` | Monotonic time since this addon host started; survives UI reload. |
 | `print(...)` | Bounded client log and in-world chat output. |
 | Other WoW/game action APIs | Absent; calling one raises the normal attributed Lua nil-function error. No combat/inventory command API is exposed. |
@@ -54,6 +56,8 @@ Core lifecycle/state events were observed in the actual native/local-server sess
 Handler convention: `function(self, event, ...)`. Legacy `this`, `event`, `arg1` globals are not supplied. Hidden frames can still receive registered events, as registration is independent of visibility.
 
 [SKILL_LEARNING_VALIDATION.md](SKILL_LEARNING_VALIDATION.md) verifies both skill/JP events and APIs with two native clients. No Lua learning/casting action API is exposed. Lua 5.1 double numbers can lose integer precision above 2^53, including very large JP.
+
+[Current-job progression](JOB_PROGRESSION_VALIDATION.md) verifies `RAPPELZ_JOB_LEVEL_CHANGED(newLevel)` on initial discovery, confirmed JLV change and real reentry. Callbacks read the accepted JLV/JP state; unchanged previews/reload do not duplicate it. Owner counts 4 events across two purchases/two entries; witness counts 2 initial-entry events and receives no private gains. The exact decimal JP API preserves values beyond 2^53; legacy numeric APIs/events retain their documented limits. No Lua job-purchase action is exposed.
 
 ## UI bindings
 

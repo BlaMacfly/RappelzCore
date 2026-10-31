@@ -20,6 +20,7 @@ use crate::terrain::Terrain;
 mod party_ui;
 mod skills_ui;
 mod casting;
+mod job_ui;
 
 const MAP_TILE: f32 = 16128.0;
 const MINIMAP_PIECES: i32 = 16;
@@ -279,6 +280,8 @@ struct FloatText {
 }
 
 pub struct WorldState {
+    job_progress:Option<rz_proto::job::ScJobProgress>,
+    job_pending:bool,
     casting:HashMap<u32,(u16,u8,f64,u32)>,
     skill_cooldowns:BTreeMap<u32,(f64,u32)>,
     skill_event:Option<rz_addon::SkillEventState>,
@@ -390,7 +393,7 @@ impl WorldState {
             clock: Instant::now(),
             casting:HashMap::new(),skill_cooldowns:BTreeMap::new(),skill_event:None,
             handle: lr.handle,
-            learned_skills:None,skill_catalog:None,addon_jp:None,show_skills:false,skill_page:0,
+            job_progress:None,job_pending:false,learned_skills:None,skill_catalog:None,addon_jp:None,show_skills:false,skill_page:0,
             party:None,show_party:true,
             layer: lr.layer,
             name: lr.name.clone(),
@@ -478,6 +481,7 @@ impl WorldState {
             party_invite:self.party.as_ref().and_then(|p|p.invite.as_ref().map(|i|i.name.clone())),
             bag_revision: self.bag_revision,
             learned_skills:self.learned_skills.clone(),job_points:self.addon_jp,
+            job_level:self.job_progress.as_ref().filter(|p|p.status!=rz_proto::job::status::INVALID_CHARACTER).map(|p|p.job_level),
             skill_event:self.skill_event.clone(),
         }
     }
@@ -671,6 +675,9 @@ impl WorldState {
         let previous_inventory = matches!(p.id, gid::TS_SC_INVENTORY | gid::TS_SC_DESTROY_ITEM | gid::TS_SC_ITEM_WEAR_INFO)
             .then(|| self.inventory.clone());
         match p.id {
+            rz_proto::job::SC_JOB_PROGRESS=>{
+                if let Ok(state)=rz_proto::job::ScJobProgress::from_packet(&p){if state.target==self.handle{if state.jp>=0{self.jp=state.jp;self.addon_jp=Some(state.jp);}self.job_progress=Some(state);self.job_pending=false;}}
+            }
             gid::TS_SC_SKILL=>{
                 if let Ok(event)=game::ScSkill::from_packet(&p){self.apply_restoration(event,now);}
             }

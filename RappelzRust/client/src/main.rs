@@ -152,7 +152,7 @@ async fn main() {
     let sfx_volume = config.get("Sound_SFXVolume", "0.7").parse().unwrap_or(0.7);
     let rzui = assets.as_mut().map(|a| rzui::RzUi::new(a, font.clone()));
     let mut app = App {
-        validation_input_locked:arg_value("-validate-corpse-skill").is_some() || arg_value("-validate-terrain").is_some() || arg_value("-validate-terrain-cancel").is_some() || arg_value("-validate-terrain-warp").is_some() || arg_value("-validate-terrain-network").is_some() || arg_value("-validate-terrain-restart").is_some() || arg_value("-validate-gameplay-restart").is_some(),
+        validation_input_locked:arg_value("-validate-skills").is_some() || arg_value("-validate-corpse-skill").is_some() || arg_value("-validate-terrain").is_some() || arg_value("-validate-terrain-cancel").is_some() || arg_value("-validate-terrain-warp").is_some() || arg_value("-validate-terrain-network").is_some() || arg_value("-validate-terrain-restart").is_some() || arg_value("-validate-gameplay-restart").is_some(),
         combat_trace: ["-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting","-validate-corpse-skill","-validate-terrain","-validate-terrain-cancel","-validate-terrain-warp","-validate-terrain-network","-validate-terrain-restart","-validate-gameplay-restart"].iter().any(|flag|arg_value(flag).is_some()).then(Default::default),
         addons: addons::Addons::new(&root),
         addon_realm: "offline".into(),
@@ -347,7 +347,7 @@ impl App {
                     }
                 }
                 // Learning refusals are normal gameplay responses; the server supplies a notice/catalog.
-                NetEvent::Result {request,..} if matches!(request,rz_proto::msg_game::id::TS_CS_LEARN_SKILL|rz_proto::msg_game::id::TS_CS_SKILL)=>{},
+                NetEvent::Result {request,..} if matches!(request,rz_proto::msg_game::id::TS_CS_LEARN_SKILL|rz_proto::msg_game::id::TS_CS_SKILL|rz_proto::job::CS_JOB_LEVEL_UP)=>{},
                 NetEvent::Result { request, result } => {
                     if result != 0 {
                         self.error = Some(match (request, result) {

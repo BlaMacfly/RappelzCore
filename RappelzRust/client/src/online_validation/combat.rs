@@ -21,6 +21,8 @@ pub(super) mod visibility;
 
 #[derive(Default)]
 pub struct PacketTrace {
+    job_progress:Vec<Value>,
+    job_results:Vec<u16>,
     chats: Vec<Value>,
     network_errors: Vec<String>,
     disconnects: Vec<String>,
@@ -109,11 +111,13 @@ impl PacketTrace {
                 NetEvent::Chat {sender,chat_type,message} if *chat_type==rz_proto::msg::chat_type::PARTY => {
                     self.party_chats.push(json!({"sender":sender,"message":message}));
                 }
+                NetEvent::Result {request,result} if *request==rz_proto::job::CS_JOB_LEVEL_UP=>self.job_results.push(*result),
                 NetEvent::Result {request,result} if *request==id::TS_CS_LEARN_SKILL=>self.learn_results.push(*result),
                 NetEvent::Result {request,result} if *request==id::TS_CS_SKILL=>self.cast_results.push(*result),
                 NetEvent::Move(m) => self.moves.push(json!({"handle":m.handle,"time":m.start_time,
                     "layer":m.tlayer,"speed":m.speed,"points":m.points.iter().map(|p|[p.x,p.y]).collect::<Vec<_>>(),"order":self.order})),
                 NetEvent::Packet(p) => match p.id {
+                    rz_proto::job::SC_JOB_PROGRESS=>{let j=rz_proto::job::ScJobProgress::from_packet(p)?;self.job_progress.push(json!({"target":j.target,"job":j.job,"jlv":j.job_level,"jp":j.jp,"cost":j.cost,"status":j.status,"base":j.base,"order":self.order}));}
                     id::TS_SC_SKILL=>{
                         let event=game::ScSkill::from_packet(p)?;
                         let phase=rz_proto::restoration::decode(&event)?;
@@ -185,7 +189,7 @@ impl PacketTrace {
     }
 
     pub(super) fn json(&self) -> Value {
-        json!({"order":self.order,"hit_orders":self.hit_orders,"vitals_orders":self.vitals_orders,"experience_orders":self.experience_orders,"chats":self.chats,"network_errors":self.network_errors,"disconnects":self.disconnects,"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"level_orders":self.level_orders,"gold":self.gold,"gold_orders":self.gold_orders,"experience":self.experience,
+        json!({"job_progress":self.job_progress,"job_results":self.job_results,"order":self.order,"hit_orders":self.hit_orders,"vitals_orders":self.vitals_orders,"experience_orders":self.experience_orders,"chats":self.chats,"network_errors":self.network_errors,"disconnects":self.disconnects,"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"level_orders":self.level_orders,"gold":self.gold,"gold_orders":self.gold_orders,"experience":self.experience,
             "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors,
             "logins":self.logins,"dialogs":self.dialogs,"denied_attacks":self.denied_attacks,"targets":self.targets,
             "party_states":self.party_states,"party_chats":self.party_chats,"skill_lists":self.skill_lists,"skill_catalogs":self.skill_catalogs,"learn_results":self.learn_results,"cast_events":self.cast_events,"cast_results":self.cast_results})

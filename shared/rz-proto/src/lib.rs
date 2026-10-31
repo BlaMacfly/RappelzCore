@@ -11,6 +11,7 @@ pub mod party;
 pub mod secure;
 pub mod skills;
 pub mod restoration;
+pub mod job;
 
 pub use msg::Message;
 pub use packet::{RawPacket, Reader, Writer};

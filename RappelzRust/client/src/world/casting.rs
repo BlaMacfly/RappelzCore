@@ -4,7 +4,7 @@ use rz_proto::restoration::{decode, Phase};
 impl WorldState {
     pub fn focus_skill(&mut self, id: u32) {
         self.show_skills = true;
-        let per_page = (((screen_height() - 190.).clamp(300., 530.) - 135.) / 62.)
+        let per_page = (((screen_height() - 190.).clamp(300., 530.) - 225.) / 62.)
             .floor()
             .max(1.) as usize;
         if let Some(index) = self

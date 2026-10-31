@@ -42,6 +42,7 @@ pub struct GameState {
     pub party_invite: Option<String>,
     pub learned_skills: Option<BTreeMap<u32, u8>>,
     pub job_points: Option<i64>,
+    pub job_level: Option<i32>,
     pub skill_event:Option<SkillEventState>,
     /// Incremented by the client only after a changed inventory is accepted.
     pub bag_revision: u64,
@@ -492,6 +493,10 @@ impl AddonRuntime {
             "GetJobPoints",
             lua.create_function(move |_, ()| Ok(state.borrow().job_points))?,
         )?;
+        let state=self.state.clone();
+        globals.raw_set("GetJobPointsExact",lua.create_function(move |_,()|Ok(state.borrow().job_points.map(|v|v.to_string())))?)?;
+        let state=self.state.clone();
+        globals.raw_set("GetJobLevel",lua.create_function(move |_,()|Ok(state.borrow().job_level))?)?;
         let start = self.start;
         globals.raw_set(
             "GetTime",
@@ -751,6 +756,9 @@ impl AddonRuntime {
                     vec![EventArg::Number(jp as f64)],
                 ));
             }
+        }
+        if old.job_level!=state.job_level {
+            if let Some(level)=state.job_level {self.dispatch(Event::new("RAPPELZ_JOB_LEVEL_CHANGED",vec![EventArg::Number(f64::from(level))]));}
         }
         if old.skill_event!=state.skill_event {
             if let Some(e)=&state.skill_event {

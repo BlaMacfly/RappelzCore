@@ -10,6 +10,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[path="job_progression.rs"] mod job_progression;
+
 #[derive(Debug, PartialEq)]
 enum Stage {
     Join,
@@ -31,6 +33,7 @@ enum Stage {
     Done,
 }
 pub struct LearningValidation {
+    job:Option<job_progression::JobValidation>,
     directory: PathBuf,
     role: String,
     peer: String,
@@ -63,7 +66,9 @@ impl LearningValidation {
             !directory.join(format!("{role}.json")).exists(),
             "fresh attempt required"
         );
+        let job=if p["job_progression"]==true{Some(job_progression::JobValidation::new(&p,app)?)}else{None};
         Ok(Self {
+            job,
             directory,
             role,
             peer,
@@ -84,6 +89,7 @@ impl LearningValidation {
         })
     }
     pub fn message(&mut self, message: &str) {
+        if let Some(job)=self.job.as_mut(){job.message(message);return;}
         if let Some(s) = message.strip_prefix("[RappelzDebug] EVENT ") {
             if let Some(e) = s.split_whitespace().next() {
                 *self.events.entry(e.into()).or_default() += 1;
@@ -170,6 +176,7 @@ impl LearningValidation {
         ));
     }
     pub fn tick(&mut self, app: &mut App) -> Result<bool> {
+        if let Some(job)=self.job.as_mut(){return job.tick(app);}
         ensure!(
             app.error.is_none()
                 && app.addons.error.is_none()
@@ -443,10 +450,12 @@ impl LearningValidation {
         Ok(false)
     }
     pub fn fail(&mut self, error: anyhow::Error) {
+        if let Some(job)=self.job.as_mut(){job.fail(error);return;}
         self.failure = Some(format!("{error:#}"));
         let _ = self.capture(&format!("{}-failure", self.role));
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
+        if let Some(job)=self.job.as_ref(){return job.finish(app);}
         let success = self.stage == Stage::Done && self.failure.is_none();
         mark(
             &self.directory,

@@ -40,6 +40,8 @@ impl WorldState {
         if close.contains(mouse) && is_mouse_button_pressed(MouseButton::Left) {
             self.show_skills = false;
         }
+        let job=self.job_progress.clone();
+        if let Some(job)=job {self.draw_job_progression(&job,r,ui,out);}
         let Some(state) = self.skill_catalog.as_ref() else {
             ui.label(
                 "Informations d'apprentissage indisponibles.",
@@ -69,7 +71,7 @@ impl WorldState {
             );
             return r.contains(mouse);
         }
-        let per_page = ((r.h - 135.0) / 62.0).floor().max(1.0) as usize;
+        let per_page = ((r.h - 225.0) / 62.0).floor().max(1.0) as usize;
         let pages = state.entries.len().div_ceil(per_page).max(1);
         self.skill_page = self.skill_page.min(pages - 1);
         for (i, entry) in state
@@ -79,7 +81,7 @@ impl WorldState {
             .take(per_page)
             .enumerate()
         {
-            let y = r.y + 62.0 + i as f32 * 62.0;
+            let y = r.y + 152.0 + i as f32 * 62.0;
             if let Some(icon) = assets.skill_icon(entry.id) {
                 draw_texture_ex(
                     &icon,

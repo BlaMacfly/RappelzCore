@@ -40,6 +40,19 @@ fn state() -> GameState {
         ..Default::default()
     }
 }
+#[test]
+fn job_level_callbacks_read_committed_level_and_exact_wide_jp_once(){
+    let root=tempfile::tempdir().unwrap();addon(root.path(),"Jobs","",r#"
+        local f=CreateFrame("Frame")
+        f:RegisterEvent("RAPPELZ_JOB_LEVEL_CHANGED")
+        f:SetScript("OnEvent",function(self,event,level)
+            print("JOB",level,GetJobLevel(),GetJobPointsExact())
+        end)
+    "#);
+    let mut rt=AddonRuntime::new(root.path());rt.load().unwrap();rt.drain_messages();let mut s=state();s.job_level=Some(1);s.job_points=Some(9_007_199_254_740_993);
+    rt.update_state(s.clone());rt.update_state(s.clone());let lines=rt.drain_messages();assert_eq!(lines.len(),1);assert!(lines[0].contains("JOB 1 1 9007199254740993"));
+    s.job_level=Some(2);s.job_points=Some(0);rt.update_state(s.clone());rt.update_state(s);let lines=rt.drain_messages();assert_eq!(lines.len(),1);assert!(lines[0].contains("JOB 2 2 0"));assert!(rt.errors().is_empty());
+}
 
 fn text(runtime: &AddonRuntime) -> String {
     runtime

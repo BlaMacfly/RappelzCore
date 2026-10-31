@@ -31,6 +31,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Extrait les tables de progression d'archive en DBC sans perte 64 bits, séparés.
+    Progression {
+        #[arg(long)] client:PathBuf,
+        /// Racine Data client ou dbc serveur ; ajoute uniquement Progression/.
+        #[arg(long)] out:PathBuf,
+    },
     /// Extrait uniquement le profil 3212 archive, sans remplacer les DBC/MPQ existants.
     CorpseSkill {
         #[arg(long)] client:PathBuf,
@@ -95,6 +101,7 @@ enum Command {
 fn main() -> Result<()> {
     rz_common::init_logging("info");
     match Cli::parse().command {
+        Command::Progression{client,out}=>write_progression_profile(&client,&out),
         Command::CorpseSkill{client,out}=>write_corpse_profile(&client,&out),
         Command::Addons { out } => write_example_addon(&out),
         Command::Client {
@@ -115,6 +122,7 @@ fn main() -> Result<()> {
             }
             write_locale(&client, &data_dir, &locale, &codepage, compression)?;
             if let Err(error)=write_corpse_profile(&client,&data_dir){tracing::warn!("profil cadavre indisponible : {error:#}");}
+            if let Err(error)=write_progression_profile(&client,&data_dir){tracing::warn!("profil progression indisponible : {error:#}");}
             write_config(&out, &locale, &realmlist)?;
             write_example_addon(&out)?;
             tracing::info!("Terminé en {:.0?} → {}", started.elapsed(), out.display());
@@ -367,6 +375,17 @@ fn write_corpse_profile(client:&Path,out:&Path)->Result<()> {
     tracing::info!("3212 archive : cadavre monstre, {} PM nominaux, coût {} PM, incantation {} cs, recharge {} cs",quote.amount,quote.mp,quote.cast,quote.cooldown);
     Ok(())
 }
+fn write_progression_profile(client:&Path,out:&Path)->Result<()> {
+    let mut archive=DataArchive::open(client)?;let mut raw=BTreeMap::new();
+    for name in ["db_basicstat.rdb","db_exp.rdb","db_summonexp.rdb"] {
+        let entries:Vec<_>=archive.entries().iter().filter(|e|e.name.eq_ignore_ascii_case(name)).cloned().collect();
+        anyhow::ensure!(entries.len()==1,"archive : entrée {name} absente ou ambiguë");raw.insert(name,archive.read(&entries[0])?);
+    }
+    let book=rz_rappelz::progression::ProgressionBook::from_rdb(&raw["db_basicstat.rdb"],&raw["db_exp.rdb"],&raw["db_summonexp.rdb"])?;
+    let mut converted=book.to_dbc_files();let files=["BasicStat.dbc","Exp.dbc","SummonExp.dbc"].into_iter().map(|name|(name,converted.remove(name).expect("typed progression output"))).collect();
+    preserve_profile_files(&out.join("Progression"),files)?;
+    let (base,exp,summon)=book.counts();tracing::info!("Progression archive : {base} bases, {exp} niveaux EXP/JP, {summon} niveaux invocation ; entiers 64 bits conservés");Ok(())
+}
 fn preserve_profile_files<'a>(directory:&Path,files:BTreeMap<&'a str,Vec<u8>>)->Result<()> {
     use std::io::Write;
     // Preflight all existing files before writing anything; conflicting data is preserved.
@@ -472,6 +491,11 @@ fn extract_dbc(data: &Path, locale: &str, out: &Path) -> Result<()> {
     if profile.join("Skill.dbc").exists() && profile.join("SkillStage.dbc").exists() {
         let files=[("Skill.dbc",std::fs::read(profile.join("Skill.dbc"))?),("SkillStage.dbc",std::fs::read(profile.join("SkillStage.dbc"))?)].into_iter().collect();
         preserve_profile_files(&dbc_dir.join("CorpseSkill"),files)?;
+    }
+    if data.join("Progression").exists() {
+        let book=rz_rappelz::progression::ProgressionBook::open(data)?;let mut converted=book.to_dbc_files();
+        let files=["BasicStat.dbc","Exp.dbc","SummonExp.dbc"].into_iter().map(|name|(name,converted.remove(name).unwrap())).collect();
+        preserve_profile_files(&dbc_dir.join("Progression"),files)?;
     }
     Ok(())
 }
