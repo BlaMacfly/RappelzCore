@@ -24,6 +24,7 @@ enum Stage {
     Quiet,
     Recovered,
     PostFight,
+    ResumeSave,
     SaveLobby,
     Lobby,
     Durable,
@@ -37,6 +38,7 @@ pub struct GameplayRestartValidation {
     character: String,
     password: String,
     interrupt_save: bool,
+    durable_rewards: bool,
     stage: Stage,
     started: Instant,
     since: Instant,
@@ -61,6 +63,7 @@ impl GameplayRestartValidation {
             "separate auth and direct world sockets required"
         );
         let p: Value = serde_json::from_slice(&std::fs::read(plan)?)?;
+        ensure!(!(p["interrupt_save"]==true && p["durable_rewards"]==true), "choose one save strategy");
         let role = p["role"].as_str().context("role")?.to_owned();
         ensure!(role == "owner" || role == "witness", "role");
         let peer = p["peer"].as_str().context("peer")?.to_owned();
@@ -80,6 +83,7 @@ impl GameplayRestartValidation {
             character: app.auto_enter.clone().context("character")?,
             password: password.to_owned(),
             interrupt_save: p["interrupt_save"].as_bool().unwrap_or(false),
+            durable_rewards: p["durable_rewards"].as_bool().unwrap_or(false),
             stage: Stage::Join,
             started: Instant::now(),
             since: Instant::now(),
@@ -357,7 +361,7 @@ impl GameplayRestartValidation {
                     && self.ready(&format!("release-{label}"))
                 {
                     if self.stage == Stage::Initial && self.ready("actions-release") {
-                        if self.interrupt_save {
+                        if self.interrupt_save || self.durable_rewards {
                             self.record(app, "BeforeSaveActionsStarted");
                             if self.role == "witness" {
                                 self.move_to(app, Self::final_position(&self.role))?;
@@ -388,6 +392,13 @@ impl GameplayRestartValidation {
                         self.record(app, "ActionsStarted");
                         self.advance(Stage::Active);
                     } else if self.stage == Stage::Recovered {
+                        if self.durable_rewards {
+                            self.boundary=self.trace(app)["order"].as_u64().unwrap();
+                            self.record(app,"PostActionsStarted");
+                            if self.role=="witness" {self.move_to(app,Self::final_position(&self.role))?;}
+                            self.advance(Stage::ResumeSave);
+                            return Ok(false);
+                        }
                         self.boundary = self.trace(app)["order"].as_u64().unwrap();
                         self.record(app, "PostActionsStarted");
                         if self.role == "owner" {
@@ -494,11 +505,18 @@ impl GameplayRestartValidation {
                         && self.audits[0].instance() != self.audits[1].instance(),
                     "stale world"
                 );
+                let saved=self.read("reward-committed.json");
+                let expected=if self.durable_rewards && self.role=="owner" {(5,3)} else {(0,0)};
+                let raw=self.trace(app)["logins"].as_array().unwrap().last().unwrap().clone();
+                let vitals_ok=if self.durable_rewards {
+                    let profile=&saved.as_ref().context("reward checkpoint")?[&self.role];
+                    raw["hp"]==profile["health"] && raw["mp"]==profile["mp"]
+                } else {p.health==Some(100)};
                 ensure!(
                     self.at(app, &self.role, Self::checkpoint(&self.role))
                         && self.at(app, self.other(), Self::checkpoint(self.other()))
-                        && p.health == Some(100)
-                        && w.experience() == (0, 0),
+                        && vitals_ok
+                        && w.experience() == expected,
                     "last durable checkpoint not restored"
                 );
                 self.record(app, "CheckpointRestored");
@@ -547,6 +565,10 @@ impl GameplayRestartValidation {
                 }
                 if self.role == "owner" {
                     if w.experience() != (5, 3) {
+                        if before && self.durable_rewards {
+                            if !self.announced {self.record(app,"RewardWithheld");self.announced=true;}
+                            self.write("owner.pending-reward.json",json!({"unix_ms":SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis(),"xp_jp":app.world.as_ref().unwrap().experience(),"order":self.trace(app)["order"],"monster":self.monster}))?;
+                        }
                         return Ok(false);
                     }
                     self.write(if before {"owner.before-save-rewarded"} else {"owner.rewarded"}, json!({"xp":5,"jp":3}))?;
@@ -572,6 +594,14 @@ impl GameplayRestartValidation {
                     json!({"ready":true}),
                 )?;
                 self.advance(Stage::SaveLobby);
+            }
+            Stage::ResumeSave => {
+                ensure!(self.current_hits(app).is_empty(),"reward replay triggered combat");
+                if self.at(app,&self.role,Self::final_position(&self.role)) && self.at(app,self.other(),Self::final_position(self.other())) {
+                    self.record(app,"RewardRetained");
+                    self.write(&format!("{}.finish-ready",self.role),json!({"ready":true}))?;
+                    self.advance(Stage::SaveLobby);
+                }
             }
             Stage::PendingSave => {
                 if self.ready("server-killed.json") {
@@ -671,7 +701,7 @@ impl GameplayRestartValidation {
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
         let success = self.stage == Stage::Done && self.failure.is_none();
-        self.write(&format!("{}.json",self.role),json!({"scenario":if self.interrupt_save {"save-rollback"} else {"gameplay-restart"},"success":success,"failure":self.failure,"role":self.role,"character":self.character,"steps":self.steps,"samples":self.samples,"events":self.events,"audits":self.audits.iter().map(|a|a.snapshot()).collect::<Vec<_>>(),"trace":self.trace(app)}))?;
+        self.write(&format!("{}.json",self.role),json!({"scenario":if self.durable_rewards {"reward-durable"} else if self.interrupt_save {"save-rollback"} else {"gameplay-restart"},"success":success,"failure":self.failure,"role":self.role,"character":self.character,"steps":self.steps,"samples":self.samples,"events":self.events,"audits":self.audits.iter().map(|a|a.snapshot()).collect::<Vec<_>>(),"trace":self.trace(app)}))?;
         Ok(success)
     }
 }

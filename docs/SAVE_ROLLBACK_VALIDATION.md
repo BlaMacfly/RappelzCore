@@ -2,6 +2,8 @@
 
 Verified **2026-10-31**, extending [movement/combat restart coverage](GAMEPLAY_RESTART_VALIDATION.md). Two real Windows x64 clients complete a cooperative fight, then the isolated worldserver is killed **after both character UPDATEs and before either character_settings REPLACE can finish**. Both uncommitted saves roll back completely. A fresh fight after restart is saved normally and read back on a third entry.
 
+Subsequent implementation: [durable reward notifications](REWARD_DURABILITY_VALIDATION.md) now commits rewards before sending EXP/JP. This page records the earlier server behavior; its interrupted-save-after-announcement expectations require that retained previous server binary.
+
 ## What the test proves
 
 The existing `rz_database::characters::save` already performs the character UPDATE and Rappelz settings REPLACE in one InnoDB transaction. XP/position/health are in `characters`; JP and other extra fields are in `character_settings`. This cycle changes no backend save/reward code, schema, gameplay formula or asset. It adds a guarded observation strategy to the existing restart controller, a bounded SQL probe, an optional mode of the existing native driver and independent acceptance checks.
