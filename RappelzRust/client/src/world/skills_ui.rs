@@ -209,7 +209,7 @@ impl WorldState {
             if cancel.contains(mouse) && is_mouse_button_pressed(MouseButton::Left){out.push(self.cancel_skill());}
         }
         ui.label(
-            "PM sur soi · règle de cadavre à confirmer.",
+            "3212 : cadavre de monstre ciblé, puis consommé.",
             r.x + 12.0,
             r.y + r.h - 10.0,
             LIGHTGRAY,

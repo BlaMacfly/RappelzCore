@@ -31,6 +31,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Extrait uniquement le profil 3212 archive, sans remplacer les DBC/MPQ existants.
+    CorpseSkill {
+        #[arg(long)] client:PathBuf,
+        /// Racine Data client ou dbc serveur ; écrit uniquement le sous-dossier CorpseSkill.
+        #[arg(long)] out:PathBuf,
+    },
     /// Installe l'addon Lua de demonstration, sans modifier les fichiers deja presents.
     Addons {
         #[arg(long)]
@@ -89,6 +95,7 @@ enum Command {
 fn main() -> Result<()> {
     rz_common::init_logging("info");
     match Cli::parse().command {
+        Command::CorpseSkill{client,out}=>write_corpse_profile(&client,&out),
         Command::Addons { out } => write_example_addon(&out),
         Command::Client {
             client,
@@ -107,6 +114,7 @@ fn main() -> Result<()> {
                 write_common(&client, &data_dir, max_archive_mb << 20, compression)?;
             }
             write_locale(&client, &data_dir, &locale, &codepage, compression)?;
+            if let Err(error)=write_corpse_profile(&client,&data_dir){tracing::warn!("profil cadavre indisponible : {error:#}");}
             write_config(&out, &locale, &realmlist)?;
             write_example_addon(&out)?;
             tracing::info!("Terminé en {:.0?} → {}", started.elapsed(), out.display());
@@ -336,6 +344,48 @@ fn collect_rdb(client: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
     Ok(files)
 }
 
+/// Read archive entries directly: collect_rdb deliberately gives loose Resource overrides priority.
+fn write_corpse_profile(client:&Path,out:&Path)->Result<()> {
+    let mut archive=DataArchive::open(client)?;
+    let mut files=BTreeMap::new();
+    for (table,file) in [("skill","Skill.dbc"),("skillstage","SkillStage.dbc")] {
+        let name=format!("db_{table}.rdb");
+        let entries:Vec<_>=archive.entries().iter().filter(|e|e.name.eq_ignore_ascii_case(&name)).cloned().collect();
+        anyhow::ensure!(entries.len()==1,"archive : entrée {name} absente ou ambiguë");
+        let bytes=archive.read(&entries[0])?;
+        let mut decoded=rdb::parse_table(table,&bytes,&Decoder::new("windows-1252"))?;
+        let index=decoded.layout.index_of("id").context("profile id column")?;
+        decoded.rows.retain(|row|row[index].as_i64()==3212);
+        anyhow::ensure!(decoded.rows.len()==1,"archive : ligne 3212 absente ou ambiguë dans {name}");
+        files.insert(file,to_dbc::table_to_dbc(&decoded));
+    }
+    let skills=rz_rappelz::dbcstore::NamedDbc::from_bytes("skill",&files["Skill.dbc"])?;
+    let stages=rz_rappelz::dbcstore::NamedDbc::from_bytes("skillstage",&files["SkillStage.dbc"])?;
+    let quote=rz_rappelz::restoration::RestorationBook::from_corpse_tables(&skills,&stages).quote(3212,1).context("archive : profil 511/cadavre incompatible")?;
+    anyhow::ensure!(quote.corpse,"corpse profile required");
+    preserve_profile_files(&out.join("CorpseSkill"),files)?;
+    tracing::info!("3212 archive : cadavre monstre, {} PM nominaux, coût {} PM, incantation {} cs, recharge {} cs",quote.amount,quote.mp,quote.cast,quote.cooldown);
+    Ok(())
+}
+fn preserve_profile_files<'a>(directory:&Path,files:BTreeMap<&'a str,Vec<u8>>)->Result<()> {
+    use std::io::Write;
+    // Preflight all existing files before writing anything; conflicting data is preserved.
+    for (name,bytes) in &files {
+        let path=directory.join(name);
+        if path.exists(){anyhow::ensure!(std::fs::read(&path)?==*bytes,"profil existant différent : {} (préservé)",path.display());}
+    }
+    std::fs::create_dir_all(directory)?;
+    for (name,bytes) in files {
+        let path=directory.join(name);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file)=>{file.write_all(&bytes)?;file.sync_all()?;},
+            Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>{anyhow::ensure!(std::fs::read(&path)?==bytes,"profil concurrent différent préservé");},
+            Err(e)=>return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+
 fn write_locale(client: &Path, data_dir: &Path, locale: &str, codepage: &str, compression: u32) -> Result<()> {
     let path = data_dir.join(locale).join(format!("locale-{locale}.MPQ"));
     tracing::info!("Écriture de {}", path.display());
@@ -418,5 +468,10 @@ fn extract_dbc(data: &Path, locale: &str, out: &Path) -> Result<()> {
         }
     }
     tracing::info!("{n} fichiers DBC extraits vers {}", dbc_dir.display());
+    let profile=data.join("CorpseSkill");
+    if profile.join("Skill.dbc").exists() && profile.join("SkillStage.dbc").exists() {
+        let files=[("Skill.dbc",std::fs::read(profile.join("Skill.dbc"))?),("SkillStage.dbc",std::fs::read(profile.join("SkillStage.dbc"))?)].into_iter().collect();
+        preserve_profile_files(&dbc_dir.join("CorpseSkill"),files)?;
+    }
     Ok(())
 }

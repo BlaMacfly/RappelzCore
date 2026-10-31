@@ -206,6 +206,8 @@ struct Entity {
 
 impl Entity {
     fn renderable(&self, now: f64) -> bool {
+        // A monster corpse remains selectable until the server removes/consumes it.
+        if self.kind==Kind::Monster {return true;}
         !self.dead_at.is_some_and(|d| now - d > 2.0)
     }
 
@@ -266,7 +268,7 @@ struct FloatText {
 }
 
 pub struct WorldState {
-    casting:HashMap<u32,(u16,u8,f64)>,
+    casting:HashMap<u32,(u16,u8,f64,u32)>,
     skill_cooldowns:BTreeMap<u32,(f64,u32)>,
     skill_event:Option<rz_addon::SkillEventState>,
     learned_skills:Option<BTreeMap<u32,u8>>,
@@ -842,7 +844,7 @@ impl WorldState {
     }
 
     /// Met à jour la simulation, dessine la scène et l'interface, renvoie les commandes réseau.
-    pub fn update_and_draw(&mut self, assets: &mut Assets, ui: &mut RzUi, addon_mouse: bool, modal: bool) -> Vec<NetCmd> {
+    pub fn update_and_draw(&mut self, assets: &mut Assets, ui: &mut RzUi, addon_mouse: bool, modal: bool,input_locked:bool) -> Vec<NetCmd> {
         let mut out = Vec::new();
         let now = self.now();
         if self.terrain.is_none() {
@@ -858,18 +860,18 @@ impl WorldState {
 
         // Caméra : glisser avec le bouton gauche, molette pour le zoom.
         let mouse: Vec2 = mouse_position().into();
-        if is_mouse_button_pressed(MouseButton::Left) && !addon_mouse {
+        if is_mouse_button_pressed(MouseButton::Left) && !addon_mouse && !input_locked {
             self.press_pos = Some(mouse);
         }
         let dragging = self.press_pos.is_some_and(|p| (p - mouse).length() > 4.0);
-        if is_mouse_button_down(MouseButton::Left) && dragging && !self.chat_open && !addon_mouse {
+        if is_mouse_button_down(MouseButton::Left) && dragging && !self.chat_open && !addon_mouse && !input_locked {
             let d = mouse - self.last_mouse;
             self.cam_yaw += d.x * 0.008;
             self.cam_pitch = (self.cam_pitch + d.y * 0.006).clamp(0.05, 1.45);
         }
         self.last_mouse = mouse;
         let (_, wheel) = mouse_wheel();
-        if wheel != 0.0 && !addon_mouse {
+        if wheel != 0.0 && !addon_mouse && !input_locked {
             self.cam_dist = (self.cam_dist * if wheel > 0.0 { 0.9 } else { 1.1 }).clamp(30.0, 900.0);
         }
 
@@ -975,7 +977,7 @@ impl WorldState {
         }
 
         // Déplacement et interaction.
-        if !self.chat_open && !modal {
+        if !self.chat_open && !modal && !input_locked {
             self.handle_movement(&cam, mx, my, my_h, now, over_ui, &screen_labels, &mut out);
         }
         if is_mouse_button_released(MouseButton::Left) {

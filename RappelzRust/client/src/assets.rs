@@ -20,6 +20,7 @@ pub struct Assets {
     pub items: Option<NamedDbc>,
     pub monsters: Option<NamedDbc>,
     pub skills:Option<NamedDbc>,
+    pub restoration:Option<rz_rappelz::restoration::RestorationBook>,
     /// `ItemResource.dbc` : noms de fichiers référencés par les champs i16 d'Item.dbc.
     pub item_res: Vec<String>,
 }
@@ -51,6 +52,7 @@ impl Assets {
         let items = dbc("item", "Item.dbc");
         let monsters = dbc("monster", "Monster.dbc");
         let skills=dbc("skill","Skill.dbc");
+        let restoration=rz_rappelz::restoration::RestorationBook::open(data_dir).ok();
         let item_res = chain
             .read_file(r"DBFilesClient\ItemResource.dbc")
             .ok()
@@ -63,7 +65,7 @@ impl Assets {
             by_basename.len(),
             strings.len()
         );
-        Ok(Self { chain, by_basename, textures: HashMap::new(), strings, npcs, jobs, items, monsters,skills, item_res })
+        Ok(Self { chain, by_basename, textures: HashMap::new(), strings, npcs, jobs, items, monsters,skills,restoration, item_res })
     }
 
     /// Lit un fichier par chemin MPQ complet ou par nom Rappelz d'origine.
@@ -152,8 +154,7 @@ impl Assets {
         if name.is_empty(){format!("Compétence {id}")}else{name}
     }
     pub fn restoration_quote(&self,id:u32,level:u8)->Option<rz_rappelz::restoration::Quote>{
-        let row=self.skills.as_ref()?.by_id(i32::try_from(id).ok()?)?;
-        rz_rappelz::restoration::Restoration::from_row(row)?.quote(level)
+        self.restoration.as_ref()?.quote(u16::try_from(id).ok()?,level)
     }
     pub fn skill_icon(&mut self,id:u32)->Option<Texture2D> {
         let name=self.skills.as_ref()?.by_id(id as i32)?.str("icon_file_name").to_string();

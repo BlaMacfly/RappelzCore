@@ -15,6 +15,7 @@ pub(super) mod layer;
 pub(super) mod party;
 pub(super) mod learning;
 pub(super) mod casting;
+pub(super) mod corpse_skill;
 pub(super) mod revival;
 pub(super) mod visibility;
 
@@ -100,8 +101,9 @@ impl PacketTrace {
                     id::TS_SC_SKILL=>{
                         let event=game::ScSkill::from_packet(p)?;
                         let phase=rz_proto::restoration::decode(&event)?;
-                        let (phase,duration,amount)=match phase {rz_proto::restoration::Phase::Casting(n)=>("CASTING",n,0),rz_proto::restoration::Phase::Cancel=>("CANCEL",0,0),rz_proto::restoration::Phase::Fire{amount,..}=>("FIRE",0,amount)};
-                        self.cast_events.push(json!({"id":event.skill_id,"level":event.skill_level,"caster":event.caster,"target":event.target,"layer":event.layer,"phase":phase,"duration":duration,"amount":amount,"mp_cost":event.mp_cost,"caster_hp":event.caster_hp,"caster_mp":event.caster_mp,"order":self.order}));
+                        let corpse=matches!(phase,rz_proto::restoration::Phase::CorpseFire{..});
+                        let (phase,duration,amount)=match phase {rz_proto::restoration::Phase::Casting(n)=>("CASTING",n,0),rz_proto::restoration::Phase::Cancel=>("CANCEL",0,0),rz_proto::restoration::Phase::Fire{amount,..}|rz_proto::restoration::Phase::CorpseFire{amount,..}=>("FIRE",0,amount)};
+                        self.cast_events.push(json!({"id":event.skill_id,"level":event.skill_level,"caster":event.caster,"target":event.target,"layer":event.layer,"phase":phase,"duration":duration,"amount":amount,"mp_cost":event.mp_cost,"caster_hp":event.caster_hp,"caster_mp":event.caster_mp,"corpse_fire":corpse,"order":self.order}));
                     }
                     rz_proto::skills::SC_SKILL_CATALOG=>{
                         let state=rz_proto::skills::ScSkillCatalog::from_packet(p)?;self.skill_rows+=state.entries.len();

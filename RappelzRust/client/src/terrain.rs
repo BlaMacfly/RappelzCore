@@ -20,9 +20,11 @@ pub const MAP_SIZE: f32 = 16128.0;
 /// Côté d'un morceau de rendu (= une tuile de minicarte, 24 cases de 42).
 pub const CHUNK: f32 = 1008.0;
 const CHUNK_CELLS: usize = 24;
-const BAKE_PX: usize = 128;
+// 128 texels over 1008 world units discarded almost all source ground detail.
+// Match the chunk's world density with about one texel/unit, keeping original DETAIL repeats.
+const BAKE_PX: usize = 1024;
 /// Morceaux construits par image au plus (évite les saccades).
-const BUILDS_PER_FRAME: usize = 2;
+const BUILDS_PER_FRAME: usize = 1;
 
 struct Chunk {
     mesh: QMesh,
@@ -124,11 +126,19 @@ impl Terrain {
                     let Some((img, repeat)) = entry else { continue };
                     let u = (lx / *repeat).rem_euclid(1.0);
                     let v = (ly / *repeat).rem_euclid(1.0);
-                    let (ix, iy) = ((u * img.width as f32) as usize, (v * img.height as f32) as usize);
-                    let o = (iy.min(img.height as usize - 1) * img.width as usize + ix.min(img.width as usize - 1)) * 4;
+                    let (sx,sy)=(u*img.width as f32-0.5,v*img.height as f32-0.5);
+                    let (x0,y0)=(sx.floor() as i32,sy.floor() as i32);
+                    let (fx,fy)=(sx-sx.floor(),sy-sy.floor());
+                    let sample=|dx:i32,dy:i32,k:usize| {
+                        let x=(x0+dx).rem_euclid(img.width as i32) as usize;
+                        let y=(y0+dy).rem_euclid(img.height as i32) as usize;
+                        img.pixels[(y*img.width as usize+x)*4+k] as f32
+                    };
                     let a = if layer == 0 { 1.0 } else { w as f32 / 255.0 };
                     for k in 0..3 {
-                        c[k] = c[k] * (1.0 - a) + img.pixels[o + k] as f32 * a;
+                        let top=sample(0,0,k)*(1.-fx)+sample(1,0,k)*fx;
+                        let bottom=sample(0,1,k)*(1.-fx)+sample(1,1,k)*fx;
+                        c[k] = c[k] * (1.0 - a) + (top*(1.-fy)+bottom*fy)*a;
                     }
                 }
                 let o = (py * BAKE_PX + pxx) * 4;

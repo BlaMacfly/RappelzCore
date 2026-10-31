@@ -22,6 +22,7 @@ pub enum OnlineValidation {
     Party(combat::party::PartyValidation),
     Skills(combat::learning::LearningValidation),
     Casting(combat::casting::CastingValidation),
+    CorpseSkill(combat::corpse_skill::CorpseSkillValidation),
 }
 
 impl OnlineValidation {
@@ -43,6 +44,7 @@ impl OnlineValidation {
     pub fn party(plan:PathBuf,app:&App)->Result<Self> {Ok(Self::Party(combat::party::PartyValidation::new(plan,app)?))}
     pub fn skills(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::Skills(combat::learning::LearningValidation::new(plan,app)?))}
     pub fn casting(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::Casting(combat::casting::CastingValidation::new(plan,app)?))}
+    pub fn corpse_skill(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::CorpseSkill(combat::corpse_skill::CorpseSkillValidation::new(plan,app)?))}
     pub fn message(&mut self, message: &str) {
         match self {
             Self::Addons(v) => v.message(message),
@@ -53,6 +55,7 @@ impl OnlineValidation {
             Self::Party(v) => v.message(message),
             Self::Skills(v)=>v.message(message),
             Self::Casting(v)=>v.message(message),
+            Self::CorpseSkill(v)=>v.message(message),
         }
     }
     pub fn tick(&mut self, app: &mut App) -> Result<bool> {
@@ -65,6 +68,7 @@ impl OnlineValidation {
             Self::Party(v) => v.tick(app),
             Self::Skills(v)=>v.tick(app),
             Self::Casting(v)=>v.tick(app),
+            Self::CorpseSkill(v)=>v.tick(app),
         }
     }
     pub fn fail(&mut self, error: anyhow::Error) {
@@ -77,6 +81,7 @@ impl OnlineValidation {
             Self::Party(v) => v.fail(error),
             Self::Skills(v)=>v.fail(error),
             Self::Casting(v)=>v.fail(error),
+            Self::CorpseSkill(v)=>v.fail(error),
         }
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
@@ -89,6 +94,7 @@ impl OnlineValidation {
             Self::Party(v) => v.finish(app),
             Self::Skills(v)=>v.finish(app),
             Self::Casting(v)=>v.finish(app),
+            Self::CorpseSkill(v)=>v.finish(app),
         }
     }
 }

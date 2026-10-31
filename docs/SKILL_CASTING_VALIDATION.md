@@ -1,5 +1,7 @@
 # Skill casting: local MP restoration, interruption and cooldowns
 
+**Historical profile, superseded on 2026-10-31:** [SKILL_CORPSE_VALIDATION.md](SKILL_CORPSE_VALIDATION.md) identifies the archive/loose override discrepancy and validates the archived monster-corpse rule with 48 checks. The 34-check results below document the earlier loose effect-502 slice; they are not the current rule for 3212.
+
 Verified **2026-10-31**, Europe/Paris. Two native clients exit **0/0** and the final independent comparison passes **34/34 checks**. This slice adds the casting lifecycle, cancellation, authoritative MP restoration, private cooldowns and actual Lua diagnostics. **It implements the local effect-502 profile, not the original corpse mechanics of skill 3212.** Its localized name mentions a corpse, while the inspected data/reference dispatch describes self restoration; that disagreement remains explicit in the window and below.
 
 ## Evidence and the unresolved corpse rule

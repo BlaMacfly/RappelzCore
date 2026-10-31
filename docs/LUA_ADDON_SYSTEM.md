@@ -54,6 +54,8 @@ Implemented event names/arguments are in [LUA_API_COMPATIBILITY.md](LUA_API_COMP
 
 [SKILL_CASTING_VALIDATION.md](SKILL_CASTING_VALIDATION.md) adds RAPPELZ_SKILL_EVENT(id, phase, caster, nominal_amount) from accepted same-layer CASTING/CANCEL/FIRE packets. Confirmed FIRE vitals update before callbacks; duplicate HPMP/snapshots/reload do not replay changes. RappelzDebug logs phase/caster/amount, and the 34 native checks cover the original old-MP callback negative control. The current effect is a local self-MP profile; original 3212 corpse semantics remain unresolved.
 
+[SKILL_CORPSE_VALIDATION.md](SKILL_CORPSE_VALIDATION.md) supersedes the historical self-target profile with archive effect511: a separate selected corpse and caster beneficiary, eight matching phase events, 320 nominal MP and actual capped mana readable before Lua callbacks. Forty-eight native checks cover expiration/concurrency/consumption/respawn/privacy. No additional Lua action API or fabricated reward event was added.
+
 ## UI/XML subset
 
 Widgets are Rust-backed records rendered by macroquad. `CreateFrame`, frames, buttons, font strings, solid-color textures, basic status bars and tooltip-shaped panels work. Child font strings and textures can be created from Lua. Anchors support nine standard points, a single active point, relative widget/table/global-name anchors, WoW-style upward-positive Y offsets and inherited scale. Relative widgets must already exist; this prevents layout cycles. Forward anchor references, templates, multiple simultaneous anchors and automatic size solving are unsupported.

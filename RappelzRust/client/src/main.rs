@@ -51,6 +51,8 @@ const FIELD_PASSWORD: u32 = 2;
 const FIELD_NAME: u32 = 3;
 
 pub struct App {
+    /// Only automated corpse sessions suppress physical world commands; drivers still use send().
+    validation_input_locked:bool,
     combat_trace: Option<online_validation::PacketTrace>,
     addons: addons::Addons,
     addon_realm: String,
@@ -150,7 +152,8 @@ async fn main() {
     let sfx_volume = config.get("Sound_SFXVolume", "0.7").parse().unwrap_or(0.7);
     let rzui = assets.as_mut().map(|a| rzui::RzUi::new(a, font.clone()));
     let mut app = App {
-        combat_trace: ["-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting"].iter().any(|flag|arg_value(flag).is_some()).then(Default::default),
+        validation_input_locked:arg_value("-validate-corpse-skill").is_some(),
+        combat_trace: ["-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting","-validate-corpse-skill"].iter().any(|flag|arg_value(flag).is_some()).then(Default::default),
         addons: addons::Addons::new(&root),
         addon_realm: "offline".into(),
         rzui,
@@ -196,7 +199,7 @@ async fn main() {
         app.send(NetCmd::Login { host, port, account: account.to_string(), password: password.to_string() });
     }
     let screenshot = arg_value("-screenshot");
-    let validation_flags: Vec<_> = ["-validate-addons","-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting"]
+    let validation_flags: Vec<_> = ["-validate-addons","-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting","-validate-corpse-skill"]
         .into_iter().filter_map(|flag|arg_value(flag).map(|path|(flag,path))).collect();
     let validation_args = match validation_flags.as_slice() {
         [] => None,
@@ -211,6 +214,7 @@ async fn main() {
                 "-validate-party"=>online_validation::OnlineValidation::party(plan,&app),
                 "-validate-skills"=>online_validation::OnlineValidation::skills(plan,&app),
                 "-validate-casting"=>online_validation::OnlineValidation::casting(plan,&app),
+                "-validate-corpse-skill"=>online_validation::OnlineValidation::corpse_skill(plan,&app),
                 _=>unreachable!("validation flag comes from the fixed list"),
             })
         }
@@ -734,8 +738,8 @@ impl App {
 
     fn draw_world(&mut self) {
         let (Some(w), Some(a), Some(ui)) = (&mut self.world, &mut self.assets, &mut self.rzui) else { return };
-        let actions = w.update_and_draw(a, ui, self.addons.mouse_captured, self.addons.manager);
-        if w.take_reload_ui() { self.addons.reload(); }
+        let actions = w.update_and_draw(a, ui, self.addons.mouse_captured, self.addons.manager,self.validation_input_locked);
+        if w.take_reload_ui() && !self.validation_input_locked { self.addons.reload(); }
         // Écran de chargement : la scène se dessine dessous (textures préchargées), puis disparaît.
         if let Some((since, image)) = &self.loading {
             let t = (get_time() - since) as f32;
@@ -754,6 +758,7 @@ impl App {
                 draw_rectangle(sw * 0.2 + 2.0, sh - 38.0, (sw * 0.6 - 4.0) * progress, 8.0, GOLD);
             }
         }
+        if self.validation_input_locked {return;}
         for cmd in actions {
             if matches!(cmd, NetCmd::ReturnLobby) {
                 self.status = "Retour au lobby…".into();

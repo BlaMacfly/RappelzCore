@@ -40,11 +40,15 @@ impl WorldState {
             return None;
         }
         let (x, y) = self.me.motion.position(self.now());
+        let target=if q.corpse {let target=self.target?;let entity=self.entities.get(&target)?;
+            if entity.kind!=Kind::Monster || !entity.health_known || entity.hp!=0 || entity.layer!=Some(self.layer) {return None;}
+            let (tx,ty)=entity.motion.position(self.now());if ((x-tx).powi(2)+(y-ty).powi(2)).sqrt()>q.range as f32{return None;}target
+        } else {self.handle};
         Some(NetCmd::Raw(
             game::CsSkill {
                 skill_id: q.id,
                 caster: self.handle,
-                target: self.handle,
+            target,
                 x,
                 y,
                 z: 0.,
@@ -72,25 +76,26 @@ impl WorldState {
         };
         let (name, amount) = match phase {
             Phase::Casting(duration) => {
-                self.casting.retain(|_, (_, _, end)| *end + 5. > now);
+                if s.target!=s.caster && !self.entities.get(&s.target).is_some_and(|e|e.kind==Kind::Monster && e.health_known && e.hp==0 && e.layer==Some(s.layer)){return;}
+                self.casting.retain(|_, (_, _, end,_)| *end + 5. > now);
                 if self.casting.contains_key(&s.caster) || self.casting.len() >= 256 {
                     return;
                 }
                 self.casting.insert(
                     s.caster,
-                    (s.skill_id, s.skill_level, now + f64::from(duration) / 100.),
+                    (s.skill_id, s.skill_level, now + f64::from(duration) / 100.,s.target),
                 );
                 ("CASTING", 0)
             }
-            Phase::Cancel | Phase::Fire { .. } => {
+            Phase::Cancel | Phase::Fire { .. }|Phase::CorpseFire{..} => {
                 if !self
                     .casting
                     .get(&s.caster)
-                    .is_some_and(|(id, level, _)| *id == s.skill_id && *level == s.skill_level)
+                    .is_some_and(|(id, level, _,target)| *id == s.skill_id && *level == s.skill_level && *target==s.target)
                 {
                     return;
                 }
-                if matches!(phase, Phase::Fire { .. }) {
+                if matches!(phase, Phase::Fire { .. }|Phase::CorpseFire{..}) {
                     if s.caster == self.handle {
                         if s.caster_hp > self.max_hp || s.caster_mp > self.max_mp {
                             return;
@@ -110,7 +115,7 @@ impl WorldState {
                     }
                 }
                 self.casting.remove(&s.caster);
-                if let Phase::Fire { amount, .. } = phase {
+                if let Phase::Fire { amount, .. }|Phase::CorpseFire{amount,..} = phase {
                     if let Some((x, y)) = self.unit_position(s.caster) {
                         self.floats.push(FloatText {
                             pos: vec3(x, 0., y),
@@ -142,6 +147,22 @@ impl WorldState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn corpse_helper_and_events_separate_dead_selected_target_from_mana_beneficiary(){
+        let mut w=WorldState::from_login(&msg::ScLoginResult{handle:7,hp:280,max_hp:280,mp:20,max_mp:140,..Default::default()},Vec2::ZERO);
+        w.on_packet(game::ScSkillList{target:7,modification_type:0,skills:vec![game::SkillInfo{skill_id:3212,base_skill_level:1,current_skill_level:1,total_cool_time:5800,remain_cool_time:0}]}.to_packet(),0.);
+        let q=rz_rappelz::restoration::Restoration{corpse:true,range:192,id:3212,mp_per_level:5,cast_base:150,cast_per_level:-5,cooldown:6000,cooldown_per_level:-200,group:103,amount_base:200.,amount_per_level:120.,..Default::default()}.quote(1).unwrap();
+        assert!(w.cast_skill(&q).is_none());let body=0x20000001;
+        let mut m=Entity::new("Monster".into(),Kind::Monster,0.,0.,1,None);m.layer=Some(0);m.apply_hpmp(105,105,53,53,0.);w.entities.insert(body,m);w.target=Some(body);assert!(w.cast_skill(&q).is_none());
+        w.entities.get_mut(&body).unwrap().apply_hpmp(0,105,53,53,0.);assert!(w.entities[&body].renderable(10.));
+        let NetCmd::Raw(packet)=w.cast_skill(&q).unwrap() else{panic!("cast")};let r=game::CsSkill::from_packet(&packet).unwrap();assert_eq!((r.caster,r.target),(7,body));assert_eq!(w.mp,20);
+        w.entities.get_mut(&body).unwrap().layer=Some(1);assert!(w.cast_skill(&q).is_none());w.entities.get_mut(&body).unwrap().layer=Some(0);
+        let mut cast=rz_proto::restoration::event(3212,1,7,(0.,0.,0.,0),280,20,0,Phase::Casting(145));cast.target=body;w.on_packet(cast.to_packet(),0.);
+        let mut fire=rz_proto::restoration::event(3212,1,7,(0.,0.,0.,0),280,140,5,Phase::CorpseFire{mana:140,amount:320});fire.target=body+1;w.on_packet(fire.to_packet(),1.45);assert_eq!(w.mp,20);
+        // LEAVE may arrive before the recovery event. Its previously accepted target stays bound.
+        w.entities.remove(&body);fire.target=body;w.on_packet(fire.to_packet(),1.45);assert_eq!(w.mp,140);assert!(!w.is_casting());
+        assert_eq!(w.addon_state().skill_event.unwrap().amount,320);w.on_packet(fire.to_packet(),1.45);assert_eq!(w.skill_event.as_ref().unwrap().sequence,2);
+    }
     #[test]
     fn accepted_cast_phases_do_not_optimistically_change_mana_and_reject_hidden_or_malformed_events(
     ) {
@@ -183,6 +204,7 @@ mod tests {
             minimum_mp: 0,
             amount_base: 2000.,
             amount_per_level: 1500.,
+            ..Default::default()
         };
         let q = d.quote(1).unwrap();
         assert!(w.cast_skill(&q).is_some());
