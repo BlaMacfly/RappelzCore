@@ -16,7 +16,16 @@ def pending(root):
     except (OSError,ValueError):return {}
 
 
-def withheld(before,committed,dirty,waits,client,now_ms):
+def withheld(before,committed,dirty,waits,client,now_ms,money_level=False):
+    if money_level:
+        if set(dirty)!=set(ROLES):return False
+        d=dirty["owner"];gain=d.get("money",0)-before["owner"]["money"]
+        expected=dict(before["owner"],level=3,xp=4,money=d.get("money"),health=140,mp=70)
+        return (committed==before and len(waits)==1 and waits[0].get("modified",0)>0
+            and "replace into character_settings" in waits[0].get("query","").lower()
+            and client.get("xp_jp")==[799,7] and client.get("level")==2 and client.get("money")==1000
+            and 0<=now_ms-client.get("unix_ms",0)<=150 and 8<=gain<=14 and d==expected
+            and dirty["witness"]==before["witness"])
     return (committed==before and len(waits)==1 and waits[0].get('modified',0)>0
         and 'replace into character_settings' in waits[0].get('query','').lower()
         and client.get('xp_jp')==[0,0] and 0<=now_ms-client.get('unix_ms',0)<=150
@@ -25,7 +34,12 @@ def withheld(before,committed,dirty,waits,client,now_ms):
         and 0<dirty['owner'].get('health',0)<=100)
 
 
-def awarded(before,profiles):
+def awarded(before,profiles,money_level=False):
+    if money_level:
+        if set(profiles)!=set(ROLES) or profiles['witness']!=before['witness']:return False
+        d=profiles['owner'];expected=dict(before['owner'],level=3,xp=4,jp=10,money=d.get('money'),health=140,mp=70)
+        expected['settings']=dict(before['owner']['settings'],jp='10')
+        return d==expected and 8<=d.get('money',0)-before['owner']['money']<=14
     if set(profiles)!=set(ROLES) or profiles['witness']!=before['witness']:return False
     expected=dict(before['owner'],xp=5,jp=3,health=profiles['owner'].get('health'))
     expected['settings']=dict(before['owner']['settings'],jp='3')
@@ -34,7 +48,7 @@ def awarded(before,profiles):
 
 def run(plan,probe):
     if plan.get('scenario')!='reward-durable':raise ValueError('reward-durable scenario required')
-    db=Database(plan,probe);root=db.root;result=dict(success=False,method='reward COMMIT before notification')
+    db=Database(plan,probe);root=db.root;money_level=plan.get('money_level') is True;result=dict(success=False,method='reward COMMIT before notification',money_level=money_level)
     try:
         wait_until(lambda:(root/'checkpoint-verified').exists() and (root/'release-initial').exists(),100,'durable baseline and initial capture missing')
         before=db.profiles();checkpoint=json.loads((root/'checkpoint-database.json').read_text(encoding='utf-8'))
@@ -47,7 +61,7 @@ def run(plan,probe):
                     result['premature_notification']=dict(locks_held=True,connection=lock.connection,committed=db.profiles())
                     raise RuntimeError('reward announced before the locked save could commit')
                 waits=db.waits(lock.connection);committed=db.profiles();dirty=db.profiles(True);client=pending(root);now=time.time_ns()//1_000_000
-                return dict(waits=waits,committed=committed,dirty=dirty,client=client,unix_ms=now) if withheld(before,committed,dirty,waits,client,now) else None
+                return dict(waits=waits,committed=committed,dirty=dirty,client=client,unix_ms=now) if withheld(before,committed,dirty,waits,client,now,money_level) else None
             first=wait_until(observe,35,'reward not held before notification')
             observations=[first];end=time.monotonic()+.6
             while time.monotonic()<end:
@@ -59,7 +73,7 @@ def run(plan,probe):
         wait_until(lambda:all((root/(r+'.save-ready')).exists() for r in ROLES),10,'reward not received after lock release')
         def committed_reward():
             profiles=db.profiles()
-            return profiles if awarded(before,profiles) else None
+            return profiles if awarded(before,profiles,money_level) else None
         profiles=wait_until(committed_reward,8,'announced reward not fully committed')
         write(root/'reward-committed.json',profiles)
         server=json.loads((root/'server-up-0.json').read_text(encoding='utf-8'))

@@ -29,6 +29,9 @@ pub struct PacketTrace {
     hpmp: Vec<Value>,
     vitals_orders: Vec<u64>,
     levels: Vec<Value>,
+    level_orders: Vec<u64>,
+    gold: Vec<Value>,
+    gold_orders: Vec<u64>,
     experience: Vec<Value>,
     experience_orders: Vec<u64>,
     enters: Vec<Value>,
@@ -57,7 +60,7 @@ impl PacketTrace {
             + self.cast_events.len()+self.cast_results.len()
             + self.enters.len()
             + self.leaves.len()
-            + self.levels.len()
+            + self.levels.len() + self.gold.len()
             + self.experience.len()
             + self.warps.len()
             + self.moves.len()
@@ -153,7 +156,12 @@ impl PacketTrace {
                         let h = game::ScHpMp::from_packet(p)?;
                         self.hpmp.push(json!({"handle":h.handle,"hp":h.hp,"max_hp":h.max_hp,"mp":h.mp,"max_mp":h.max_mp,"add_hp":h.add_hp}));
                     }
+                    id::TS_SC_GOLD_UPDATE => {
+                        let g=game::ScGoldUpdate::from_packet(p)?;
+                        self.gold_orders.push(self.order);self.gold.push(json!({"gold":g.gold,"chaos":g.chaos}));
+                    }
                     id::TS_SC_LEVEL_UPDATE => {
+                        self.level_orders.push(self.order);
                         let l = game::ScLevelUpdate::from_packet(p)?;
                         self.levels.push(
                             json!({"handle":l.handle,"level":l.level,"job_level":l.job_level}),
@@ -177,7 +185,7 @@ impl PacketTrace {
     }
 
     pub(super) fn json(&self) -> Value {
-        json!({"order":self.order,"hit_orders":self.hit_orders,"vitals_orders":self.vitals_orders,"experience_orders":self.experience_orders,"chats":self.chats,"network_errors":self.network_errors,"disconnects":self.disconnects,"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
+        json!({"order":self.order,"hit_orders":self.hit_orders,"vitals_orders":self.vitals_orders,"experience_orders":self.experience_orders,"chats":self.chats,"network_errors":self.network_errors,"disconnects":self.disconnects,"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"level_orders":self.level_orders,"gold":self.gold,"gold_orders":self.gold_orders,"experience":self.experience,
             "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors,
             "logins":self.logins,"dialogs":self.dialogs,"denied_attacks":self.denied_attacks,"targets":self.targets,
             "party_states":self.party_states,"party_chats":self.party_chats,"skill_lists":self.skill_lists,"skill_catalogs":self.skill_catalogs,"learn_results":self.learn_results,"cast_events":self.cast_events,"cast_results":self.cast_results})
@@ -186,6 +194,18 @@ impl PacketTrace {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn currency_and_level_orders_follow_login_epochs_without_changing_existing_records() {
+        let mut t=PacketTrace::default();
+        for balance in [1000,1008] {
+            t.observe(&NetEvent::LoginResult(rz_proto::msg::ScLoginResult{handle:1,..Default::default()}));
+            t.observe(&NetEvent::Packet(game::ScGoldUpdate{gold:balance,chaos:0}.to_packet()));
+            t.observe(&NetEvent::Packet(game::ScLevelUpdate{handle:1,level:3,job_level:1}.to_packet()));
+        }
+        assert_eq!(t.gold.len(),t.gold_orders.len());assert_eq!(t.levels.len(),t.level_orders.len());
+        assert!(t.gold_orders[0]<t.level_orders[0] && t.level_orders[0]<t.logins[1]["order"].as_u64().unwrap());
+        assert_eq!(t.gold[1]["gold"],1008);assert!(t.levels[0].get("order").is_none());
+    }
     #[test]
     fn combat_vitals_and_reward_orders_remain_aligned_across_login_epochs() {
         let mut trace=PacketTrace::default();

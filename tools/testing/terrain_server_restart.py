@@ -118,7 +118,7 @@ def run(plan):
     # Do not start on a port owned by any existing process.
     with socket.socket() as probe:probe.bind(('127.0.0.1',port))
     scenario=plan.get('scenario','terrain')
-    proc=None;record=dict(success=False,boots=[],executable_sha256=plan['executable_sha256'],scenario=scenario)
+    proc=None;record=dict(success=False,boots=[],executable_sha256=plan['executable_sha256'],scenario=scenario,money_level=plan.get('money_level') is True)
     try:
         proc,info=boot(exe,cfg,root,port,0);record['boots'].append(info)
         if scenario in ('gameplay','save-rollback','reward-durable'):

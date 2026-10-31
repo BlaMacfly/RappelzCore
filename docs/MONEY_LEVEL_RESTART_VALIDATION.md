@@ -1,0 +1,51 @@
+# Native currency gain and level-up retained after worldserver crash
+
+Verified **2026-10-31** with two ordinary Windows x64 clients and **57/57 independent checks**, extending [commit-before-notification validation](REWARD_DURABILITY_VALIDATION.md). A real cooperative kill awards positive currency and crosses an EXP threshold. The same totals and level-derived vitals survive actual process death, restart and a third entry, without a post-combat manual save or a second kill.
+
+## Data and preservation
+
+The NamedDbc reader finds **7,584** converted Monster rows with positive valid gold ranges. Existing monster **651** has level 1, HP **105**, MP **53**, attack **20**, defence **6**, EXP **5**, JP **3** and gold **8–14**. Its original converted row is unchanged. Server Monster.dbc SHA-256 remains `a35771111380ea25022e2d4cb784f9c71e7526f556cbf931e2fe82ffadab0aed`. This is evidence about the supplied converted data, not an assertion of official formula fidelity or natural spawn placement.
+
+A single additive clone-only creature row **1499** places that definition at **9470/7227**, outside the earlier monster's visibility area. Existing creature **1498** (711 at 8470/7227), every other copied world row and all original data remain unchanged. The new row is separately snapshotted and verified exactly. No monster stat, EXP/gold range, DBC asset, production spawn or schema is edited.
+
+Only new clone-only ordinary characters **34/35** and sentinel accounts **36/37** are used. Owner starts level **2**, EXP **799**, JP **7**, wallet **1000**, HP/MP **120/60**; witness starts level **1**, EXP/JP **0/0**, wallet **2000**, HP/MP **100/50**. Their temporary starting values are set while offline, with exact GUID/account/name and pre-existing-ID bounds. Both are GM-0. A real move and the sole initial console save establish checkpoints **9452/7235** and **9452/7255**. Seeding the new owner's EXP positions it before the threshold; the actual **2→3** transition is caused by the normal kill reward.
+
+The unchanged provisional EXP formula requires **800** EXP at level 2, so 799 + 5 becomes level **3**, remaining EXP **4**. The existing level formulas give **140 HP / 70 MP**, persisted in the same reward transaction. These formulas remain provisional pending verified original BasicStat/Exp data.
+
+## Real session and results
+
+1. Start the copied server against separate persistent MariaDB/auth/world ports **3331/24615/24514**. Main services **3310/4615/4514** stay running. Bind/path/config/SHA/database namespace and fixture guards remain in force; only the controller's owned child can be killed.
+2. Both clients acknowledge their checkpoint movement. Capture terrain and CPU/GPU counters; verify failed duplicate-start protection and online flags. Hold only the two newly created settings rows with the existing owned SQL lock helper.
+3. Both attack the unchanged HP-105 fixture monster; witness moves to **9468/7255**, assists for exactly three hits, then cancels. Owner lands the single killing blow.
+4. Across **three observations spanning 859 ms**, the real owner transaction has modified its character row and waits at settings REPLACE. Normal readers retain level 2/799 EXP/7 JP/1000 money. Dirty readers see level 3/4 EXP, the positive currency gain and full 140/70 vitals, but old JP 7. The real client still reports level 2, 799 EXP/7 JP and 1000 money. Neither gold nor the level-up is announced before COMMIT.
+5. Release the probe's lock transaction. The existing server save commits the complete reward, then sends EXP/JP, private currency and broadcast level/vitals. The actual random gain in the final attempt is **14 rupees**: wallet **1000→1014**, JP **7→10**, level **2→3**, remaining EXP **4**, HP/MP **140/70**. Witness stays level 1, wallet 2000, EXP/JP 0/0.
+6. Independently read the committed profiles, then kill actual world PID **13488** with exit **1**, **11 ms** after verification. There is no second console save, lobby exit or periodic save before this kill; the configured save interval is 900,000 ms. The dead-server database still contains the exact committed profiles.
+7. Replacement world PID **21020** is ready **5.216 seconds** after kill. Independently verify current-realm online cleanup and the preserved other-realm sentinel, then let both clients reauthenticate. Owner loads level 3, remaining EXP 4, JP 10, wallet 1014 and exact raw login 140/70 with maxima 140/70. Both observers see the correct peer level/vitals. Observe at least 3.2 seconds with no stale target, movement, attack or repeated reward.
+8. After both observers have recorded the end of the recovery checks, release a new ordinary witness movement. Both return to the lobby, their normal saved profiles are read, and a third entry loads the same balances/progress/vitals. No new combat or level gain occurs. The final world shuts down normally; both native clients exit 0.
+
+Both observers see the same **10-hit first-world sequence**, followed by zero hits in both later worlds. Each sees exactly one owner level-3 update in the first world, none later. Owner currency packets are **1000, 1014, 1014, 1014**; witness packets are **2000, 2000, 2000**. Per-login packet ordering separates initial-state refreshes from an award and detects duplicate gains even when handles are reused.
+
+RappelzDebug records three real login/entry/logout events per client, **one owner PLAYER_LEVEL_UP** and zero witness level-up events. PLAYER_MONEY counts are **4/3** (owner/witness), including initial-state packets. The recovered UI was inspected showing level 3, wallet 1014, JP 10 and 140/70. This relocated fixture's camera is obstructed by scenery; it is not a new acceptance test for scene placement, collision or rendering geometry.
+
+All **six world workers join**. Final-lobby cancellations, where present, retain causal cache/GPU exclusion checks; there is no claim of a partial terrain blend at process death. Both recovered ground PNGs are byte-identical to their checkpoint captures. Terrain payload peaks at **60 MiB/client** under the existing 128 MiB CPU cap and four-upload/frame policy. Twelve Windows counter samples cover both holds; the pair's observed GPU Total Committed is **5386.08/5403.08 MiB**. This different fixture location is not a graphics optimization comparison.
+
+## Implementation and verification
+
+No backend reward/schema/formula change is required: the previous transactional reward implementation passes positive-gold and level-up validation. The existing native driver gains an explicit `money_level: true` profile under durable-reward mode. Existing PacketTrace adds bounded currency packets and parallel currency/level order arrays; old level/hit record shapes remain intact. The reward probe and independent comparer accept exact seeded balances, EXP rollover, random gold within source bounds, healed level-up vitals, peer synchronization and private currency.
+
+The initial attempt is retained as a diagnostic failure: rewards and level survived correctly, but the witness could begin its new movement before the owner's final pre-action observation. A two-client post-observation barrier fixes the driver ordering. It preserves the strict no-replay and authoritative-new-movement checks; the final attempt passes all 57 checks.
+
+- Combined workspace: **164 Rust tests pass**, one exhaustive model test ignored, **22 Lua tests included**; **92 Python tests pass**.
+- Separate publication workspaces: Core **75 Rust**, client **130 Rust** with one ignored; **92 Python tests each** and all six expected optimized AMD64 executable types build.
+- One Rust trace-order regression and four Python regressions cover positive gold/rollover, loss/duplication/private leakage, premature notification, partial commits, wrong restored maxima/peer levels, repeated Lua gains, bad monster metadata and packet ordering. Existing historical 45/48/49-check reports still pass the extended comparer.
+- Original selected accounts/characters through **33**, items through **4**, world INSERTs and installed WTF pass **9 preservation checks**. Clone verification passes **9**: the eight pre-existing-content checks plus the exact single additive spawn. No copied pre-existing row is changed. New fixtures finish offline/GM-0 with their expected totals; sentinel flags are restored.
+- Backup **18,917,362 bytes**, SHA-256 `e1254264490b1d41470d402db457a273f4c390dfc6dc55474026bf5fa173ee8e`.
+- Installed native-tested client SHA-256 `ea4a148c568ab0e22c0c2e9f45e7351aa1bc5c201bef4bec1190a1aeea523b4c`; isolated tested server `0d2a4cfe9c2d6cf77d7fd726fef459f24f9dd3218dfa2aad36900673bdf654ad`.
+
+The original server image `3ecfcb979e6dbffa4709945ca6403a931b2ef5e4cad743a79dfc064ce125a37c` and service PIDs remain unchanged. Only sources, tests and documentation are published to the two Git branches. All attempts, cloned databases, the additive fixture manifest, backups, assets, credentials and executable evidence remain ignored under `client-data/validation/2026-10-31-money-level-terrain-restart-f2576b47/`; `verified/` is the final attempt. Additional test services stop at finalization; persistent clone files and evidence are retained.
+
+## Scope and repetition
+
+This verifies one positive random currency award and one EXP-driven level transition under worldserver process failure while MariaDB stays alive. Full-host/database failure, pre-commit kill recovery, an exactly-once reward/death journal, disconnected ambiguous retries, multiple/distributed writers and original formula fidelity remain separate work.
+
+Repeat on fresh copied schemas with newly created offline fixtures and one additive verified spawn, retaining all original rows. Use controller scenario `reward-durable` with `money_level: true`, both native plans with `durable_rewards: true` and `money_level: true`, and the existing guarded reward probe. Copy the independent monster manifest into the attempt. Preserve checkpoint/counter, pre-reward lock, crash-verification, scoped-online-recovery, post-observation and saved-profile-before-third-entry gates. Do not issue a post-combat save to make the test pass. Run the existing gameplay comparer plus original/copied-content/new-row checks and both branch builds/tests before publication.

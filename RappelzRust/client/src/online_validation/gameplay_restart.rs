@@ -39,6 +39,7 @@ pub struct GameplayRestartValidation {
     password: String,
     interrupt_save: bool,
     durable_rewards: bool,
+    money_level: bool,
     stage: Stage,
     started: Instant,
     since: Instant,
@@ -64,6 +65,7 @@ impl GameplayRestartValidation {
         );
         let p: Value = serde_json::from_slice(&std::fs::read(plan)?)?;
         ensure!(!(p["interrupt_save"]==true && p["durable_rewards"]==true), "choose one save strategy");
+        ensure!(p["money_level"]!=true || p["durable_rewards"]==true,"money/level requires durable reward mode");
         let role = p["role"].as_str().context("role")?.to_owned();
         ensure!(role == "owner" || role == "witness", "role");
         let peer = p["peer"].as_str().context("peer")?.to_owned();
@@ -84,6 +86,7 @@ impl GameplayRestartValidation {
             password: password.to_owned(),
             interrupt_save: p["interrupt_save"].as_bool().unwrap_or(false),
             durable_rewards: p["durable_rewards"].as_bool().unwrap_or(false),
+            money_level: p["money_level"].as_bool().unwrap_or(false),
             stage: Stage::Join,
             started: Instant::now(),
             since: Instant::now(),
@@ -112,15 +115,25 @@ impl GameplayRestartValidation {
             "owner"
         }
     }
-    fn checkpoint(role: &str) -> [f32; 2] {
-        [8452., if role == "owner" { 7235. } else { 7255. }]
+    fn checkpoint(&self, role: &str) -> [f32; 2] {
+        [if self.money_level {9452.} else {8452.}, if role == "owner" { 7235. } else { 7255. }]
     }
-    fn final_position(role: &str) -> [f32; 2] {
-        let mut p = Self::checkpoint(role);
+    fn final_position(&self, role: &str) -> [f32; 2] {
+        let mut p = self.checkpoint(role);
         if role == "witness" {
             p[0] += 16.;
         }
         p
+    }
+    fn baseline_xp(&self)->(i64,i64) {if self.money_level && self.role=="owner" {(799,7)} else {(0,0)}}
+    fn awarded_xp(&self)->(i64,i64) {if self.role=="owner" {if self.money_level {(4,10)} else {(5,3)}} else {(0,0)}}
+    fn award_ready(&self,app:&App)->bool {
+        let Some(w)=&app.world else {return false};
+        if w.experience()!=self.awarded_xp(){return false;}
+        if self.money_level {
+            let s=w.addon_state();let Some(p)=s.player else {return false};
+            p.level==Some(if self.role=="owner" {3} else {1}) && s.money.is_some_and(|g|if self.role=="owner" {(1008..=1014).contains(&g)} else {g==2000})
+        } else {true}
     }
     fn ready(&self, name: &str) -> bool {
         self.directory.join(name).exists()
@@ -183,8 +196,8 @@ impl GameplayRestartValidation {
         let w = app.world.as_ref();
         let s = w.map(|w| w.addon_state()).unwrap_or_default();
         self.steps.push(json!({"stage":label,"elapsed_ms":self.started.elapsed().as_millis(),"stage_ms":self.since.elapsed().as_millis(),"own":self.own,"peer_handle":self.peer_handle,"monster":self.monster,"boundary":self.boundary,
-            "player":s.player.as_ref().map(|p|json!({"handle":p.handle,"name":p.name,"level":p.level,"hp":p.health,"mp":p.mana})),"position":w.and_then(|w|w.unit_position(self.own)),
-            "motion":w.and_then(|w|w.validation_motion(self.own)),"peer_motion":w.and_then(|w|w.validation_motion(self.peer_handle)),"target":s.target.map(|p|json!({"handle":p.handle,"hp":p.health})),
+            "player":s.player.as_ref().map(|p|json!({"handle":p.handle,"name":p.name,"level":p.level,"hp":p.health,"mp":p.mana,"max_hp":p.max_health,"max_mp":p.max_mana})),"position":w.and_then(|w|w.unit_position(self.own)),
+            "motion":w.and_then(|w|w.validation_motion(self.own)),"peer_motion":w.and_then(|w|w.validation_motion(self.peer_handle)),"peer_unit":w.and_then(|w|w.unit(self.peer_handle)).map(|p|json!({"level":p.level,"hp":p.health,"mp":p.mana,"max_hp":p.max_health,"max_mp":p.max_mana})),"target":s.target.map(|p|json!({"handle":p.handle,"hp":p.health})),
             "monster_hp":w.and_then(|w|w.unit(self.monster)).and_then(|p|p.health),"xp_jp":w.map(|w|w.experience()),"money":s.money,"layer":w.map(|w|w.layer()),
             "hits":self.current_hits(app),"moves":self.current_moves(app),"order":self.trace(app)["order"],"events":self.events,"audit_instance":self.audits.last().map(|a|a.instance()),"error":app.error}));
     }
@@ -300,27 +313,27 @@ impl GameplayRestartValidation {
                     return Ok(false);
                 };
                 ensure!(
-                    p.level == Some(1)
-                        && p.health == Some(100)
-                        && p.mana == Some(50)
-                        && w.experience() == (0, 0),
+                    p.level == Some(if self.money_level && self.role=="owner" {2} else {1})
+                        && p.health == Some(if self.money_level && self.role=="owner" {120} else {100})
+                        && p.mana == Some(if self.money_level && self.role=="owner" {60} else {50})
+                        && w.experience() == self.baseline_xp(),
                     "fresh level-one fixtures required"
                 );
                 self.own = p.handle;
                 self.peer_handle = peer.handle;
                 app.auto_enter = None;
                 self.record(app, "Joined");
-                self.move_to(app, Self::checkpoint(&self.role))?;
+                self.move_to(app, self.checkpoint(&self.role))?;
                 self.advance(Stage::CheckpointMove);
             }
             Stage::CheckpointMove => {
-                if self.at(app, &self.role, Self::checkpoint(&self.role))
-                    && self.at(app, &self.peer_role(), Self::checkpoint(self.other()))
+                if self.at(app, &self.role, self.checkpoint(&self.role))
+                    && self.at(app, &self.peer_role(), self.checkpoint(self.other()))
                 {
                     self.record(app, "CheckpointArrived");
                     self.write(
                         &format!("{}.checkpoint-ready", self.role),
-                        json!({"position":Self::checkpoint(&self.role),"handle":self.own}),
+                        json!({"position":self.checkpoint(&self.role),"handle":self.own}),
                     )?;
                     self.advance(Stage::CheckpointWait);
                 }
@@ -364,13 +377,13 @@ impl GameplayRestartValidation {
                         if self.interrupt_save || self.durable_rewards {
                             self.record(app, "BeforeSaveActionsStarted");
                             if self.role == "witness" {
-                                self.move_to(app, Self::final_position(&self.role))?;
+                                self.move_to(app, self.final_position(&self.role))?;
                             }
                             self.begin_attack(app)?;
                             self.advance(Stage::BeforeSave);
                             return Ok(false);
                         }
-                        let [x, y] = Self::checkpoint(&self.role);
+                        let [x, y] = self.checkpoint(&self.role);
                         let circuit = vec![
                             MovePoint { x: x + 24., y },
                             MovePoint {
@@ -393,9 +406,14 @@ impl GameplayRestartValidation {
                         self.advance(Stage::Active);
                     } else if self.stage == Stage::Recovered {
                         if self.durable_rewards {
-                            self.boundary=self.trace(app)["order"].as_u64().unwrap();
-                            self.record(app,"PostActionsStarted");
-                            if self.role=="witness" {self.move_to(app,Self::final_position(&self.role))?;}
+                            if !self.ready(&format!("{}.post-ready",self.role)) {
+                                self.boundary=self.trace(app)["order"].as_u64().unwrap();
+                                self.record(app,"PostActionsStarted");
+                                self.write(&format!("{}.post-ready",self.role),json!({"ready":true}))?;
+                                return Ok(false);
+                            }
+                            if !self.ready(&format!("{}.post-ready",self.other())) {return Ok(false);}
+                            if self.role=="witness" {self.move_to(app,self.final_position(&self.role))?;}
                             self.advance(Stage::ResumeSave);
                             return Ok(false);
                         }
@@ -404,7 +422,7 @@ impl GameplayRestartValidation {
                         if self.role == "owner" {
                             self.begin_attack(app)?;
                         } else {
-                            self.move_to(app, Self::final_position(&self.role))?;
+                            self.move_to(app, self.final_position(&self.role))?;
                             self.begin_attack(app)?;
                         }
                         self.advance(Stage::PostFight);
@@ -435,7 +453,7 @@ impl GameplayRestartValidation {
                         })
                         .count();
                     let pos = w.unit_position(self.own).context("position")?;
-                    let cp = Self::checkpoint(&self.role);
+                    let cp = self.checkpoint(&self.role);
                     let state = w.addon_state();
                     let monster = w.unit(self.monster).context("monster")?;
                     let moving = w.validation_motion(self.own).unwrap()["moving"].clone();
@@ -506,15 +524,15 @@ impl GameplayRestartValidation {
                     "stale world"
                 );
                 let saved=self.read("reward-committed.json");
-                let expected=if self.durable_rewards && self.role=="owner" {(5,3)} else {(0,0)};
+                let expected=if self.durable_rewards {self.awarded_xp()} else {(0,0)};
                 let raw=self.trace(app)["logins"].as_array().unwrap().last().unwrap().clone();
                 let vitals_ok=if self.durable_rewards {
                     let profile=&saved.as_ref().context("reward checkpoint")?[&self.role];
                     raw["hp"]==profile["health"] && raw["mp"]==profile["mp"]
                 } else {p.health==Some(100)};
                 ensure!(
-                    self.at(app, &self.role, Self::checkpoint(&self.role))
-                        && self.at(app, self.other(), Self::checkpoint(self.other()))
+                    self.at(app, &self.role, self.checkpoint(&self.role))
+                        && self.at(app, self.other(), self.checkpoint(self.other()))
                         && vitals_ok
                         && w.experience() == expected,
                     "last durable checkpoint not restored"
@@ -564,19 +582,19 @@ impl GameplayRestartValidation {
                     return Ok(false);
                 }
                 if self.role == "owner" {
-                    if w.experience() != (5, 3) {
-                        if before && self.durable_rewards {
+                    if !self.award_ready(app) {
+                        if before && self.durable_rewards && w.experience()==self.baseline_xp() {
                             if !self.announced {self.record(app,"RewardWithheld");self.announced=true;}
-                            self.write("owner.pending-reward.json",json!({"unix_ms":SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis(),"xp_jp":app.world.as_ref().unwrap().experience(),"order":self.trace(app)["order"],"monster":self.monster}))?;
+                            self.write("owner.pending-reward.json",json!({"unix_ms":SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis(),"xp_jp":app.world.as_ref().unwrap().experience(),"level":app.world.as_ref().unwrap().addon_state().player.unwrap().level,"money":app.world.as_ref().unwrap().addon_state().money,"order":self.trace(app)["order"],"monster":self.monster}))?;
                         }
                         return Ok(false);
                     }
-                    self.write(if before {"owner.before-save-rewarded"} else {"owner.rewarded"}, json!({"xp":5,"jp":3}))?;
+                    self.write(if before {"owner.before-save-rewarded"} else {"owner.rewarded"}, json!({"xp_jp":self.awarded_xp()}))?;
                 } else {
                     ensure!(w.experience() == (0, 0), "private reward leaked");
                 }
-                if !self.at(app, &self.role, Self::final_position(&self.role))
-                    || !self.at(app, self.other(), Self::final_position(self.other()))
+                if !self.at(app, &self.role, self.final_position(&self.role))
+                    || !self.at(app, self.other(), self.final_position(self.other()))
                     || !self.ready(if before {"owner.before-save-rewarded"} else {"owner.rewarded"})
                 {
                     return Ok(false);
@@ -584,7 +602,7 @@ impl GameplayRestartValidation {
                 if before {
                     let xp_jp = w.experience();
                     self.record(app, "BeforeInterruptedSave");
-                    self.write(&format!("{}.save-ready",self.role),json!({"role":self.role,"own":self.own,"peer":self.peer_handle,"monster":self.monster,"xp_jp":xp_jp,"position":Self::final_position(&self.role)}))?;
+                    self.write(&format!("{}.save-ready",self.role),json!({"role":self.role,"own":self.own,"peer":self.peer_handle,"monster":self.monster,"xp_jp":xp_jp,"position":self.final_position(&self.role)}))?;
                     self.advance(Stage::PendingSave);
                     return Ok(false);
                 }
@@ -597,7 +615,7 @@ impl GameplayRestartValidation {
             }
             Stage::ResumeSave => {
                 ensure!(self.current_hits(app).is_empty(),"reward replay triggered combat");
-                if self.at(app,&self.role,Self::final_position(&self.role)) && self.at(app,self.other(),Self::final_position(self.other())) {
+                if self.at(app,&self.role,self.final_position(&self.role)) && self.at(app,self.other(),self.final_position(self.other())) {
                     self.record(app,"RewardRetained");
                     self.write(&format!("{}.finish-ready",self.role),json!({"ready":true}))?;
                     self.advance(Stage::SaveLobby);
@@ -644,8 +662,8 @@ impl GameplayRestartValidation {
                 };
                 self.own = p.handle;
                 self.peer_handle = peer.handle;
-                let expected = if self.role == "owner" { (5, 3) } else { (0, 0) };
-                if w.experience() != expected {
+                let expected = self.awarded_xp();
+                if w.experience() != expected || !self.award_ready(app) {
                     return Ok(false);
                 }
                 let saved = self.read("saved-lobby-verified").context("saved profile")?;
@@ -657,8 +675,8 @@ impl GameplayRestartValidation {
                     "saved vitals not loaded by actual login"
                 );
                 ensure!(
-                    self.at(app, &self.role, Self::final_position(&self.role))
-                        && self.at(app, self.other(), Self::final_position(self.other()))
+                    self.at(app, &self.role, self.final_position(&self.role))
+                        && self.at(app, self.other(), self.final_position(self.other()))
                         && self.current_hits(app).is_empty()
                         && self.current_moves(app).is_empty()
                         && w.addon_state().target.is_none(),
@@ -701,7 +719,7 @@ impl GameplayRestartValidation {
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
         let success = self.stage == Stage::Done && self.failure.is_none();
-        self.write(&format!("{}.json",self.role),json!({"scenario":if self.durable_rewards {"reward-durable"} else if self.interrupt_save {"save-rollback"} else {"gameplay-restart"},"success":success,"failure":self.failure,"role":self.role,"character":self.character,"steps":self.steps,"samples":self.samples,"events":self.events,"audits":self.audits.iter().map(|a|a.snapshot()).collect::<Vec<_>>(),"trace":self.trace(app)}))?;
+        self.write(&format!("{}.json",self.role),json!({"scenario":if self.durable_rewards {"reward-durable"} else if self.interrupt_save {"save-rollback"} else {"gameplay-restart"},"money_level":self.money_level,"success":success,"failure":self.failure,"role":self.role,"character":self.character,"steps":self.steps,"samples":self.samples,"events":self.events,"audits":self.audits.iter().map(|a|a.snapshot()).collect::<Vec<_>>(),"trace":self.trace(app)}))?;
         Ok(success)
     }
 }
