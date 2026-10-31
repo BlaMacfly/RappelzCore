@@ -15,6 +15,20 @@ rebuilt by reverse engineering (REA / Ghidra) the **Rappelz NoLimits** client
 (`Rappelz NoLimits\SFrame.exe`). The launcher label is 1.3.60; the executable's exact Epic/patch
 identity remains unresolved (see [binary evidence](docs/CLIENT_REVERSE_ENGINEERING.md)).
 
+## Versions and game target
+
+| Component | Version / target |
+|---|---|
+| Our RappelzRust client (Windows x64) | **0.1.0 — development** |
+| RappelzCore server | **0.1.0 — development** |
+| Original game | **Rappelz NoLimits**, customized x86 client |
+| Original launcher/package | **1.3.60** |
+| Original SFrame file/product metadata | **9.1.0.0** |
+| Original build lineage / protocol | **Source9.5.2** / **201507080** |
+| Exact official game Epic / patch | **Not established** |
+
+See [version evidence and interpretation](docs/VERSIONS.md). The launcher, PE metadata and build-directory labels have different meanings; they do not establish an exact official release.
+
 **Latest follow-up:** the [C character sheet](docs/CHARACTER_STATS_VALIDATION.md) now shows own attack/defence/speed from actual server combat state, refreshed after XP level-up and reentry. Two real clients pass **35 checks**, including a wrong-stat old-server control and direct SQL reward checks. **196 Rust + 123 Python tests pass** (one Rust ignored, 24 Lua included). Existing data/settings and primary services are preserved. Verified job-bonus/promotion rules remain separate.
 
 A new [static SFrame decompilation pass](docs/SFRAME_PROGRESSION_RE.md) documents numeric PROPERTY width, independently received current/previous job state, stat snapshot dispatch and the party `CHANGE_JOB` false lead. Nine fresh REA/Ghidra function dossiers and37 original byte anchors are retained; server promotion policy and bonus coefficients remain unresolved. Original files, installed gameplay, services and data are preserved.
