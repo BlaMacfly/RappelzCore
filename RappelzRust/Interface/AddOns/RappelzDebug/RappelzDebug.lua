@@ -41,6 +41,7 @@ function RappelzDebugOnLoad(self)
     self:RegisterEvent("RAPPELZ_PARTY_STATE_READY")
     self:RegisterEvent("SKILL_LINES_CHANGED")
     self:RegisterEvent("RAPPELZ_JP_CHANGED")
+    self:RegisterEvent("RAPPELZ_SKILL_EVENT")
     self:RegisterEvent("PARTY_INVITE_REQUEST")
     self:RegisterEvent("RAPPELZ_PARTY_INVITE_CLOSED")
     self:RegisterEvent("CHAT_MSG_PARTY")
@@ -59,6 +60,9 @@ function RappelzDebugOnEvent(self, event, ...)
     RappelzDebugDB.events[event] = (RappelzDebugDB.events[event] or 0) + 1
     local snapshot = {
         event = event, arg = arg, time = GetTime(),
+        skillPhase = event == "RAPPELZ_SKILL_EVENT" and select(2, ...) or nil,
+        skillCaster = event == "RAPPELZ_SKILL_EVENT" and select(3, ...) or nil,
+        skillAmount = event == "RAPPELZ_SKILL_EVENT" and select(4, ...) or nil,
         name = UnitName("player"), level = UnitLevel("player"), layer = UnitLayer("player"),
         hp = UnitHealth("player"), maxHP = UnitHealthMax("player"),
         mp = UnitMana("player"), maxMP = UnitManaMax("player"),
@@ -72,6 +76,9 @@ function RappelzDebugOnEvent(self, event, ...)
     table.insert(RappelzDebugDB.recent, snapshot)
     if #RappelzDebugDB.recent > 32 then table.remove(RappelzDebugDB.recent, 1) end
     RappelzDebugDB.lastPlayer = snapshot
+    if event == "RAPPELZ_SKILL_EVENT" then
+        print("SKILL " .. known(arg) .. " " .. known(snapshot.skillPhase) .. " caster=" .. known(snapshot.skillCaster) .. " amount=" .. known(snapshot.skillAmount))
+    end
     print("EVENT " .. event .. " " .. known(arg) ..
         " HP=" .. known(snapshot.hp) .. "/" .. known(snapshot.maxHP) ..
         " MP=" .. known(snapshot.mp) .. "/" .. known(snapshot.maxMP) ..

@@ -10,6 +10,7 @@ pub mod packet;
 pub mod party;
 pub mod secure;
 pub mod skills;
+pub mod restoration;
 
 pub use msg::Message;
 pub use packet::{RawPacket, Reader, Writer};

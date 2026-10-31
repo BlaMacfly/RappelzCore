@@ -6,6 +6,7 @@ pub mod dbcstore;
 pub mod layout;
 pub mod rdb;
 pub mod skills;
+pub mod restoration;
 mod rdb_schemas;
 pub mod to_dbc;
 

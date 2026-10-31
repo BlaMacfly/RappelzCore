@@ -14,6 +14,7 @@ use crate::{App, NetCmd, NetEvent};
 pub(super) mod layer;
 pub(super) mod party;
 pub(super) mod learning;
+pub(super) mod casting;
 pub(super) mod revival;
 pub(super) mod visibility;
 
@@ -36,6 +37,7 @@ pub struct PacketTrace {
     party_states: Vec<Value>,
     party_chats: Vec<Value>,
     skill_lists:Vec<Value>,skill_catalogs:Vec<Value>,learn_results:Vec<u16>,skill_rows:usize,
+    cast_events:Vec<Value>,cast_results:Vec<u16>,
     errors: Vec<String>,
 }
 
@@ -43,6 +45,7 @@ impl PacketTrace {
     pub fn observe(&mut self, event: &NetEvent) {
         if self.hits.len()
             + self.hpmp.len()
+            + self.cast_events.len()+self.cast_results.len()
             + self.enters.len()
             + self.leaves.len()
             + self.levels.len()
@@ -90,16 +93,23 @@ impl PacketTrace {
                     self.party_chats.push(json!({"sender":sender,"message":message}));
                 }
                 NetEvent::Result {request,result} if *request==id::TS_CS_LEARN_SKILL=>self.learn_results.push(*result),
+                NetEvent::Result {request,result} if *request==id::TS_CS_SKILL=>self.cast_results.push(*result),
                 NetEvent::Move(m) => self.moves.push(json!({"handle":m.handle,"time":m.start_time,
                     "layer":m.tlayer,"speed":m.speed,"points":m.points.iter().map(|p|[p.x,p.y]).collect::<Vec<_>>(),"order":self.order})),
                 NetEvent::Packet(p) => match p.id {
+                    id::TS_SC_SKILL=>{
+                        let event=game::ScSkill::from_packet(p)?;
+                        let phase=rz_proto::restoration::decode(&event)?;
+                        let (phase,duration,amount)=match phase {rz_proto::restoration::Phase::Casting(n)=>("CASTING",n,0),rz_proto::restoration::Phase::Cancel=>("CANCEL",0,0),rz_proto::restoration::Phase::Fire{amount,..}=>("FIRE",0,amount)};
+                        self.cast_events.push(json!({"id":event.skill_id,"level":event.skill_level,"caster":event.caster,"target":event.target,"layer":event.layer,"phase":phase,"duration":duration,"amount":amount,"mp_cost":event.mp_cost,"caster_hp":event.caster_hp,"caster_mp":event.caster_mp,"order":self.order}));
+                    }
                     rz_proto::skills::SC_SKILL_CATALOG=>{
                         let state=rz_proto::skills::ScSkillCatalog::from_packet(p)?;self.skill_rows+=state.entries.len();
                         ensure!(self.skill_rows<=1024,"skill trace row capacity exceeded");self.skill_catalogs.push(skill_catalog(&state));
                     }
                     id::TS_SC_SKILL_LIST=>{
                         let list=game::ScSkillList::from_packet(p)?;self.skill_rows+=list.skills.len();ensure!(self.skill_rows<=1024,"skill trace row capacity exceeded");
-                        self.skill_lists.push(json!({"target":list.target,"modification":list.modification_type,"levels":list.skills.iter().map(|s|json!({"id":s.skill_id,"base":s.base_skill_level,"current":s.current_skill_level})).collect::<Vec<_>>()}));
+                        self.skill_lists.push(json!({"target":list.target,"modification":list.modification_type,"levels":list.skills.iter().map(|s|json!({"id":s.skill_id,"base":s.base_skill_level,"current":s.current_skill_level,"total":s.total_cool_time,"remain":s.remain_cool_time})).collect::<Vec<_>>()}));
                     }
                     rz_proto::party::SC_PARTY_STATE=>self.party_states.push(party_state(&rz_proto::party::ScPartyState::from_packet(p)?)),
                     id::TS_SC_DIALOG => {
@@ -152,7 +162,7 @@ impl PacketTrace {
         json!({"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
             "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors,
             "logins":self.logins,"dialogs":self.dialogs,"denied_attacks":self.denied_attacks,"targets":self.targets,
-            "party_states":self.party_states,"party_chats":self.party_chats,"skill_lists":self.skill_lists,"skill_catalogs":self.skill_catalogs,"learn_results":self.learn_results})
+            "party_states":self.party_states,"party_chats":self.party_chats,"skill_lists":self.skill_lists,"skill_catalogs":self.skill_catalogs,"learn_results":self.learn_results,"cast_events":self.cast_events,"cast_results":self.cast_results})
     }
 }
 

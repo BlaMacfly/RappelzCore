@@ -26,6 +26,11 @@ pub struct UnitState {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
+pub struct SkillEventState {
+    pub sequence:u64,pub skill:u16,pub phase:String,pub caster:u32,pub amount:i32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct GameState {
     pub player: Option<UnitState>,
     pub target: Option<UnitState>,
@@ -37,6 +42,7 @@ pub struct GameState {
     pub party_invite: Option<String>,
     pub learned_skills: Option<BTreeMap<u32, u8>>,
     pub job_points: Option<i64>,
+    pub skill_event:Option<SkillEventState>,
     /// Incremented by the client only after a changed inventory is accepted.
     pub bag_revision: u64,
 }
@@ -744,6 +750,11 @@ impl AddonRuntime {
                     "RAPPELZ_JP_CHANGED",
                     vec![EventArg::Number(jp as f64)],
                 ));
+            }
+        }
+        if old.skill_event!=state.skill_event {
+            if let Some(e)=&state.skill_event {
+                self.dispatch(Event::new("RAPPELZ_SKILL_EVENT",vec![EventArg::Number(f64::from(e.skill)),e.phase.clone().into(),EventArg::Number(f64::from(e.caster)),EventArg::Number(f64::from(e.amount))]));
             }
         }
     }

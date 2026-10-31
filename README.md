@@ -26,7 +26,7 @@ verifies observer rendering/position and Lua transitions. [Movement/visibility](
 now resumes late-visible players' routes and validates range removal. [Layer transitions](docs/LAYER_VALIDATION.md)
 verify separation, hidden-interaction denial and saved character re-entry with two clients.
 [Player groups](docs/PARTY_VALIDATION.md) add consented invitations, leadership, private chat and live roster/vitals,
-verified through actual damage and layer separation. [Skill learning](docs/SKILL_LEARNING_VALIDATION.md) adds the native K window, real learning costs/prerequisites, durable private levels/JP and Lua diagnostics, verified with 40 two-client checks. The combined development workspace passes 124 Rust and 26 Python tests;
+verified through actual damage and layer separation. [Skill learning](docs/SKILL_LEARNING_VALIDATION.md) adds the native K window, real learning costs/prerequisites, durable private levels/JP and Lua diagnostics, verified with 40 two-client checks. [Local skill casting](docs/SKILL_CASTING_VALIDATION.md) adds timed interruption, MP restoration and private cooldowns with 34 checks; original corpse semantics remain unresolved. The combined development workspace passes 133 Rust and 30 Python tests;
 each branch keeps its own buildable server/client scope. See the [gameplay roadmap](docs/GAMEPLAY_ROADMAP.md) for remaining systems.
 
 - **RappelzCore** uses **exactly the AzerothCore SQL schema** (`acore_auth`, `acore_characters`,
@@ -238,7 +238,7 @@ Constraints inherited from the schema:
 ## Earlier development verification
 
 The following includes retained results from earlier work. Current combined-workspace checks, including
-124 passing Rust tests, 26 Python tests, the optimized build and 125,212 identical converted assets, are separated from
+133 passing Rust tests, 30 Python tests, the optimized build and 125,212 identical converted assets, are separated from
 historical online/database claims in [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md).
 
 - **Unit tests**: RC4 and checksum vectors taken from the binary, sizes of the 20 observed packets,
@@ -278,7 +278,7 @@ historical online/database claims in [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_ST
 - **Server gameplay**:
   - melee combat with provisional formulas (until db_BasicStat / db_Exp are decoded);
   - EXP/JP/rupee rewards, death and respawn;
-  - skill casting/effects, job advancement, quests, ground loot and proactive monster aggression remain incomplete; temporary groups and current-job skill learning are implemented.
+  - general casting/effects and original corpse rules, job advancement, quests, ground loot and proactive monster aggression remain incomplete; temporary groups and current-job skill learning are implemented.
 - **Original NoLimits client**:
   - not tested against RappelzCore yet;
   - it must be started by its launcher (`<process>_RUNNER`);

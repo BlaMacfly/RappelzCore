@@ -29,7 +29,7 @@ impl WorldState {
         draw_rectangle(r.x, r.y, r.w, r.h, Color::from_rgba(12, 18, 30, 245));
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, SKYBLUE);
         ui.label(
-            "Compétences (K) — apprentissage",
+            "Compétences (K)",
             r.x + 12.0,
             r.y + 22.0,
             SKYBLUE,
@@ -138,6 +138,8 @@ impl WorldState {
                 reason::PLAYER_LEVEL => format!("Personnage niv. {} requis", entry.player_level),
                 _ => explanation(entry.reason).into(),
             };
+            let detail=assets.restoration_quote(entry.id,entry.learned).map_or(detail,|q|
+                format!("Lancer : {} PM · {:.2} s · recharge {:.0} s",q.mp,f64::from(q.cast)/100.,f64::from(q.cooldown)/100.));
             ui.label(
                 &detail,
                 r.x + 55.0,
@@ -149,6 +151,17 @@ impl WorldState {
                 },
             );
             let button = Rect::new(r.x + r.w - 97.0, y + 21.0, 85.0, 27.0);
+            if let Some(q)=assets.restoration_quote(entry.id,entry.learned) {
+                let cast=Rect::new(button.x,y-3.0,button.w,22.0);
+                let remaining=self.skill_remaining(entry.id);
+                let command=self.cast_skill(&q);
+                draw_rectangle(cast.x,cast.y,cast.w,cast.h,Color::from_rgba(35,60,85,255));
+                let label=if remaining>0. {format!("{remaining:.1} s")}else{"Lancer".into()};
+                ui.label_in(&label,cast,if command.is_some(){SKYBLUE}else{GRAY});
+                if cast.contains(mouse) && is_mouse_button_pressed(MouseButton::Left) {
+                    if let Some(command)=command {out.push(command);}
+                }
+            }
             if entry.reason == reason::READY {
                 draw_rectangle(
                     button.x,
@@ -190,8 +203,13 @@ impl WorldState {
                     (self.skill_page as i32 + delta).clamp(0, pages as i32 - 1) as usize;
             }
         }
+        if self.is_casting() {
+            let cancel=Rect::new(r.x+r.w-115.,r.y+29.,105.,23.);
+            ui.label_in("Annuler",cancel,YELLOW);
+            if cancel.contains(mouse) && is_mouse_button_pressed(MouseButton::Left){out.push(self.cancel_skill());}
+        }
         ui.label(
-            "Lancement des sorts et effets : à venir.",
+            "PM sur soi · règle de cadavre à confirmer.",
             r.x + 12.0,
             r.y + r.h - 10.0,
             LIGHTGRAY,

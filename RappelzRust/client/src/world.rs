@@ -18,6 +18,7 @@ use crate::terrain::Terrain;
 
 mod party_ui;
 mod skills_ui;
+mod casting;
 
 const MAP_TILE: f32 = 16128.0;
 const MINIMAP_PIECES: i32 = 16;
@@ -265,6 +266,9 @@ struct FloatText {
 }
 
 pub struct WorldState {
+    casting:HashMap<u32,(u16,u8,f64)>,
+    skill_cooldowns:BTreeMap<u32,(f64,u32)>,
+    skill_event:Option<rz_addon::SkillEventState>,
     learned_skills:Option<BTreeMap<u32,u8>>,
     skill_catalog:Option<rz_proto::skills::ScSkillCatalog>,
     addon_jp:Option<i64>,
@@ -326,6 +330,7 @@ impl WorldState {
         me.max_hp = lr.max_hp.max(1);
         Self {
             clock: Instant::now(),
+            casting:HashMap::new(),skill_cooldowns:BTreeMap::new(),skill_event:None,
             handle: lr.handle,
             learned_skills:None,skill_catalog:None,addon_jp:None,show_skills:false,skill_page:0,
             party:None,show_party:true,
@@ -413,6 +418,7 @@ impl WorldState {
             party_invite:self.party.as_ref().and_then(|p|p.invite.as_ref().map(|i|i.name.clone())),
             bag_revision: self.bag_revision,
             learned_skills:self.learned_skills.clone(),job_points:self.addon_jp,
+            skill_event:self.skill_event.clone(),
         }
     }
 
@@ -538,6 +544,7 @@ impl WorldState {
                 self.entities.insert(e.handle, entity);
             }
             NetEvent::Leave(h) => {
+                self.casting.remove(&h);
                 self.entities.remove(&h);
                 if self.target == Some(h) {
                     self.target = None;
@@ -598,11 +605,14 @@ impl WorldState {
         let previous_inventory = matches!(p.id, gid::TS_SC_INVENTORY | gid::TS_SC_DESTROY_ITEM | gid::TS_SC_ITEM_WEAR_INFO)
             .then(|| self.inventory.clone());
         match p.id {
+            gid::TS_SC_SKILL=>{
+                if let Ok(event)=game::ScSkill::from_packet(&p){self.apply_restoration(event,now);}
+            }
             rz_proto::skills::SC_SKILL_CATALOG=>{
                 if let Ok(state)=rz_proto::skills::ScSkillCatalog::from_packet(&p){if state.target==self.handle {self.skill_catalog=Some(state);}}
             }
             gid::TS_SC_SKILL_LIST=>{
-                if let Ok(list)=game::ScSkillList::from_packet(&p){self.apply_skill_list(list);}
+                if let Ok(list)=game::ScSkillList::from_packet(&p){self.apply_skill_list(list,now);}
             }
             rz_proto::party::SC_PARTY_STATE => {
                 if let Ok(state)=rz_proto::party::ScPartyState::from_packet(&p) {
@@ -738,16 +748,20 @@ impl WorldState {
         self.target=self.entities.contains_key(&handle).then_some(handle);
     }
 
-    fn apply_skill_list(&mut self,list:game::ScSkillList) {
+    fn apply_skill_list(&mut self,list:game::ScSkillList,now:f64) {
         if list.target!=self.handle || list.modification_type!=0 || list.skills.len()>rz_proto::skills::MAX_ENTRIES {return;}
         let mut accepted=BTreeMap::new();
+        let mut cooldowns=BTreeMap::new();
         for skill in list.skills {
-            if skill.skill_id<=0 || skill.base_skill_level==0 || skill.base_skill_level>50 || accepted.insert(skill.skill_id as u32,skill.base_skill_level).is_some(){return;}
+            if skill.skill_id<=0 || skill.base_skill_level==0 || skill.base_skill_level>50 || skill.total_cool_time>360_000 || skill.remain_cool_time>skill.total_cool_time || accepted.insert(skill.skill_id as u32,skill.base_skill_level).is_some(){return;}
+            cooldowns.insert(skill.skill_id as u32,(now+f64::from(skill.remain_cool_time)/100.,skill.total_cool_time));
         }
         self.learned_skills=Some(accepted);
+        self.skill_cooldowns=cooldowns;
     }
 
     fn apply_warp(&mut self, x: f32, y: f32, _z: f32, layer: u8) {
+        self.casting.clear();
         // Terrain supplies rendered height. Previous-layer entities/UI cannot survive the transition.
         if self.layer != layer {
             self.entities.clear(); self.target=None; self.dialog=None; self.market=None;

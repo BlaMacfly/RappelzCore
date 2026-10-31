@@ -1213,7 +1213,7 @@ impl Message for CsSkill {
             .u8(self.skill_level);
     }
     fn read(r: &mut Reader) -> Result<Self> {
-        Ok(Self {
+        let request = Self {
             skill_id: r.u16()?,
             caster: r.u32()?,
             target: r.u32()?,
@@ -1222,7 +1222,11 @@ impl Message for CsSkill {
             z: r.f32()?,
             layer: r.u8()?,
             skill_level: r.u8()?,
-        })
+        };
+        if r.remaining()!=0 || ![request.x,request.y,request.z].iter().all(|v|v.is_finite()) {
+            return Err(crate::packet::PacketError::Invalid{id:Self::ID,field:"cast request"});
+        }
+        Ok(request)
     }
 }
 

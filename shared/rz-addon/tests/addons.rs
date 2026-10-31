@@ -879,6 +879,26 @@ fn event_failure_is_reported_once_and_cannot_stop_other_addons() {
 }
 
 #[test]
+fn cast_events_keep_real_arguments_and_do_not_repeat_on_snapshots_or_reload() {
+    let dir=tempfile::tempdir().unwrap();
+    addon(dir.path(),"Casts","",r#"
+        local f=CreateFrame("Frame")
+        f:RegisterEvent("RAPPELZ_SKILL_EVENT")
+        f:SetScript("OnEvent",function(self,event,id,phase,caster,amount)
+            print(id .. ":" .. phase .. ":" .. caster .. ":" .. amount)
+        end)
+    "#);
+    let mut rt=AddonRuntime::new(dir.path());rt.load().unwrap();
+    let mut s=state();rt.update_state(s.clone());assert!(rt.drain_messages().is_empty());
+    for (sequence,phase,amount) in [(1,"CASTING",0),(2,"CANCEL",0),(3,"CASTING",0),(4,"FIRE",3500)] {
+        s.skill_event=Some(rz_addon::SkillEventState{sequence,skill:3212,phase:phase.into(),caster:7,amount});
+        rt.update_state(s.clone());rt.update_state(s.clone());
+        let lines=rt.drain_messages();assert_eq!(lines.len(),1);assert!(lines[0].contains(&format!("3212:{phase}:7:{amount}")));
+    }
+    rt.reload().unwrap();rt.update_state(s);assert!(rt.drain_messages().is_empty());assert!(rt.errors().is_empty());
+}
+
+#[test]
 fn xml_inline_handlers_visibility_scale_and_anchors_use_same_hit_test_as_renderer() {
     let dir = tempfile::tempdir().unwrap();
     addon(dir.path(), "Layout", "", "");

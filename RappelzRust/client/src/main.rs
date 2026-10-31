@@ -150,7 +150,7 @@ async fn main() {
     let sfx_volume = config.get("Sound_SFXVolume", "0.7").parse().unwrap_or(0.7);
     let rzui = assets.as_mut().map(|a| rzui::RzUi::new(a, font.clone()));
     let mut app = App {
-        combat_trace: ["-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills"].iter().any(|flag|arg_value(flag).is_some()).then(Default::default),
+        combat_trace: ["-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting"].iter().any(|flag|arg_value(flag).is_some()).then(Default::default),
         addons: addons::Addons::new(&root),
         addon_realm: "offline".into(),
         rzui,
@@ -196,7 +196,7 @@ async fn main() {
         app.send(NetCmd::Login { host, port, account: account.to_string(), password: password.to_string() });
     }
     let screenshot = arg_value("-screenshot");
-    let validation_flags: Vec<_> = ["-validate-addons","-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills"]
+    let validation_flags: Vec<_> = ["-validate-addons","-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting"]
         .into_iter().filter_map(|flag|arg_value(flag).map(|path|(flag,path))).collect();
     let validation_args = match validation_flags.as_slice() {
         [] => None,
@@ -210,6 +210,7 @@ async fn main() {
                 "-validate-layer"=>online_validation::OnlineValidation::layer(plan,&app),
                 "-validate-party"=>online_validation::OnlineValidation::party(plan,&app),
                 "-validate-skills"=>online_validation::OnlineValidation::skills(plan,&app),
+                "-validate-casting"=>online_validation::OnlineValidation::casting(plan,&app),
                 _=>unreachable!("validation flag comes from the fixed list"),
             })
         }
@@ -335,7 +336,7 @@ impl App {
                     }
                 }
                 // Learning refusals are normal gameplay responses; the server supplies a notice/catalog.
-                NetEvent::Result {request,..} if request==rz_proto::msg_game::id::TS_CS_LEARN_SKILL=>{},
+                NetEvent::Result {request,..} if matches!(request,rz_proto::msg_game::id::TS_CS_LEARN_SKILL|rz_proto::msg_game::id::TS_CS_SKILL)=>{},
                 NetEvent::Result { request, result } => {
                     if result != 0 {
                         self.error = Some(match (request, result) {
