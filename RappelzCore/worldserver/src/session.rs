@@ -88,12 +88,16 @@ pub async fn run(ctx: Arc<Ctx>, addr: SocketAddr, mut reader: PacketReader, mut 
     }
     if let Err(e) = session.leave_world().await {
         tracing::error!("{addr} : sauvegarde à la déconnexion : {e:#}");
+        session.detach_world_without_save();
     }
-    if let Some(account) = &session.account {
-        let _ = auth::set_online(&ctx.login, account.id, 0).await;
-    }
+    let account_id=session.account.as_ref().map(|a|a.id);
+    // Remove all world/socket senders before a possibly unavailable auth database.
+    // Otherwise SQL recovery delays EOF and can leave a ghost player indefinitely.
     drop(session);
     let _ = writer_task.await;
+    if let Some(account_id)=account_id {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2),auth::set_online(&ctx.login,account_id,0)).await;
+    }
 }
 
 impl Session {
@@ -438,7 +442,11 @@ impl Session {
     /// Met à jour le personnage depuis l'état du monde et le sauvegarde (Player::SaveToDB).
     pub async fn save(&mut self) -> Result<()> {
         let Some(character)=self.character_snapshot() else {return Ok(())};
-        characters::save(&self.ctx.chars,&character).await?;
+        if let Err(error)=characters::save(&self.ctx.chars,&character).await {
+            // No retry with an older snapshot after an uncertain SQL outcome.
+            self.detach_world_without_save();
+            return Err(error);
+        }
         if let Some(g)=&mut self.in_game {g.character=character;}
         Ok(())
     }

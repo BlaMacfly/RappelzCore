@@ -954,6 +954,21 @@ mod tests {
         session.leave_world().await.unwrap();
     }
 
+    #[tokio::test]
+    async fn failed_periodic_or_lobby_save_detaches_player_and_releases_the_socket_sender() {
+        for lobby in [false,true] {
+            let (mut session,mut rx)=isolated_session(None);
+            session.ctx.chars.close().await;
+            let result=if lobby {session.leave_world().await} else {session.save().await};
+            assert!(result.is_err());assert!(session.in_game.is_none(),"failed save retained a phantom session");
+            assert!(!session.ctx.world.lock().unwrap().players.contains_key(&1));
+            session.leave_world().await.unwrap();
+            drop(session);
+            while rx.try_recv().is_ok() {}
+            assert!(matches!(rx.try_recv(),Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)));
+        }
+    }
+
     #[test]
     fn query_and_new_visibility_read_current_vitals_after_combat_or_regeneration() {
         let (mut world, mut receivers) = test_world();

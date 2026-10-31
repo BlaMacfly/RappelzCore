@@ -88,7 +88,7 @@ class SettingsLock:
     def __enter__(self):
         db=self.db
         try:
-            with (db.root/'save-lock.stderr.log').open('wb') as err:
+            with (db.root/'save-lock.stderr.log').open('ab') as err:
                 self.proc=subprocess.Popen(db.command,env=db.env,creationflags=db.flags,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=err,text=True,encoding='utf-8',bufsize=1)
             rows=queue.Queue()
             def consume():
