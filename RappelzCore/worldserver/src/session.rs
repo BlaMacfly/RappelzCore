@@ -130,6 +130,11 @@ impl Session {
                 self.leave_world().await?;
                 self.sc_result(p.id, result::SUCCESS, 0);
             }
+            rz_proto::party::CS_PARTY_HELLO if self.in_game.is_some() => {
+                let version=rz_proto::party::CsPartyHello::from_packet(&p)?.0;
+                let handle=self.in_game.as_ref().unwrap().handle;
+                self.ctx.world.lock().unwrap().enable_party(handle,version);
+            }
             id if crate::gameplay::handles(id) => self.handle_gameplay(p).await?,
             other => tracing::trace!("{} : paquet {other} non géré", self.addr),
         }
@@ -491,6 +496,7 @@ impl Session {
         }
         let world = self.ctx.world.lock().unwrap();
         match req.chat_type {
+            chat_type::PARTY => world.party_chat(handle,&text),
             chat_type::WHISPER => match world.find_by_name(&req.target) {
                 Some(target) => {
                     let packet = msg::ScChat { sender: name, chat_type: chat_type::WHISPER, message: text }.to_packet();

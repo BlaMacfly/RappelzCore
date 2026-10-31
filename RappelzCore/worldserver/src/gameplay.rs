@@ -184,8 +184,9 @@ impl Session {
                 self.put_off(handle, req.position).await?;
             }
             gid::TS_CS_DROP_ITEM => {
-                let req = game::CsDropItem::from_packet(&p)?;
-                self.remove_item(req.item_handle).await?;
+                let _request = game::CsDropItem::from_packet(&p)?;
+                // Ground loot does not exist yet: a drop must never behave like erase.
+                self.ctx.world.lock().unwrap().notify(handle,"Le dépôt au sol n'est pas disponible. L'objet reste dans le sac.");
             }
             gid::TS_CS_ERASE_ITEM => {
                 for it in game::CsEraseItem::from_packet(&p)?.items {

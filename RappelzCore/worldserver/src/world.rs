@@ -156,6 +156,9 @@ impl MonsterEntity {
 }
 
 pub struct World {
+    pub(crate) parties: crate::party::Parties,
+    pub(crate) party_clients: HashSet<u32>,
+    pub(crate) party_sent: HashMap<u32,rz_proto::party::ScPartyState>,
     started: Instant,
     pub players: HashMap<u32, PlayerEntity>,
     pub npcs: HashMap<u32, NpcEntity>,
@@ -209,6 +212,7 @@ impl World {
             })
             .collect();
         let mut world = Self {
+            parties:Default::default(),party_clients:HashSet::new(),party_sent:HashMap::new(),
             started: Instant::now(),
             players: HashMap::new(),
             npcs,
@@ -273,6 +277,9 @@ impl World {
     /// Retire un joueur et prévient ceux qui le voyaient.
     pub fn remove_player(&mut self, handle: u32) -> Option<PlayerEntity> {
         let p = self.players.remove(&handle)?;
+        self.parties.disconnected(handle);
+        self.party_clients.remove(&handle);self.party_sent.remove(&handle);
+        self.publish_parties();
         let leave = msg::ScLeave { handle }.to_packet();
         for other in self.players.values_mut() {
             if other.visible.remove(&handle) {
@@ -568,6 +575,7 @@ impl World {
             self.tick_regen(now);
         }
         self.update_visibility();
+        self.publish_parties();
     }
 
     fn tick_player_attacks(&mut self, now: u32) {
@@ -781,6 +789,7 @@ mod tests {
 
     fn test_world() -> (World, Vec<tokio::sync::mpsc::UnboundedReceiver<RawPacket>>) {
         let mut world = World {
+            parties:Default::default(),party_clients:HashSet::new(),party_sent:HashMap::new(),
             started: Instant::now(), players: HashMap::new(), npcs: HashMap::new(), monsters: HashMap::new(),
             next_handle: 3, next_monster_handle: MONSTER_HANDLE_BASE, visibility_distance: 540.0,
             max_online: 0, last_regen: 0,
@@ -820,6 +829,77 @@ mod tests {
         assert_eq!((player.creature.level, player.creature.hp, player.creature.max_hp, player.creature.mp, player.creature.max_mp),
             (2, 120, 120, 60, 60));
         assert!(!world.set_player_level(99, 2, 1));
+    }
+
+    #[test]
+    fn party_state_requires_opt_in_consent_and_stays_private_across_layers_and_logout() {
+        use rz_proto::party::{ScPartyState,SC_PARTY_STATE,VERSION};
+        let (mut world,mut receivers)=test_world();
+        let (mut other,_)=test_world();let mut outsider=other.players.remove(&1).unwrap();
+        let (tx,mut outsider_rx)=tokio::sync::mpsc::unbounded_channel();
+        outsider.handle=3;outsider.name="Outsider".into();outsider.tx=tx;world.add_player(outsider);
+        for p in world.players.values_mut() {p.enter.creature.level=1;}
+        world.update_visibility();
+        for rx in &mut receivers {while rx.try_recv().is_ok(){}}while outsider_rx.try_recv().is_ok(){}
+        world.publish_parties();assert!(receivers.iter_mut().all(|rx|rx.try_recv().is_err()));
+        world.enable_party(1,VERSION+1);assert!(receivers[0].try_recv().is_err());
+        world.enable_party(1,VERSION);world.enable_party(2,VERSION);
+        for rx in &mut receivers {assert_eq!(ScPartyState::from_packet(&rx.try_recv().unwrap()).unwrap(),ScPartyState::default());}
+        assert!(outsider_rx.try_recv().is_err());
+        world.party_command(1,&["invite","Player2"]);
+        assert!(world.parties.group(1).is_none());
+        let pending:Vec<_>=std::iter::from_fn(||receivers[1].try_recv().ok()).collect();
+        let state=ScPartyState::from_packet(pending.iter().find(|p|p.id==SC_PARTY_STATE).unwrap()).unwrap();
+        assert_eq!(state.invite.unwrap().inviter,1);assert!(state.members.is_empty());
+        world.party_command(2,&["accept"]);
+        for rx in &mut receivers {
+            let packets:Vec<_>=std::iter::from_fn(||rx.try_recv().ok()).collect();
+            let state=ScPartyState::from_packet(packets.iter().rev().find(|p|p.id==SC_PARTY_STATE).unwrap()).unwrap();
+            assert_eq!(state.members.len(),2);assert_eq!(state.leader,1);assert!(state.invite.is_none());
+        }
+        world.party_command(2,&["disband"]);assert!(world.parties.group(1).is_some());
+        world.players.get_mut(&2).unwrap().hp=25;world.players.get_mut(&2).unwrap().mp=4;
+        world.change_layer(2,1);world.publish_parties();
+        let packets:Vec<_>=std::iter::from_fn(||receivers[0].try_recv().ok()).collect();
+        let state=ScPartyState::from_packet(packets.iter().rev().find(|p|p.id==SC_PARTY_STATE).unwrap()).unwrap();
+        assert_eq!((state.members[1].hp,state.members[1].mp,state.members[1].layer),(25,4,1));
+        assert!(!world.can_see(1,2,world.now()));
+        for rx in &mut receivers {while rx.try_recv().is_ok(){}}while outsider_rx.try_recv().is_ok(){}
+        world.party_chat(1,"private group message");
+        for rx in &mut receivers {assert_eq!(msg::ScChat::from_packet(&rx.try_recv().unwrap()).unwrap().message,"private group message");}
+        assert!(outsider_rx.try_recv().is_err());
+        world.party_chat(3,"injected outsider message");assert!(receivers.iter_mut().all(|rx|rx.try_recv().is_err()));
+        world.remove_player(1);
+        let packets:Vec<_>=std::iter::from_fn(||receivers[1].try_recv().ok()).collect();
+        assert_eq!(ScPartyState::from_packet(packets.iter().find(|p|p.id==SC_PARTY_STATE).unwrap()).unwrap(),ScPartyState::default());
+        assert!(!world.party_clients.contains(&1));assert!(!world.party_sent.contains_key(&1));
+    }
+
+    #[tokio::test]
+    async fn unsupported_ground_drop_keeps_inventory_and_never_attempts_a_database_mutation() {
+        use crate::{Ctx,Settings,session::{Session,InGame},gameplay::InvItem};
+        use std::{sync::{Arc,Mutex,RwLock,atomic::AtomicU32},time::Duration};
+        let (world,mut receivers)=test_world();let tx=world.players[&1].tx.clone();
+        // No real database is reachable by this fixture; any SQL path is a test failure.
+        let pool=rz_database::sqlx::mysql::MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(20))
+            .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused").unwrap();
+        let data=GameData {jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
+            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![]};
+        let settings=Settings {realm_id:1,network_key:vec![],characters_per_realm:1,start_level:1,start_money:0,start_positions:[(0.0,0.0);3],
+            region_size:180,cell_size:6,move_speed:120,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
+        let ctx=Arc::new(Ctx {login:pool.clone(),chars:pool.clone(),world_db:pool,data,world:Mutex::new(world),settings,
+            save_all:tokio::sync::broadcast::channel(4).0,shutdown:tokio::sync::watch::channel(false).0,
+            character_guid:AtomicU32::new(1),item_guid:AtomicU32::new(99),creature_guid:AtomicU32::new(0)});
+        let item=InvItem {guid:99,entry:500,count:7,slot:28};let item_handle=item.handle();
+        let mut session=Session {ctx,addr:"127.0.0.1:1".parse().unwrap(),tx,account:None,gm_level:0,events_rx:None,dialog_npc:None,
+            in_game:Some(InGame {handle:1,character:rz_database::characters::Character::default(),items:vec![item]})};
+        for (handle,count) in [(item_handle,1),(item_handle,0),(item_handle,u32::MAX),(123,1)] {
+            session.handle_gameplay(game::CsDropItem {item_handle:handle,count}.to_packet()).await.unwrap();
+            let items=&session.in_game.as_ref().unwrap().items;
+            assert_eq!(items.len(),1);assert_eq!((items[0].guid,items[0].entry,items[0].count,items[0].slot),(99,500,7,28));
+            let notice=msg::ScChat::from_packet(&receivers[0].try_recv().unwrap()).unwrap();
+            assert!(notice.message.contains("L'objet reste dans le sac"));assert!(receivers[0].try_recv().is_err());
+        }
     }
 
     #[test]

@@ -8,13 +8,14 @@ Core lifecycle/state events were observed in the actual native/local-server sess
 
 | API | Status / data source |
 |---|---|
-| `UnitName("player"/"target")` | Current WorldState name; nil for absent/unsupported unit. |
-| `UnitHealth`, `UnitHealthMax` | Player login/HPMP state; selected entity's known HP. Nil if not known. |
-| `UnitMana`, `UnitManaMax` | Player login/HPMP state and known target player/NPC/monster ENTER/HPMP values. Unknown target values remain nil; known zero is preserved. Two-client combat verified. |
-| `UnitLevel` | Player level/property packets, target entity level; nil until known. |
-| `UnitLayer("player"/"target")` | Read-only Rappelz extension: actual accepted login/WARP layer or target ENTER layer. Nil for unknown/absent units/layers; known zero is preserved. Two-client separation/re-entry verified in [LAYER_VALIDATION.md](LAYER_VALIDATION.md). |
+| `UnitName("player"/"target"/"party1"–"party7")` | Current WorldState name or accepted party roster excluding self; nil for absent/unsupported unit. Party order follows server join order. |
+| `UnitHealth`, `UnitHealthMax` | Player login/HPMP state, selected entity's known HP or accepted party roster values. Nil if not known; known zero remains zero. |
+| `UnitMana`, `UnitManaMax` | Player login/HPMP state, known target ENTER/HPMP values or accepted party roster. Unknown values remain nil; known zero is preserved. Two-client combat/groups verified. |
+| `UnitLevel` | Player level/property packets, target entity level or party roster; nil until known. |
+| `UnitLayer("player"/"target"/"party1"–"party7")` | Read-only Rappelz extension: actual accepted login/WARP, target ENTER or party roster layer. Nil for unknown/absent units/layers; known zero is preserved. Two-client separation/re-entry/groups verified. |
 | `GetMoney()` | Currency/property updates; nil until a value is known. |
-| `GetNumPartyMembers()` | State-backed API exists; native party subsystem not implemented, so nil. No invented zero. |
+| `GetNumPartyMembers()` | Accepted number of other group members: nil until the server confirms state, zero when solo, 1–7 when grouped. Real two-client group validation passes. |
+| `GetPartyInviteName()` | Read-only Rappelz extension; actual pending inviter name, otherwise nil. No invitation/group action APIs are exposed. |
 | `GetTime()` | Monotonic time since this addon host started; survives UI reload. |
 | `print(...)` | Bounded client log and in-world chat output. |
 | Other WoW/game action APIs | Absent; calling one raises the normal attributed Lua nil-function error. No combat/inventory command API is exposed. |
@@ -36,6 +37,11 @@ Core lifecycle/state events were observed in the actual native/local-server sess
 | `BAG_UPDATE` | Accepted inventory contents change; `0` for the current single logical bag. |
 | `PLAYER_TARGET_CHANGED` | Selected target handle changes, including removal. |
 | `CHAT_MSG_SYSTEM` | Server NOTICE chat received; actual message. Local `print` does not synthesize this event. |
+| `CHAT_MSG_PARTY` | Actual group chat received; message, sender. Delivered to accepted group members only. |
+| `PARTY_INVITE_REQUEST` | Accepted pending invitation appears/changes; inviter name. Identical snapshots do not repeat it. |
+| `PARTY_MEMBERS_CHANGED` | Accepted roster identity/order or leader changes; no arguments. Initial confirmed empty roster, vitals-only changes and UI reload do not fabricate a membership change. |
+| `RAPPELZ_PARTY_STATE_READY` | Rappelz extension: first accepted party state of the current player session; no arguments. Distinguishes known solo from unknown. |
+| `RAPPELZ_PARTY_INVITE_CLOSED` | Rappelz extension: actual pending invitation removed by acceptance/refusal/expiry/revocation; no arguments. |
 | `PLAYER_MONEY` | Currency snapshot changes, including first discovery. |
 | Rappelz pet/summon/skill/combat-specific events | Not connected; implement from real future gameplay state transitions. |
 

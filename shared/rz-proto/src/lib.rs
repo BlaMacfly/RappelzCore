@@ -7,6 +7,7 @@ pub mod entity_id;
 pub mod msg;
 pub mod msg_game;
 pub mod packet;
+pub mod party;
 pub mod secure;
 
 pub use msg::Message;

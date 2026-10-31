@@ -7,6 +7,7 @@
 mod commands;
 mod data;
 mod gameplay;
+mod party;
 mod session;
 mod world;
 
