@@ -8,6 +8,9 @@ use rz_proto::{
 use rz_rappelz::restoration::Quote;
 
 pub(crate) struct PendingCast {
+    target:u32,
+    corpse_generation:Option<u64>,
+    audience:Vec<u32>,
     guid: u32,
     position: (f32, f32, f32, u8),
     end: u64,
@@ -71,7 +74,7 @@ impl Session {
         if !ok {
             self.ctx.world.lock().unwrap().notify(
                 g.handle,
-                "Lancement refusé : compétence, état, PM ou recharge indisponible.",
+                "Lancement refusé : cadavre de monstre visible, état, PM ou recharge indisponible.",
             );
         }
     }
@@ -90,7 +93,7 @@ impl World {
             return false;
         };
         if r.caster != handle
-            || r.target != handle
+            || (!q.corpse && r.target != handle)
             || r.layer != p.layer
             || r.skill_id != q.id
             || r.skill_level != q.level
@@ -113,7 +116,11 @@ impl World {
         }
         let (x, y) = p.motion.position(self.now());
         let position = (x, y, p.z, p.layer);
-        let packet = wire::event(
+        let generation=if q.corpse {
+            let Some(generation)=self.corpse_generation_for(handle,r.target,q.range) else{return false;};Some(generation)
+        } else {None};
+        let audience=self.players.keys().copied().filter(|viewer|self.can_see(*viewer,handle,self.now()) && (!q.corpse || self.can_see(*viewer,r.target,self.now()))).collect::<Vec<_>>();
+        let mut packet = wire::event(
             q.id,
             q.level,
             handle,
@@ -122,11 +129,12 @@ impl World {
             p.mp,
             0,
             Phase::Casting(q.cast),
-        )
-        .to_packet();
+        );packet.target=r.target;
+        self.emit_cast(handle,&audience,packet.to_packet());
         self.casts.insert(
             handle,
             PendingCast {
+                target:r.target,corpse_generation:generation,audience,
                 guid: p.guid,
                 position,
                 end: now + u64::from(q.cast),
@@ -134,15 +142,27 @@ impl World {
                 known,
             },
         );
-        self.broadcast_around(handle, &packet, true);
         true
+    }
+    pub(crate) fn corpse_generation_for(&self,caster:u32,target:u32,range:u32)->Option<u64>{
+        if !self.can_see(caster,target,self.now()){return None;}
+        let p=self.players.get(&caster)?;
+        let m=self.monsters.get(&target)?;
+        if p.layer!=0 || m.hp!=0 || m.corpse_consumed || m.dead_since.is_none(){return None;}
+        let (x,y)=p.motion.position(self.now());let (mx,my)=m.motion.position(self.now());
+        (((x-mx).powi(2)+(y-my).powi(2)).sqrt()<=range as f32).then_some(m.corpse_generation)
+    }
+    fn emit_cast(&self,caster:u32,audience:&[u32],packet:rz_proto::RawPacket){
+        for viewer in audience {
+            if self.can_see(*viewer,caster,self.now()){self.send_to(*viewer,packet.clone());}
+        }
     }
     pub(crate) fn cancel_restoration(&mut self, handle: u32) {
         let Some(c) = self.casts.remove(&handle) else {
             return;
         };
         if let Some(p) = self.players.get(&handle) {
-            let packet = wire::event(
+            let mut packet = wire::event(
                 c.quote.id,
                 c.quote.level,
                 handle,
@@ -151,9 +171,8 @@ impl World {
                 p.mp.max(0),
                 0,
                 Phase::Cancel,
-            )
-            .to_packet();
-            self.broadcast_around(handle, &packet, true);
+            );packet.target=c.target;
+            self.emit_cast(handle,&c.audience,packet.to_packet());
         }
     }
     pub(crate) fn cooldown_remaining(&self, guid: u32, group: u32) -> u32 {
@@ -164,7 +183,8 @@ impl World {
     }
     pub(crate) fn tick_restorations(&mut self, now: u64) {
         self.cast_cooldowns.retain(|_, end| *end > now);
-        let handles: Vec<_> = self.casts.keys().copied().collect();
+        let mut handles: Vec<_> = self.casts.keys().copied().collect();
+        handles.sort_by_key(|h|(self.casts[h].end,*h));
         for handle in handles {
             let c = &self.casts[&handle];
             let valid = self.players.get(&handle).is_some_and(|p| {
@@ -182,7 +202,8 @@ impl World {
                     && p.mp <= p.max_mp
                     && p.max_mp > 0
             });
-            if !valid {
+            let corpse_valid=!c.quote.corpse || self.corpse_generation_for(handle,c.target,c.quote.range)==c.corpse_generation;
+            if !valid || !corpse_valid {
                 self.cancel_restoration(handle);
                 continue;
             }
@@ -190,13 +211,15 @@ impl World {
                 continue;
             }
             let c = self.casts.remove(&handle).unwrap();
+            // World lock serializes competing fires. The losing cast cannot debit or restore.
+            if c.quote.corpse {self.monsters.get_mut(&c.target).unwrap().corpse_consumed=true;}
             let p = self.players.get_mut(&handle).unwrap();
             let before = p.mp;
             p.mp = (i64::from(before) - i64::from(c.quote.mp) + i64::from(c.quote.amount))
                 .min(i64::from(p.max_mp)) as i32;
             p.last_combat = now as u32;
             p.enter.creature.mp = p.mp;
-            let event = wire::event(
+            let mut event = wire::event(
                 c.quote.id,
                 c.quote.level,
                 handle,
@@ -204,12 +227,11 @@ impl World {
                 p.hp,
                 p.mp,
                 c.quote.mp,
-                Phase::Fire {
+                if c.quote.corpse {Phase::CorpseFire{mana:p.mp,amount:c.quote.amount}} else {Phase::Fire {
                     mana: p.mp,
                     amount: c.quote.amount,
-                },
-            )
-            .to_packet();
+                }},
+            );event.target=c.target;
             let hpmp = game::ScHpMp {
                 handle,
                 hp: p.hp,
@@ -223,7 +245,7 @@ impl World {
             .to_packet();
             self.cast_cooldowns
                 .insert((c.guid, c.quote.group), now + u64::from(c.quote.cooldown));
-            self.broadcast_around(handle, &event, true);
+            self.emit_cast(handle,&c.audience,event.to_packet());
             self.broadcast_around(handle, &hpmp, true);
             let skills = c
                 .known
@@ -255,6 +277,7 @@ impl World {
                 }
                 .to_packet(),
             );
+            if c.quote.corpse {self.update_visibility();}
         }
     }
 }

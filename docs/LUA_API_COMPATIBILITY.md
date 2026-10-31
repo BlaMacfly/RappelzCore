@@ -48,7 +48,7 @@ Core lifecycle/state events were observed in the actual native/local-server sess
 | `PLAYER_MONEY` | Currency snapshot changes, including first discovery. |
 | `SKILL_LINES_CHANGED` | Accepted private full-list discovery/change, including first empty list; no arguments. Identical snapshots/UI reload do not repeat it. |
 | `RAPPELZ_JP_CHANGED` | Rappelz extension: own known JP discovery/change; numeric balance, including zero. Discovery is not an earned reward. Duplicates/UI reload do not repeat it. |
-| `RAPPELZ_SKILL_EVENT` | Accepted matching visible self-restoration CASTING/CANCEL/FIRE; skill ID, phase string, caster handle, nominal amount (zero except FIRE). Confirmed FIRE vitals are readable before the callback. Duplicates/UI reload do not repeat phases; no casting action API. See SKILL_CASTING_VALIDATION. |
+| `RAPPELZ_SKILL_EVENT` | Accepted matching visible CASTING/CANCEL/FIRE, including archived corpse absorption: skill ID, phase string, caster handle, nominal MP amount (zero except FIRE). The selected corpse differs from the recovery beneficiary. Confirmed caster vitals are readable before callbacks; duplicates/reload do not repeat phases. No casting action API. See SKILL_CORPSE_VALIDATION. |
 | Rappelz pet/summon/general-casting/combat-specific events | Not connected; implement from real future gameplay state transitions. |
 
 Handler convention: `function(self, event, ...)`. Legacy `this`, `event`, `arg1` globals are not supplied. Hidden frames can still receive registered events, as registration is independent of visibility.

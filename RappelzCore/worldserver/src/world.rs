@@ -123,6 +123,8 @@ pub struct NpcEntity {
 }
 
 pub struct MonsterEntity {
+    pub(crate) corpse_consumed:bool,
+    pub(crate) corpse_generation:u64,
     pub handle: u32,
     pub info: MonsterInfo,
     pub home: (f32, f32),
@@ -264,6 +266,7 @@ impl World {
                 hp,
                 respawn_secs: respawn_secs.max(5),
                 dead_since: None,
+                corpse_consumed:false,corpse_generation:0,
                 target: None,
                 next_attack: 0,
                 next_chase: 0,
@@ -372,6 +375,7 @@ impl World {
         } else if let Some(npc) = self.npcs.get(&handle) {
             (npc.x, npc.y)
         } else if let Some(monster) = self.monsters.get(&handle) {
+            if monster.corpse_consumed {return false;}
             if !monster.alive() && !monster.dead_since.is_some_and(|t| now.saturating_sub(t) < MONSTER_CORPSE_TIME) {
                 return false;
             }
@@ -423,7 +427,7 @@ impl World {
                 }
                 for m in self.monsters.values() {
                     let (mx, my) = m.motion.position(now);
-                    let corpse = m.dead_since.is_some_and(|t| now.saturating_sub(t) < MONSTER_CORPSE_TIME);
+                    let corpse = !m.corpse_consumed && m.dead_since.is_some_and(|t| now.saturating_sub(t) < MONSTER_CORPSE_TIME);
                     if (m.alive() || corpse) && (mx - x).powi(2) + (my - y).powi(2) <= range2 {
                         now_visible.insert(m.handle);
                     }
@@ -647,6 +651,7 @@ impl World {
     fn kill_monster(&mut self, mh: u32, killer: u32, now: u32) {
         let Some(m) = self.monsters.get_mut(&mh) else { return };
         m.dead_since = Some(now);
+        m.corpse_consumed=false;m.corpse_generation=m.corpse_generation.saturating_add(1);
         m.target = None;
         m.motion.settle(now);
         let info = m.info.clone();
@@ -674,6 +679,7 @@ impl World {
                 if now.saturating_sub(t) >= m.respawn_secs * 100 {
                     let m = self.monsters.get_mut(&mh).unwrap();
                     m.dead_since = None;
+                    m.corpse_consumed=false;
                     m.hp = m.info.hp;
                     m.motion = Motion::at(m.home.0, m.home.1);
                 }
@@ -1224,8 +1230,52 @@ mod tests {
 
     fn restoration_fixture()->(rz_rappelz::restoration::Restoration,game::CsSkill) {
         (rz_rappelz::restoration::Restoration{id:3212,mp_base:0,mp_per_level:5,cast_base:150,cast_per_level:-5,
-            cooldown:2500,group:103,minimum_level:0,minimum_hp:0,minimum_mp:0,amount_base:2000.,amount_per_level:1500.},
+            cooldown:2500,group:103,minimum_level:0,minimum_hp:0,minimum_mp:0,amount_base:2000.,amount_per_level:1500.,..Default::default()},
         game::CsSkill{skill_id:3212,caster:1,target:1,skill_level:1,..Default::default()})
+    }
+    fn corpse_fixture(w:&mut World)->(u32,rz_rappelz::restoration::Quote){
+        let h=test_monster(w);w.monsters.get_mut(&h).unwrap().hp=0;w.kill_monster(h,1,w.now());w.update_visibility();
+        let (mut d,_)=restoration_fixture();d.corpse=true;d.range=192;d.cooldown=6000;d.cooldown_per_level=-200;d.amount_base=200.;d.amount_per_level=120.;
+        (h,d.quote(1).unwrap())
+    }
+    #[test]
+    fn corpse_requires_current_dead_visible_in_range_monster_and_rechecks_before_fire(){
+        let (mut w,_)=test_world();let (h,q)=corpse_fixture(&mut w);let r=game::CsSkill{skill_id:3212,skill_level:1,caster:1,target:h,..Default::default()};
+        for target in [1,2,h+1] {assert!(!w.begin_restoration(1,&game::CsSkill{target,..r.clone()},q.clone(),vec![],0));}
+        w.players.get_mut(&1).unwrap().layer=1;assert!(!w.begin_restoration(1,&r,q.clone(),vec![],0));w.players.get_mut(&1).unwrap().layer=0;
+        w.monsters.get_mut(&h).unwrap().hp=1;assert!(!w.begin_restoration(1,&r,q.clone(),vec![],0));w.monsters.get_mut(&h).unwrap().hp=0;
+        assert!(w.begin_restoration(1,&r,q,vec![],0));w.players.get_mut(&1).unwrap().motion=Motion::at(250.,0.);w.tick_restorations(145);
+        assert_eq!(w.players[&1].mp,20);assert!(!w.monsters[&h].corpse_consumed);assert!(w.cast_cooldowns.is_empty());
+    }
+    #[test]
+    fn competing_casts_consume_one_body_and_restore_only_first_caster_without_duplicate_rewards(){
+        let (mut w,mut rx)=test_world();let (h,q)=corpse_fixture(&mut w);
+        for r in &mut rx {while r.try_recv().is_ok(){}}
+        for caster in [1,2] {assert!(w.begin_restoration(caster,&game::CsSkill{skill_id:3212,skill_level:1,caster,target:h,..Default::default()},q.clone(),vec![],0));}
+        w.tick_restorations(145);assert_eq!((w.players[&1].mp,w.players[&2].mp),(50,20));assert!(w.monsters[&h].corpse_consumed);assert!(w.casts.is_empty());
+        assert!(w.cast_cooldowns.contains_key(&(1,103)));assert!(!w.cast_cooldowns.contains_key(&(2,103)));
+        for r in &mut rx {let packets:Vec<_>=std::iter::from_fn(||r.try_recv().ok()).collect();
+            let phases:Vec<_>=packets.iter().filter(|p|p.id==game::id::TS_SC_SKILL).map(|p|rz_proto::restoration::decode(&game::ScSkill::from_packet(p).unwrap()).unwrap()).collect();
+            assert_eq!(phases,vec![rz_proto::restoration::Phase::Casting(145),rz_proto::restoration::Phase::Casting(145),rz_proto::restoration::Phase::CorpseFire{mana:50,amount:320},rz_proto::restoration::Phase::Cancel]);
+            assert_eq!(packets.iter().filter(|p|p.id==msg::id::TS_SC_LEAVE && msg::ScLeave::from_packet(p).unwrap().handle==h).count(),1);
+        }
+        w.query(2,h);assert!(!w.can_see(2,h,w.now()));assert!(rx[1].try_recv().is_err());
+    }
+    #[test]
+    fn corpse_expiry_or_new_death_generation_cancels_pending_cast_without_charge(){
+        for expire in [false,true] {
+            let (mut w,_)=test_world();let(h,q)=corpse_fixture(&mut w);let r=game::CsSkill{skill_id:3212,skill_level:1,caster:1,target:h,..Default::default()};
+            assert!(w.begin_restoration(1,&r,q,vec![],0));
+            if expire {w.started-=std::time::Duration::from_secs(4);}else{w.kill_monster(h,1,w.now());}
+            w.tick_restorations(145);assert_eq!(w.players[&1].mp,20);assert!(!w.monsters[&h].corpse_consumed);assert!(w.cast_cooldowns.is_empty());
+        }
+    }
+    #[test]
+    fn consumed_body_keeps_original_respawn_timer_and_returns_alive_on_same_handle(){
+        let(mut w,_)=test_world();let(h,q)=corpse_fixture(&mut w);let stamp=w.monsters[&h].dead_since.unwrap();let generation=w.monsters[&h].corpse_generation;
+        assert!(w.begin_restoration(1,&game::CsSkill{skill_id:3212,skill_level:1,caster:1,target:h,..Default::default()},q,vec![],0));w.tick_restorations(145);
+        assert_eq!(w.monsters[&h].dead_since,Some(stamp));w.tick_monsters(stamp+w.monsters[&h].respawn_secs*100);w.update_visibility();
+        assert!(!w.monsters[&h].corpse_consumed);assert_eq!(w.monsters[&h].dead_since,None);assert_eq!(w.monsters[&h].hp,w.monsters[&h].info.hp);assert_eq!(w.monsters[&h].corpse_generation,generation);assert!(w.can_see(1,h,w.now()));
     }
     #[test]
     fn restoration_charges_once_at_fire_caps_mana_and_keeps_cooldown_across_handles() {
