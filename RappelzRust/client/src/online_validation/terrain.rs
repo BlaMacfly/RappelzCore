@@ -24,6 +24,11 @@ pub struct TerrainValidation {
     steps: Vec<Value>,
     frames: Vec<f32>,
     failure: Option<String>,
+    motion: bool,
+    pixel_cache: bool,
+    motion_frame: usize,
+    motion_view: usize,
+    motion_frames: Vec<Value>,
 }
 
 impl TerrainValidation {
@@ -43,6 +48,12 @@ impl TerrainValidation {
             _ => anyhow::bail!("renderer must be reference or optimized"),
         };
         let directory = PathBuf::from(p["directory"].as_str().context("terrain directory")?);
+        let motion = p["motion"].as_bool().unwrap_or(false);
+        let pixel_cache = match p["pixel_cache"].as_str() {
+            None | Some("enabled") => true,
+            Some("disabled") if motion => false,
+            _ => anyhow::bail!("pixel_cache must be enabled or disabled for the motion comparison"),
+        };
         std::fs::create_dir_all(&directory)?;
         ensure!(
             !directory.join(format!("{role}.json")).exists(),
@@ -65,6 +76,11 @@ impl TerrainValidation {
             steps: Vec::new(),
             frames: Vec::new(),
             failure: None,
+            motion,
+            pixel_cache,
+            motion_frame: 0,
+            motion_view: 0,
+            motion_frames: Vec::new(),
         })
     }
 
@@ -147,7 +163,17 @@ impl TerrainValidation {
             );
             app.auto_enter = None;
             let world = app.world.as_mut().unwrap();
-            world.terrain_validation_view(self.reference, self.phase);
+            world.terrain_validation_view(
+                self.reference,
+                if self.motion && self.phase == 2 {
+                    0
+                } else {
+                    self.phase
+                },
+            );
+            world.terrain_validation_pixel_cache(self.pixel_cache);
+            self.motion_frame = 0;
+            self.motion_view = 0;
             if self.phase == 4 || self.phase == 5 {
                 let x = if self.phase == 4 { 10540. } else { 8440. };
                 let command = world
@@ -157,6 +183,40 @@ impl TerrainValidation {
             }
             self.configured = true;
             return Ok(false);
+        }
+        if self.motion && !self.recorded && matches!(self.phase, 2 | 4 | 5) {
+            let world = app.world.as_ref().unwrap();
+            let sample = world.terrain_cache_snapshot();
+            let position = world.unit_position(me.handle);
+            if self.phase != 2 || self.motion_frame < 96 {
+                self.motion_frames
+                    .push(json!({"phase":self.phase,"frame":self.motion_frame,
+                    "view":self.motion_view,"cache":sample,"position":position,
+                    "frame_ms":macroquad::prelude::get_frame_time()*1000.}));
+                ensure!(
+                    self.motion_frames.len() < 12000,
+                    "bounded terrain motion samples"
+                );
+            }
+            if matches!(self.phase, 2 | 4) && self.motion_frame < 96 {
+                self.motion_frame += 1;
+                let view = if self.motion_frame < 96 {
+                    (self.motion_frame / 8) % 2
+                } else {
+                    0
+                };
+                app.world
+                    .as_mut()
+                    .unwrap()
+                    .terrain_validation_view(false, view);
+                self.motion_view = view;
+                if self.phase == 2 {
+                    self.settled = None;
+                    return Ok(false);
+                }
+            } else if self.phase != 2 {
+                self.motion_frame += 1;
+            }
         }
         let world = app.world.as_ref().unwrap();
         let x = if self.phase == 4 { 10540. } else { 8440. };
@@ -238,9 +298,10 @@ impl TerrainValidation {
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
         let success = self.done && self.failure.is_none() && self.steps.len() == 6;
-        self.write(&format!("{}.json",self.role), json!({"scenario":"terrain","role":self.role,
+        self.write(&format!("{}.json",self.role), json!({"scenario":if self.motion {"terrain-motion"}else{"terrain"},"role":self.role,
             "renderer":if self.reference {"reference"} else {"optimized"},"success":success,"failure":self.failure,
             "steps":self.steps,"events":self.events,"frame_ms":self.frames,
+            "motion":self.motion,"pixel_cache_enabled":self.pixel_cache,"motion_frames":self.motion_frames,
             "trace":app.combat_trace.as_ref().context("terrain trace")?.json()}))?;
         Ok(success)
     }

@@ -16,6 +16,9 @@ use rz_texture::Rgba;
 use crate::assets::Assets;
 use crate::models::{self, ModelCache};
 
+mod pixels;
+use pixels::PixelCache;
+
 pub const MAP_SIZE: f32 = 16128.0;
 /// Côté d'un morceau de rendu (= une tuile de minicarte, 24 cases de 42).
 pub const CHUNK: f32 = 1008.0;
@@ -25,6 +28,8 @@ const CHUNK_CELLS: usize = 24;
 const BAKE_PX: usize = 1024;
 /// Morceaux construits par image au plus (évite les saccades).
 const BUILDS_PER_FRAME: usize = 1;
+const RESTORES_PER_FRAME: usize = 4;
+const CPU_PIXEL_BYTES: usize = 128 * 1024 * 1024;
 
 struct Chunk {
     mesh: QMesh,
@@ -74,6 +79,11 @@ struct CacheStats {
     built: usize,
     evicted: usize,
     ready: bool,
+    missing: usize,
+    restored: usize,
+    last_bakes: usize,
+    last_restores: usize,
+    prepare_us: u64,
 }
 
 pub struct Terrain {
@@ -83,6 +93,7 @@ pub struct Terrain {
     chunks: HashMap<(i32, i32), Chunk>,
     bounds: HashMap<(i32, i32), Bounds>,
     stats: CacheStats,
+    pixels: PixelCache,
     reference_validation: bool,
     validation_capture: Option<std::path::PathBuf>,
     layers: HashMap<String, Option<Arc<Rgba>>>,
@@ -112,6 +123,7 @@ impl Terrain {
             chunks: HashMap::new(),
             bounds: HashMap::new(),
             stats: CacheStats::default(),
+            pixels: PixelCache::new(CPU_PIXEL_BYTES),
             reference_validation: false,
             validation_capture: None,
             layers: HashMap::new(),
@@ -169,7 +181,7 @@ impl Terrain {
     }
 
     /// Texture du sol d'un morceau : mélange des 3 couches de chaque segment.
-    fn bake(&mut self, assets: &mut Assets, map: &NfmMap, ox: f32, oy: f32) -> Texture2D {
+    fn bake(&mut self, assets: &mut Assets, map: &NfmMap, ox: f32, oy: f32) -> Vec<u8> {
         let step = CHUNK / BAKE_PX as f32;
         let mut px = vec![0u8; BAKE_PX * BAKE_PX * 4];
         let layer_info: HashMap<u16, (String, f32)> = map
@@ -225,9 +237,7 @@ impl Terrain {
                 px[o..o + 4].copy_from_slice(&[c[0] as u8, c[1] as u8, c[2] as u8, 255]);
             }
         }
-        let tex = Texture2D::from_rgba8(BAKE_PX as u16, BAKE_PX as u16, &px);
-        tex.set_filter(FilterMode::Linear);
-        tex
+        px
     }
 
     /// Couleur éclairée d'un sommet (formule du client, FUN_00af9960).
@@ -267,7 +277,18 @@ impl Terrain {
         let map = self.map(assets, mx, my)?;
         let (cx, cy) = (gx.rem_euclid(per_map), gy.rem_euclid(per_map));
         let (ox, oy) = (cx as f32 * CHUNK, cy as f32 * CHUNK);
-        let texture = self.bake(assets, &map, ox, oy);
+        let key = (gx, gy);
+        let image = if let Some(image) = self.pixels.get(key) {
+            self.stats.restored += 1;
+            self.stats.last_restores += 1;
+            image
+        } else {
+            let image = self.bake(assets, &map, ox, oy);
+            self.stats.last_bakes += 1;
+            self.pixels.insert(key, image)
+        };
+        let texture = Texture2D::from_rgba8(BAKE_PX as u16, BAKE_PX as u16, &image);
+        texture.set_filter(FilterMode::Linear);
         let n = CHUNK_CELLS + 1;
         let (wx0, wy0) = (mx as f32 * MAP_SIZE + ox, my as f32 * MAP_SIZE + oy);
         let (i0, j0) = (
@@ -346,6 +367,13 @@ impl Terrain {
         self.reference_validation = enabled;
     }
 
+    pub(crate) fn validation_pixel_cache(&mut self, enabled: bool) {
+        let limit = if enabled { CPU_PIXEL_BYTES } else { 0 };
+        if self.pixels.limit() != limit {
+            self.pixels = PixelCache::new(limit);
+        }
+    }
+
     pub(crate) fn validation_capture(&mut self, path: std::path::PathBuf) {
         self.validation_capture = Some(path);
     }
@@ -357,11 +385,17 @@ impl Terrain {
             "peak_chunks":self.stats.peak_chunks,"built":self.stats.built,"evicted":self.stats.evicted,
             "texture_payload_bytes":self.chunks.len()*BAKE_PX*BAKE_PX*4,
             "peak_texture_payload_bytes":self.stats.peak_chunks*BAKE_PX*BAKE_PX*4,
-            "reference":self.reference_validation})
+            "reference":self.reference_validation,"missing":self.stats.missing,
+            "restored":self.stats.restored,"last_bakes":self.stats.last_bakes,
+            "last_restores":self.stats.last_restores,"prepare_us":self.stats.prepare_us,
+            "cpu_pixel_bytes":self.pixels.bytes(),"cpu_pixel_limit":self.pixels.limit()})
     }
 
     /// Construit les morceaux visibles autour de (x, y) et dessine le sol.
     pub fn draw(&mut self, assets: &mut Assets, x: f32, y: f32, clip: Mat4) {
+        let prepare = std::time::Instant::now();
+        self.stats.last_bakes = 0;
+        self.stats.last_restores = 0;
         let (gx, gy) = ((x / CHUNK).floor() as i32, (y / CHUNK).floor() as i32);
         let r = self.view_chunks;
         let mut wanted: Vec<(i32, i32)> = (gy - r..=gy + r)
@@ -385,9 +419,22 @@ impl Terrain {
             self.stats.evicted += before - self.chunks.len();
         }
         self.stats.wanted = wanted.len();
+        // A revisited view can restore several exact images without running the expensive
+        // blend again. Bound uploads to 16 MiB/frame; cold blending remains one/frame.
+        for &key in &wanted {
+            if self.stats.last_restores >= RESTORES_PER_FRAME {
+                break;
+            }
+            if !self.chunks.contains_key(&key) && self.pixels.contains(key) {
+                if let Some(c) = self.build_chunk(assets, key.0, key.1) {
+                    self.chunks.insert(key, c);
+                    self.stats.built += 1;
+                }
+            }
+        }
         let mut built = 0;
         for &key in &wanted {
-            if built >= BUILDS_PER_FRAME {
+            if built >= BUILDS_PER_FRAME || self.stats.last_restores > 0 {
                 break;
             }
             if !self.chunks.contains_key(&key) {
@@ -408,6 +455,11 @@ impl Terrain {
         self.stats.peak_chunks = self.stats.peak_chunks.max(self.chunks.len());
         self.stats.ready =
             !wanted.is_empty() && wanted.iter().all(|key| self.chunks.contains_key(key));
+        self.stats.missing = wanted
+            .iter()
+            .filter(|key| !self.chunks.contains_key(key))
+            .count();
+        self.stats.prepare_us = prepare.elapsed().as_micros().min(u64::MAX as u128) as u64;
         for key in &wanted {
             if let Some(c) = self.chunks.get(key) {
                 draw_mesh(&c.mesh);

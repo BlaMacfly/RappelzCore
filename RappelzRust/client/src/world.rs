@@ -335,6 +335,10 @@ impl WorldState {
         self.terrain.as_ref().map(|t| t.cache_snapshot()).unwrap_or(serde_json::Value::Null)
     }
 
+    pub(crate) fn terrain_validation_pixel_cache(&mut self, enabled: bool) {
+        if let Some(terrain) = &mut self.terrain { terrain.validation_pixel_cache(enabled); }
+    }
+
     pub(crate) fn terrain_validation_capture(&mut self, path: std::path::PathBuf) {
         if let Some(terrain) = &mut self.terrain { terrain.validation_capture(path); }
     }
