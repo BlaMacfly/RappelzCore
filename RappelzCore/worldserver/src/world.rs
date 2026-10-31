@@ -446,12 +446,23 @@ impl World {
         );
     }
 
-    /// Téléporte un joueur (TS_SC_WARP) ; la visibilité suit au prochain tick.
+    /// Téléporte un joueur (TS_SC_WARP) et synchronise immédiatement ses observateurs.
     pub fn teleport(&mut self, handle: u32, x: f32, y: f32, z: f32) {
-        if let Some(p) = self.players.get_mut(&handle) {
-            p.motion = Motion::at(x, y);
-            p.z = z;
-            let _ = p.tx.send(msg::ScWarp { x, y, z, layer: p.layer }.to_packet());
+        if !self.players.contains_key(&handle) { return; }
+        let previous_viewers: Vec<u32> = self.players.values()
+            .filter(|p| p.visible.contains(&handle)).map(|p| p.handle).collect();
+        let p = self.players.get_mut(&handle).unwrap();
+        p.motion = Motion::at(x, y);
+        p.z = z;
+        let _ = p.tx.send(msg::ScWarp { x, y, z, layer: p.layer }.to_packet());
+        // Send LEAVE/ENTER immediately to viewers losing/gaining this player.
+        self.update_visibility();
+        // Viewers remaining nearby need a fresh position too; WARP addresses only its owner.
+        let packets = self.enter_packets(handle, self.now());
+        for viewer in previous_viewers {
+            if self.players.get(&viewer).is_some_and(|p| p.visible.contains(&handle)) {
+                for packet in &packets { self.send_to(viewer, packet.clone()); }
+            }
         }
     }
 
@@ -703,12 +714,20 @@ impl World {
 
     /// Résurrection après la mort : PV/PM au maximum, renvoi au point indiqué.
     pub fn revive(&mut self, handle: u32, x: f32, y: f32) {
+        if !self.players.contains_key(&handle) { return; }
         if let Some(p) = self.players.get_mut(&handle) {
             p.hp = p.max_hp;
             p.mp = p.max_mp;
             p.attack_target = None;
             let packet = Self::hpmp_packet(handle, p.hp, p.max_hp, p.mp, p.max_mp, 0);
             self.broadcast_around(handle, &packet, true);
+        }
+        let now = self.now();
+        for monster in self.monsters.values_mut() {
+            if monster.target == Some(handle) {
+                monster.target = None;
+                monster.motion.settle(now);
+            }
         }
         self.teleport(handle, x, y, 0.0);
     }
@@ -898,6 +917,55 @@ mod tests {
         world.tick_player_attacks(1500);
         assert!(matches!(rewards.try_recv().unwrap(), WorldEvent::Reward { exp: 5, jp: 3, .. }));
         assert!(rewards.try_recv().is_err());
+    }
+
+    #[test]
+    fn revival_refreshes_nearby_observers_and_clears_combat() {
+        let (mut world, mut receivers) = test_world();
+        let monster = test_monster(&mut world);
+        world.monsters.get_mut(&monster).unwrap().target = Some(1);
+        world.update_visibility();
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        let player = world.players.get_mut(&1).unwrap();
+        player.hp = 0;
+        player.mp = 1;
+        player.attack_target = Some(monster);
+        world.revive(1, 120.0, 30.0);
+        assert_eq!(world.players[&1].attack_target, None);
+        let own: Vec<_> = std::iter::from_fn(|| receivers[0].try_recv().ok()).collect();
+        assert_eq!(own[0].id, game::ScHpMp::ID);
+        let warp = msg::ScWarp::from_packet(&own[1]).unwrap();
+        assert_eq!((warp.x, warp.y), (120.0, 30.0));
+        let packets: Vec<_> = std::iter::from_fn(|| receivers[1].try_recv().ok()).collect();
+        let enter = packets.iter().find(|p| p.id == msg::ScEnter::ID).expect("observer did not receive the revived position");
+        let enter = msg::ScEnter::from_packet(enter).unwrap();
+        assert_eq!((enter.handle, enter.x, enter.y), (1, 120.0, 30.0));
+        let EnterKind::Player(player) = enter.kind else { panic!("expected player") };
+        assert_eq!((player.creature.hp, player.creature.mp), (100, 50));
+        assert!(!packets.iter().any(|p| p.id == msg::ScLeave::ID), "nearby target should remain selected");
+        assert_eq!(world.monsters[&monster].target, None, "revived player retained an aggressor");
+    }
+
+    #[test]
+    fn teleport_sends_leave_and_enter_to_the_correct_observers_immediately() {
+        let (mut world, mut receivers) = test_world();
+        let (mut other_world, mut other_receivers) = test_world();
+        let mut newcomer = other_world.players.remove(&2).unwrap();
+        newcomer.handle = 3;
+        newcomer.motion = Motion::at(1000.0, 0.0);
+        newcomer.visible.clear();
+        world.add_player(newcomer);
+        world.update_visibility();
+        for rx in receivers.iter_mut().chain(other_receivers.iter_mut()) { while rx.try_recv().is_ok() {} }
+        world.teleport(1, 1000.0, 0.0, 0.0);
+        let former: Vec<_> = std::iter::from_fn(|| receivers[1].try_recv().ok()).collect();
+        assert!(former.iter().any(|p| p.id == msg::ScLeave::ID
+            && msg::ScLeave::from_packet(p).unwrap().handle == 1), "old observer retained teleported player");
+        assert!(!former.iter().any(|p| p.id == msg::ScEnter::ID));
+        let entered: Vec<_> = std::iter::from_fn(|| other_receivers[1].try_recv().ok()).collect();
+        assert_eq!(entered.iter().filter(|p| p.id == msg::ScEnter::ID).count(), 1);
+        let enter = msg::ScEnter::from_packet(entered.iter().find(|p| p.id == msg::ScEnter::ID).unwrap()).unwrap();
+        assert_eq!((enter.handle, enter.x), (1, 1000.0));
     }
 
     #[test]
