@@ -112,3 +112,7 @@ The [gameplay restart regression](GAMEPLAY_RESTART_VALIDATION.md) uses ordinary 
 ## Interrupted save and advertised progress, 2026-10-31
 
 [Interrupted-save validation](SAVE_ROLLBACK_VALIDATION.md) uses the same real combat/XP, cancel, lobby and login packets with an optional local driver mode. It verifies an owner notification of 5 EXP/3 JP before a save transaction is killed at settings REPLACE; restart correctly returns the uncommitted reward to the 0/0 durable checkpoint. A fresh fight then saves 5/3 through third entry. Trace epochs distinguish these two legitimate rewards from duplicate delivery within one session. No durable-save ACK, reward journal, packet format or automatic reconnection is introduced.
+
+## Committed reward notifications, 2026-10-31
+
+The [reward durability regression](REWARD_DURABILITY_VALIDATION.md) changes server ordering, not packet formats. Reward EXP/JP, currency, level/stat and success notices now follow successful character/settings COMMIT. A killed monster's attack packet can still precede that commit; it is not a durable-reward receipt. A real SQL row-lock wait proves that XP/JP stays unannounced until release. Both later logins load the committed totals through existing initial-state packets without duplicate gain or private leakage. An uncertain failed save ends the session without publishing success or overwriting the possible commit with a stale disconnect snapshot. No automatic retry, new ACK or reconnect protocol is added.

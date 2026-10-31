@@ -462,6 +462,20 @@ impl Session {
         Some(character)
     }
 
+    /// Detach after an uncertain durable write without ever saving stale progress.
+    /// The caller ends the connection; startup recovery handles stale online flags.
+    pub(crate) fn detach_world_without_save(&mut self) {
+        if let Some(g) = self.in_game.take() {
+            let mut world = self.ctx.world.lock().unwrap();
+            if world.players.get(&g.handle).is_some_and(|p| p.guid==g.character.guid && p.account_id==g.character.account) {
+                world.remove_player(g.handle);
+            }
+        }
+        self.events_rx=None;
+        self.dialog_npc=None;
+        self.skill_catalog=None;
+    }
+
     pub async fn leave_world(&mut self) -> Result<()> {
         if self.in_game.is_none() {
             return Ok(());

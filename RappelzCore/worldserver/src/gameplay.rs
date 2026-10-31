@@ -76,6 +76,26 @@ pub fn exp_to_next(level: u8) -> i64 {
     100 * l * l + 200 * l
 }
 
+/// Build the complete award without publishing or changing live/session state.
+/// XP, JP, money and level-up vitals must commit in the same character save.
+fn reward_candidate(mut c: characters::Character, exp: i64, jp: i64, gold: i64) -> (characters::Character, bool) {
+    let mut total = i64::from(c.xp).saturating_add(exp.max(0));
+    let mut leveled = false;
+    while c.level < 255 && total >= exp_to_next(c.level) {
+        total -= exp_to_next(c.level);
+        c.level += 1;
+        leveled = true;
+    }
+    c.xp = total.clamp(0, u32::MAX as i64) as u32;
+    c.set_extra("jp", c.extra_i64("jp", 0).saturating_add(jp.max(0)).max(0));
+    c.money = i64::from(c.money).saturating_add(gold.max(0)).min(u32::MAX as i64) as u32;
+    if leveled {
+        c.health = max_hp_for(c.level) as u32;
+        c.power1 = max_mp_for(c.level) as u32;
+    }
+    (c, leveled)
+}
+
 impl Session {
     fn item_info(&self, it: &InvItem) -> game::ItemInfo {
         let endurance = self.ctx.data.items.get(&it.entry).map(|i| i.endurance).unwrap_or(0);
@@ -365,26 +385,25 @@ impl Session {
     /// Événements du monde (récompenses, mort) appliqués au personnage de la session.
     pub async fn handle_world_event(&mut self, ev: WorldEvent) -> Result<()> {
         let ctx = self.ctx.clone();
-        let Some(g) = &mut self.in_game else { return Ok(()) };
+        let Some(g) = &self.in_game else { return Ok(()) };
         let handle = g.handle;
         match ev {
             WorldEvent::Reward { exp, jp, gold, monster } => {
-                let c = &mut g.character;
-                let mut total = c.xp as i64 + exp;
-                let mut leveled = false;
-                while total >= exp_to_next(c.level) && c.level < 255 {
-                    total -= exp_to_next(c.level);
-                    c.level += 1;
-                    leveled = true;
+                let (candidate, leveled) = reward_candidate(self.character_snapshot().unwrap(), exp, jp, gold);
+                // Do not hold the world lock over SQL or expose an award before COMMIT.
+                if let Err(error) = characters::save(&ctx.chars, &candidate).await {
+                    // A failed COMMIT can have an uncertain outcome. Never let normal
+                    // disconnect cleanup overwrite it with the older session snapshot.
+                    self.detach_world_without_save();
+                    return Err(error.context("reward save failed; closing without a stale disconnect save"));
                 }
-                c.xp = total as u32;
-                let jp_total = c.extra_i64("jp", 0).saturating_add(jp);
-                c.set_extra("jp", jp_total);
-                let (level, xp, money) = (c.level, c.xp, c.money as i64 + gold);
-                let jlv = c.extra_i64("jlv", 1) as i32;
+                let (level, xp, money) = (candidate.level, candidate.xp, candidate.money);
+                let jp_total = candidate.extra_i64("jp", 0);
+                let jlv = candidate.extra_i64("jlv", 1) as i32;
+                self.in_game.as_mut().unwrap().character = candidate;
                 self.send(&game::ScExpUpdate { handle, exp: xp as i64, jp: jp_total });
                 if gold > 0 {
-                    self.set_money(money);
+                    self.send(&game::ScGoldUpdate { gold: money as i64, chaos: 0 });
                 }
                 let mut w = ctx.world.lock().unwrap();
                 w.notify(handle, &format!("{monster} vaincu : +{exp} EXP, +{jp} JP, +{gold} rupees."));
@@ -394,7 +413,7 @@ impl Session {
                 }
             }
             WorldEvent::Died => {
-                let (x, y) = ctx.settings.start_position(g.character.race as i32);
+                let (x, y) = ctx.settings.start_position(self.in_game.as_ref().unwrap().character.race as i32);
                 let mut w = ctx.world.lock().unwrap();
                 w.notify(handle, "Vous êtes mort. Retour au point de départ.");
                 w.revive(handle, x, y);
@@ -402,5 +421,33 @@ impl Session {
         }
         self.send_skill_catalog();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod reward_tests {
+    use super::*;
+    use characters::Character;
+
+    #[test]
+    fn reward_candidate_preserves_extras_and_contains_level_gold_and_healed_vitals() {
+        let mut c = Character { level:2, xp:799, money:10, health:35, power1:6, position_x:42., ..Default::default() };
+        c.set_extra("jp",7);c.set_extra("job",100);c.set_extra("unmapped","keep");
+        let (next,leveled)=reward_candidate(c.clone(),5,3,9);
+        assert!(leveled);assert_eq!((next.level,next.xp,next.money,next.health,next.power1),(3,4,19,140,70));
+        assert_eq!(next.extra_i64("jp",0),10);assert_eq!(next.extra["unmapped"],"keep");
+        assert_eq!(next.position_x,42.);assert_eq!((c.level,c.xp,c.money,c.health,c.power1),(2,799,10,35,6));
+        assert_eq!(c.extra_i64("jp",0),7);
+    }
+
+    #[test]
+    fn capped_progress_never_wraps_or_turns_negative() {
+        let mut c=Character {level:255,xp:u32::MAX,money:u32::MAX,health:7,power1:3,..Default::default()};
+        c.set_extra("jp",i64::MAX-1);
+        let (next,leveled)=reward_candidate(c,i64::MAX,3,i64::MAX);
+        assert!(!leveled);assert_eq!((next.level,next.xp,next.money,next.health,next.power1),(255,u32::MAX,u32::MAX,7,3));
+        assert_eq!(next.extra_i64("jp",0),i64::MAX);
+        let (same,_)=reward_candidate(next.clone(),-1,-1,-1);
+        assert_eq!((same.xp,same.money,same.extra),(next.xp,next.money,next.extra));
     }
 }

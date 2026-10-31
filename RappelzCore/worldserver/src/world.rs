@@ -941,14 +941,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reward_keeps_wide_job_points_nonnegative_without_integer_wrap() {
+    async fn failed_reward_commit_publishes_no_gain_and_cannot_save_an_old_snapshot_at_disconnect() {
         let (mut session,mut rx)=isolated_session(None);
-        session.in_game.as_mut().unwrap().character.set_extra("jp",i64::MAX-1);
-        session.handle_world_event(WorldEvent::Reward {exp:0,jp:3,gold:0,monster:"Fixture".into()}).await.unwrap();
-        assert_eq!(session.in_game.as_ref().unwrap().character.extra_i64("jp",0),i64::MAX);
+        session.ctx.chars.close().await;
+        let result=session.handle_world_event(WorldEvent::Reward {exp:500,jp:3,gold:20,monster:"Fixture".into()}).await;
+        assert!(result.is_err());assert!(session.in_game.is_none());assert!(session.events_rx.is_none());
+        assert!(!session.ctx.world.lock().unwrap().players.contains_key(&1));
         let packets:Vec<_>=std::iter::from_fn(||rx.try_recv().ok()).collect();
-        let exp=game::ScExpUpdate::from_packet(packets.iter().find(|p|p.id==game::ScExpUpdate::ID).unwrap()).unwrap();
-        assert_eq!(exp.jp,i64::MAX);
+        assert!(packets.iter().all(|p| p.id!=game::ScExpUpdate::ID && p.id!=game::ScGoldUpdate::ID));
+        assert!(packets.iter().all(|p| p.id!=msg::ScChat::ID));
+        // The pool is closed: a successful leave proves cleanup issues no stale SQL save.
+        session.leave_world().await.unwrap();
     }
 
     #[test]
