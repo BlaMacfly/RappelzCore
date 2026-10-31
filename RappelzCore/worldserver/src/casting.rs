@@ -6,6 +6,7 @@ use rz_proto::{
     Message,
 };
 use rz_rappelz::restoration::Quote;
+use std::collections::HashSet;
 
 pub(crate) struct PendingCast {
     target:u32,
@@ -80,6 +81,43 @@ impl Session {
     }
 }
 impl World {
+    fn restoration_valid(&self, handle:u32, c:&PendingCast)->bool {
+        self.players.get(&handle).is_some_and(|p| {
+            let (x,y)=p.motion.position(self.now());
+            p.guid==c.guid && p.hp>0 && p.layer==c.position.3
+                && p.motion.remaining_points(self.now()).is_empty()
+                && (x-c.position.0).abs()<0.01 && (y-c.position.1).abs()<0.01
+                && (p.z-c.position.2).abs()<0.01 && p.attack_target.is_none()
+                && p.hp>=c.quote.minimum_hp && p.mp>=c.quote.mp.max(c.quote.minimum_mp)
+                && p.mp<=p.max_mp && p.max_mp>0
+        }) && (!c.quote.corpse || self.corpse_generation_for(handle,c.target,c.quote.range)==c.corpse_generation)
+    }
+    /// Called after all visibility ENTER/LEAVE packets, so both entities exist before CASTING.
+    pub(crate) fn sync_restoration_audiences(&mut self, now:u64) {
+        let mut handles:Vec<_>=self.casts.keys().copied().collect();handles.sort_unstable();
+        for handle in handles {
+            let c=&self.casts[&handle];
+            if !self.restoration_valid(handle,c) {self.cancel_restoration(handle);continue;}
+            let p=&self.players[&handle];
+            let previous:HashSet<_>=c.audience.iter().copied().collect();
+            // A late viewer gets only a still-running phase, never a past effect.
+            let audience:HashSet<_>=self.players.keys().copied().filter(|viewer|
+                self.can_see(*viewer,handle,self.now()) && (!c.quote.corpse || self.can_see(*viewer,c.target,self.now()))
+                    && (now<c.end || previous.contains(viewer))).collect();
+            for viewer in previous.difference(&audience) {
+                if self.can_see(*viewer,handle,self.now()) {
+                    let mut event=wire::event(c.quote.id,c.quote.level,handle,c.position,p.hp.max(0),p.mp.max(0),0,Phase::Cancel);
+                    event.target=c.target;self.send_to(*viewer,event.to_packet());
+                }
+            }
+            for viewer in audience.difference(&previous) {
+                let remaining=c.end.saturating_sub(now).min(u64::from(c.quote.cast)) as u32;
+                let mut event=wire::event(c.quote.id,c.quote.level,handle,c.position,p.hp,p.mp,0,Phase::Casting(remaining));
+                event.target=c.target;self.send_to(*viewer,event.to_packet());
+            }
+            self.casts.get_mut(&handle).unwrap().audience=audience.into_iter().collect();
+        }
+    }
     pub(crate) fn begin_restoration(
         &mut self,
         handle: u32,
@@ -186,24 +224,9 @@ impl World {
         let mut handles: Vec<_> = self.casts.keys().copied().collect();
         handles.sort_by_key(|h|(self.casts[h].end,*h));
         for handle in handles {
-            let c = &self.casts[&handle];
-            let valid = self.players.get(&handle).is_some_and(|p| {
-                let (x, y) = p.motion.position(self.now());
-                p.guid == c.guid
-                    && p.hp > 0
-                    && p.layer == c.position.3
-                    && p.motion.remaining_points(self.now()).is_empty()
-                    && (x - c.position.0).abs() < 0.01
-                    && (y - c.position.1).abs() < 0.01
-                    && (p.z - c.position.2).abs() < 0.01
-                    && p.attack_target.is_none()
-                    && p.hp >= c.quote.minimum_hp
-                    && p.mp >= c.quote.mp.max(c.quote.minimum_mp)
-                    && p.mp <= p.max_mp
-                    && p.max_mp > 0
-            });
-            let corpse_valid=!c.quote.corpse || self.corpse_generation_for(handle,c.target,c.quote.range)==c.corpse_generation;
-            if !valid || !corpse_valid {
+            // Consuming one corpse can cancel a competing cast during visibility sync.
+            let Some(c) = self.casts.get(&handle) else {continue;};
+            if !self.restoration_valid(handle,c) {
                 self.cancel_restoration(handle);
                 continue;
             }
@@ -211,6 +234,17 @@ impl World {
                 continue;
             }
             let c = self.casts.remove(&handle).unwrap();
+            // Evaluate target visibility before consumption hides it, including moving viewers.
+            let audience:Vec<_>=c.audience.iter().copied().filter(|viewer|self.can_see(*viewer,handle,self.now())
+                && (!c.quote.corpse || self.can_see(*viewer,c.target,self.now()))).collect();
+            // A viewer can cross only the target boundary between visibility and FIRE ticks.
+            // Close its previously accepted phase before consuming the body, without FIRE.
+            for viewer in c.audience.iter().filter(|viewer|!audience.contains(viewer)) {
+                if self.can_see(*viewer,handle,self.now()) {
+                    let p=&self.players[&handle];let mut event=wire::event(c.quote.id,c.quote.level,handle,c.position,p.hp.max(0),p.mp.max(0),0,Phase::Cancel);
+                    event.target=c.target;self.send_to(*viewer,event.to_packet());
+                }
+            }
             // World lock serializes competing fires. The losing cast cannot debit or restore.
             if c.quote.corpse {self.monsters.get_mut(&c.target).unwrap().corpse_consumed=true;}
             let p = self.players.get_mut(&handle).unwrap();
@@ -245,7 +279,7 @@ impl World {
             .to_packet();
             self.cast_cooldowns
                 .insert((c.guid, c.quote.group), now + u64::from(c.quote.cooldown));
-            self.emit_cast(handle,&c.audience,event.to_packet());
+            self.emit_cast(handle,&audience,event.to_packet());
             self.broadcast_around(handle, &hpmp, true);
             let skills = c
                 .known

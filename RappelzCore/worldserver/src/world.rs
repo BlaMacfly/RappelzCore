@@ -447,6 +447,7 @@ impl World {
         for (handle, packet) in outgoing {
             let _ = self.players[&handle].tx.send(packet);
         }
+        self.sync_restoration_audiences(self.cast_clock());
     }
 
     /// Envoie un paquet au joueur et à tous ceux qui le voient.
@@ -1250,6 +1251,67 @@ mod tests {
         (rz_rappelz::restoration::Restoration{id:3212,mp_base:0,mp_per_level:5,cast_base:150,cast_per_level:-5,
             cooldown:2500,group:103,minimum_level:0,minimum_hp:0,minimum_mp:0,amount_base:2000.,amount_per_level:1500.,..Default::default()},
         game::CsSkill{skill_id:3212,caster:1,target:1,skill_level:1,..Default::default()})
+    }
+    #[test]
+    fn late_cast_observer_receives_enters_then_remaining_cast_and_one_fire() {
+        use rz_proto::restoration::{decode,Phase};
+        let (mut w,mut rx)=test_world();let (body,q)=corpse_fixture(&mut w);
+        w.change_layer(2,1);for r in &mut rx {while r.try_recv().is_ok(){}}
+        let now=w.cast_clock();assert!(w.begin_restoration(1,&game::CsSkill{target:body,..restoration_fixture().1},q.clone(),vec![],now));
+        assert!(rx[1].try_recv().is_err());w.started-=std::time::Duration::from_millis(400);
+        w.change_layer(2,0);
+        let packets:Vec<_>=std::iter::from_fn(||rx[1].try_recv().ok()).collect();
+        let at=packets.iter().position(|p|p.id==game::id::TS_SC_SKILL).expect("late observer missed active cast");
+        for handle in [1,body] {assert!(packets[..at].iter().any(|p|p.id==msg::id::TS_SC_ENTER && msg::ScEnter::from_packet(p).unwrap().handle==handle));}
+        let Phase::Casting(left)=decode(&game::ScSkill::from_packet(&packets[at]).unwrap()).unwrap() else{panic!("active cast required")};
+        assert!(left>0 && left<q.cast);w.query(2,1);w.update_visibility();
+        assert!(!std::iter::from_fn(||rx[1].try_recv().ok()).any(|p|p.id==game::id::TS_SC_SKILL),"query replayed casting");
+        w.tick_restorations(now+u64::from(q.cast));
+        let packets:Vec<_>=std::iter::from_fn(||rx[1].try_recv().ok()).collect();
+        let events:Vec<_>=packets.iter().filter(|p|p.id==game::id::TS_SC_SKILL).map(|p|decode(&game::ScSkill::from_packet(p).unwrap()).unwrap()).collect();
+        assert_eq!(events,vec![Phase::CorpseFire{mana:50,amount:320}]);assert!(!packets.iter().any(|p|p.id==game::id::TS_SC_SKILL_LIST));
+        w.update_visibility();assert!(rx[1].try_recv().is_err());
+    }
+    #[test]
+    fn cast_observer_losing_only_target_is_canceled_and_can_resubscribe() {
+        use rz_proto::restoration::{decode,Phase};
+        let (mut w,mut rx)=test_world();let (body,q)=corpse_fixture(&mut w);w.visibility_distance=100.;
+        w.players.get_mut(&2).unwrap().motion=Motion::at(-80.,0.);w.update_visibility();
+        for r in &mut rx {while r.try_recv().is_ok(){}}
+        assert!(w.begin_restoration(1,&game::CsSkill{target:body,..restoration_fixture().1},q.clone(),vec![],w.cast_clock()));
+        while rx[1].try_recv().is_ok(){}
+        // Caster is still visible at 95 units, corpse is hidden at 105 units.
+        w.players.get_mut(&2).unwrap().motion=Motion::at(-95.,0.);w.update_visibility();
+        let packets:Vec<_>=std::iter::from_fn(||rx[1].try_recv().ok()).collect();
+        assert!(w.can_see(2,1,w.now()) && !w.can_see(2,body,w.now()));
+        assert_eq!(packets.iter().filter(|p|p.id==game::id::TS_SC_SKILL).map(|p|decode(&game::ScSkill::from_packet(p).unwrap()).unwrap()).collect::<Vec<_>>(),vec![Phase::Cancel]);
+        w.update_visibility();w.query(2,body);assert!(rx[1].try_recv().is_err());
+        w.players.get_mut(&2).unwrap().motion=Motion::at(-80.,0.);w.started-=std::time::Duration::from_millis(200);w.update_visibility();
+        let packets:Vec<_>=std::iter::from_fn(||rx[1].try_recv().ok()).collect();
+        assert_eq!(packets.iter().filter(|p|p.id==game::id::TS_SC_SKILL).count(),1);
+        w.cancel_restoration(1);let packet=rx[1].try_recv().unwrap();assert_eq!(decode(&game::ScSkill::from_packet(&packet).unwrap()).unwrap(),Phase::Cancel);
+        assert!(w.cast_cooldowns.is_empty());assert_eq!(w.players[&1].mp,20);
+    }
+    #[test]
+    fn expired_cast_is_never_reintroduced_to_a_new_viewer() {
+        let (mut w,mut rx)=test_world();let (d,r)=restoration_fixture();w.change_layer(2,1);
+        for r in &mut rx {while r.try_recv().is_ok(){}}
+        assert!(w.begin_restoration(1,&r,d.quote(1).unwrap(),vec![],w.cast_clock()));
+        w.started-=std::time::Duration::from_secs(2);w.change_layer(2,0);
+        assert!(!std::iter::from_fn(||rx[1].try_recv().ok()).any(|p|p.id==game::id::TS_SC_SKILL));
+        w.tick_restorations(w.cast_clock());
+        assert!(!std::iter::from_fn(||rx[1].try_recv().ok()).any(|p|p.id==game::id::TS_SC_SKILL));
+    }
+    #[test]
+    fn viewer_crossing_only_target_boundary_at_fire_gets_cancel_instead_of_hidden_effect(){
+        use rz_proto::restoration::{decode,Phase};
+        let (mut w,mut rx)=test_world();let (body,q)=corpse_fixture(&mut w);w.visibility_distance=100.;
+        w.players.get_mut(&2).unwrap().motion=Motion::at(-80.,0.);w.update_visibility();for r in &mut rx{while r.try_recv().is_ok(){}}
+        let now=w.cast_clock();assert!(w.begin_restoration(1,&game::CsSkill{target:body,..restoration_fixture().1},q.clone(),vec![],now));while rx[1].try_recv().is_ok(){}
+        w.players.get_mut(&2).unwrap().motion=Motion::at(-95.,0.);
+        w.tick_restorations(now+u64::from(q.cast));
+        let phases:Vec<_>=std::iter::from_fn(||rx[1].try_recv().ok()).filter(|p|p.id==game::id::TS_SC_SKILL).map(|p|decode(&game::ScSkill::from_packet(&p).unwrap()).unwrap()).collect();
+        assert_eq!(phases,vec![Phase::Cancel]);assert_eq!(w.players[&1].mp,50);assert!(w.monsters[&body].corpse_consumed);
     }
     fn corpse_fixture(w:&mut World)->(u32,rz_rappelz::restoration::Quote){
         let h=test_monster(w);w.monsters.get_mut(&h).unwrap().hp=0;w.kill_monster(h,1,w.now());w.update_visibility();
