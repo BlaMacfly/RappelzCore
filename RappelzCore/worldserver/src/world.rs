@@ -62,6 +62,20 @@ impl Motion {
         let (x, y) = self.position(now);
         *self = Self::at(x, y);
     }
+
+    /// A snapshot already supplies the current position; do not replay reached waypoints.
+    fn remaining_points(&self, now: u32) -> Vec<MovePoint> {
+        if self.speed <= 0.0 { return Vec::new(); }
+        let mut budget = self.speed * now.saturating_sub(self.start_time) as f32 / 100.0;
+        let (mut x, mut y) = (self.x, self.y);
+        for (index, point) in self.points.iter().enumerate() {
+            let distance = dist((x, y), (point.x, point.y));
+            if distance > budget { return self.points[index..].to_vec(); }
+            budget -= distance;
+            (x, y) = (point.x, point.y);
+        }
+        Vec::new()
+    }
 }
 
 /// Événements du monde destinés à la session du joueur (qui possède le personnage en base).
@@ -301,7 +315,9 @@ impl World {
     /// Paquets d'apparition d'un objet du monde (ENTER + données associées).
     fn enter_packets(&self, handle: u32, now: u32) -> Vec<RawPacket> {
         if let Some(p) = self.players.get(&handle) {
-            return vec![self.player_enter(p, now), Self::wear_packet(p)];
+            let mut packets = vec![self.player_enter(p, now), Self::wear_packet(p)];
+            if let Some(movement) = Self::move_packet(handle, p.layer, &p.motion, now) { packets.push(movement); }
+            return packets;
         }
         if let Some(n) = self.npcs.get(&handle) {
             let kind = EnterKind::Npc { creature: n.creature.clone(), npc_id: n.npc_id };
@@ -313,8 +329,8 @@ impl World {
             let monster_id = rz_rappelz::rdb::monster_id_encode(m.info.id);
             let kind = EnterKind::Monster { creature: m.creature_info(), is_tamed: false, monster_id };
             let mut out = vec![ScEnter { enter_type: 0, handle, x, y, z: m.z, layer: 0, kind }.to_packet()];
-            if !m.motion.points.is_empty() {
-                out.push(self.monster_move_packet(m));
+            if let Some(movement) = Self::move_packet(handle, 0, &m.motion, now) {
+                out.push(movement);
             }
             return out;
         }
@@ -355,15 +371,11 @@ impl World {
         dist(player.motion.position(now), position) <= self.visibility_distance
     }
 
-    fn monster_move_packet(&self, m: &MonsterEntity) -> RawPacket {
-        msg::ScMove {
-            start_time: m.motion.start_time,
-            handle: m.handle,
-            tlayer: 0,
-            speed: m.motion.speed.clamp(1.0, 255.0) as u8,
-            points: m.motion.points.clone(),
-        }
-        .to_packet()
+    fn move_packet(handle: u32, layer: u8, motion: &Motion, now: u32) -> Option<RawPacket> {
+        let points = motion.remaining_points(now);
+        if points.is_empty() { return None; }
+        Some(msg::ScMove { start_time: now, handle, tlayer: layer,
+            speed: motion.speed.clamp(1.0, 255.0) as u8, points }.to_packet())
     }
 
     /// Recalcule ce que voit chaque joueur et envoie les TS_SC_ENTER / TS_SC_LEAVE.
@@ -642,8 +654,9 @@ impl World {
                 m.hp = m.info.hp;
                 let home = m.home;
                 m.motion = Motion { x: mpos.0, y: mpos.1, start_time: now, points: vec![MovePoint { x: home.0, y: home.1 }], speed: m.info.run_speed };
-                let packet = self.monster_move_packet(&self.monsters[&mh]);
-                self.broadcast_around(mh, &packet, false);
+                if let Some(packet) = Self::move_packet(mh, 0, &self.monsters[&mh].motion, now) {
+                    self.broadcast_around(mh, &packet, false);
+                }
                 continue;
             }
             if d > m.info.attack_range {
@@ -654,8 +667,9 @@ impl World {
                     let t = ((d - m.info.attack_range * 0.8) / d).clamp(0.0, 1.0);
                     let dest = MovePoint { x: mpos.0 + (ppos.0 - mpos.0) * t, y: mpos.1 + (ppos.1 - mpos.1) * t };
                     m.motion = Motion { x: mpos.0, y: mpos.1, start_time: now, points: vec![dest], speed: m.info.run_speed };
-                    let packet = self.monster_move_packet(&self.monsters[&mh]);
-                    self.broadcast_around(mh, &packet, false);
+                    if let Some(packet) = Self::move_packet(mh, 0, &self.monsters[&mh].motion, now) {
+                        self.broadcast_around(mh, &packet, false);
+                    }
                 }
                 continue;
             }
@@ -966,6 +980,50 @@ mod tests {
         assert_eq!(entered.iter().filter(|p| p.id == msg::ScEnter::ID).count(), 1);
         let enter = msg::ScEnter::from_packet(entered.iter().find(|p| p.id == msg::ScEnter::ID).unwrap()).unwrap();
         assert_eq!((enter.handle, enter.x), (1, 1000.0));
+    }
+
+    #[test]
+    fn moving_player_query_and_new_visibility_resume_only_the_unfinished_route() {
+        let (mut world, mut receivers) = test_world();
+        world.players.get_mut(&1).unwrap().motion = Motion {
+            x: 0.0, y: 0.0, start_time: 0, speed: 100.0,
+            points: vec![MovePoint { x: 100.0, y: 0.0 }, MovePoint { x: 300.0, y: 0.0 }],
+        };
+        world.started = Instant::now() - std::time::Duration::from_millis(1500);
+        world.query(2, 1);
+        let packets: Vec<_> = std::iter::from_fn(|| receivers[1].try_recv().ok()).collect();
+        let entered = msg::ScEnter::from_packet(&packets[0]).unwrap();
+        assert!(entered.x >= 100.0 && entered.x < 300.0);
+        let movement = packets.iter().find(|p| p.id == msg::ScMove::ID).expect("moving player ENTER omitted remaining motion");
+        let movement = msg::ScMove::from_packet(movement).unwrap();
+        assert_eq!(movement.points, [MovePoint { x: 300.0, y: 0.0 }]);
+        assert_eq!(movement.speed, 100);
+        assert!(movement.start_time >= 150);
+        world.players.get_mut(&2).unwrap().visible.clear();
+        world.update_visibility();
+        let packets: Vec<_> = std::iter::from_fn(|| receivers[1].try_recv().ok()).collect();
+        assert!(packets.iter().any(|p| p.id == msg::ScMove::ID), "late observer did not resume movement");
+        world.started = Instant::now() - std::time::Duration::from_secs(4);
+        world.query(2, 1);
+        let packets: Vec<_> = std::iter::from_fn(|| receivers[1].try_recv().ok()).collect();
+        assert!(!packets.iter().any(|p| p.id == msg::ScMove::ID), "completed route was replayed");
+    }
+
+    #[test]
+    fn moving_monster_snapshot_does_not_replay_reached_or_zero_length_points() {
+        let (mut world, _) = test_world();
+        let handle = test_monster(&mut world);
+        world.monsters.get_mut(&handle).unwrap().motion = Motion {
+            x: 0.0, y: 0.0, start_time: 100, speed: 100.0,
+            points: vec![MovePoint { x: 0.0, y: 0.0 }, MovePoint { x: 100.0, y: 0.0 }, MovePoint { x: 300.0, y: 0.0 }],
+        };
+        let packets = world.enter_packets(handle, 200);
+        let movement = msg::ScMove::from_packet(packets.iter().find(|p| p.id == msg::ScMove::ID).unwrap()).unwrap();
+        assert_eq!(movement.points, [MovePoint { x: 300.0, y: 0.0 }]);
+        assert_eq!(movement.start_time, 200);
+        assert_eq!(world.enter_packets(handle, 500).len(), 1, "finished monster motion replayed");
+        world.monsters.get_mut(&handle).unwrap().motion.speed = 0.0;
+        assert_eq!(world.enter_packets(handle, 100).len(), 1, "stationary monster emitted motion");
     }
 
     #[test]
