@@ -19,7 +19,7 @@ def config_values(path):
         if line.strip() and not line.lstrip().startswith(('#','[')) and '=' in line for k,v in [line.split('=',1)]}
 
 def validate(plan):
-    if plan.get('scenario','terrain') not in ('terrain','gameplay'):raise ValueError('unsupported restart scenario')
+    if plan.get('scenario','terrain') not in ('terrain','gameplay','save-rollback'):raise ValueError('unsupported restart scenario')
     workspace=Path(plan['workspace']).resolve();directory=Path(plan['directory']).resolve()
     match=re.search(r'terrain-restart-([a-f0-9]{8})$',workspace.name)
     if not match or not directory.is_relative_to(workspace):raise ValueError('dedicated restart workspace required')
@@ -62,6 +62,14 @@ def gameplay_candidates(root,now_ms):
     if a.get('own')!=b.get('peer') or b.get('own')!=a.get('peer') or a.get('monster',0)<=0 or a.get('monster')!=b.get('monster'):return None
     return found
 
+def pending_save_window(root,pid):
+    try:v=json.loads((root/'save-window-verified').read_text(encoding='utf-8'))
+    except (OSError,ValueError):return None
+    if (not isinstance(v,dict) or v.get('pid')!=pid or v.get('locks_held') is not True
+        or not 0<=time.time_ns()//1_000_000-v.get('unix_ms',0)<=1500
+        or len(set(v.get('waiting_transactions',[])))!=2):return None
+    return v
+
 def write(path,value):
     temporary=path.with_suffix(path.suffix+'.tmp');temporary.write_text(json.dumps(value,indent=2),encoding='utf-8');temporary.replace(path)
 
@@ -103,19 +111,25 @@ def run(plan):
     proc=None;record=dict(success=False,boots=[],executable_sha256=plan['executable_sha256'],scenario=scenario)
     try:
         proc,info=boot(exe,cfg,root,port,0);record['boots'].append(info)
-        if scenario=='gameplay':
+        if scenario in ('gameplay','save-rollback'):
             wait_until(lambda:all((root/(r+'.checkpoint-ready')).exists() for r in ('owner','witness')),70,'movement checkpoint missing')
             proc.stdin.write(b'saveall\n');proc.stdin.flush()
             write(root/'checkpoint-requested.json',dict(pid=proc.pid,unix_ms=time.time_ns()//1_000_000,method='console saveall'))
             wait_until(lambda:(root/'checkpoint-verified').exists() and (root/'release-initial').exists(),35,'durable movement checkpoint and initial capture not verified')
             write(root/'actions-release',dict(ready=True))
-            chosen=wait_until(lambda:gameplay_candidates(root,time.time_ns()//1_000_000),15,'two moving combatants not observed together')
+            if scenario=='save-rollback':
+                wait_until(lambda:(root/'save-locks-ready').exists(),40,'save row locks missing')
+                proc.stdin.write(b'saveall\n');proc.stdin.flush()
+                write(root/'pending-save-requested.json',dict(pid=proc.pid,unix_ms=time.time_ns()//1_000_000,method='console saveall'))
+                chosen=wait_until(lambda:pending_save_window(root,proc.pid),15,'two partially written save transactions not verified')
+            else:
+                chosen=wait_until(lambda:gameplay_candidates(root,time.time_ns()//1_000_000),15,'two moving combatants not observed together')
         else:
             chosen=wait_until(lambda:candidates(root,time.time_ns()//1_000_000) if (root/'release-initial').exists() else None,90,'two fresh partial jobs not observed together')
         # The Popen object owns the exact process handle. It cannot target the
         # user's running server even if a numeric PID is later reused.
         if proc.poll() is not None:raise RuntimeError('world already stopped')
-        killed=dict(pid=proc.pid,unix_ms=time.time_ns()//1_000_000,**({'activity':chosen} if scenario=='gameplay' else {'jobs':chosen}),method='owned Popen.kill',graceful=False)
+        killed=dict(pid=proc.pid,unix_ms=time.time_ns()//1_000_000,**{('activity' if scenario=='gameplay' else 'pending_save' if scenario=='save-rollback' else 'jobs'):chosen},method='owned Popen.kill',graceful=False)
         proc.kill();killed['exit_code']=proc.wait(timeout=5);record['kill']=killed
         if killed['exit_code']==0:raise RuntimeError('force-killed process unexpectedly exited cleanly')
         write(root/'server-killed.json',killed)
