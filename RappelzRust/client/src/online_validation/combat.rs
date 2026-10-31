@@ -99,7 +99,7 @@ impl PacketTrace {
                         .push(json!({"event":"leave","handle":handle}));
                 }
                 NetEvent::Warp { x, y, z, layer } => self.warps.push(json!({"x":x,"y":y,"z":z,"layer":layer})),
-                NetEvent::LoginResult(l) => self.logins.push(json!({"handle":l.handle,"name":l.name,"layer":l.layer,"x":l.x,"y":l.y})),
+                NetEvent::LoginResult(l) => self.logins.push(json!({"handle":l.handle,"name":l.name,"layer":l.layer,"x":l.x,"y":l.y,"order":self.order})),
                 NetEvent::Chat {sender,chat_type,message} if *chat_type==rz_proto::msg::chat_type::PARTY => {
                     self.party_chats.push(json!({"sender":sender,"message":message}));
                 }
@@ -180,6 +180,16 @@ impl PacketTrace {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn repeated_handles_after_server_restart_keep_distinct_login_order() {
+        let mut trace=PacketTrace::default();
+        for _ in 0..2 {
+            trace.observe(&NetEvent::LoginResult(rz_proto::msg::ScLoginResult{handle:1,..Default::default()}));
+            trace.observe(&NetEvent::Disconnected("server stopped".into()));
+        }
+        assert_eq!(trace.logins[0]["handle"],trace.logins[1]["handle"]);
+        assert!(trace.logins[0]["order"].as_u64()<trace.logins[1]["order"].as_u64());
+    }
     #[test]
     fn network_faults_and_whispers_share_the_bounded_trace() {
         let mut t=PacketTrace::default();
