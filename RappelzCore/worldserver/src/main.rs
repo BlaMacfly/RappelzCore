@@ -7,6 +7,7 @@
 mod commands;
 mod data;
 mod gameplay;
+mod job_progression;
 mod party;
 mod session;
 mod skills;

@@ -34,7 +34,7 @@ pub fn learned(c: &Character) -> std::result::Result<BTreeMap<u32, u8>, &'static
     }
     Ok(levels)
 }
-fn numbers(c: &Character) -> std::result::Result<(i32, i32, i64), &'static str> {
+pub(crate) fn numbers(c: &Character) -> std::result::Result<(i32, i32, i64), &'static str> {
     let get = |key: &str, default: i64| {
         c.extra.get(key).map_or(Ok(default), |s| {
             s.parse::<i64>()
@@ -137,6 +137,7 @@ impl Session {
                 self.skill_catalog = Some(state);
             }
         }
+        self.send_job_progress();
     }
     pub fn send_skill_catalog(&mut self) {
         if self.skill_catalog.is_some() {
@@ -210,7 +211,10 @@ impl Session {
             );
             return Ok(());
         }
-        let mut candidate = self.character_snapshot().unwrap();
+        let Some(mut candidate) = self.character_snapshot() else {
+            self.detach_world_without_save();
+            anyhow::bail!("skill learning lost world ownership; closing without a stale save");
+        };
         let (job, jlv, jp) = match numbers(&candidate) {
             Ok(v) => v,
             Err(message) => {

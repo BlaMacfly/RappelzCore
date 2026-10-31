@@ -389,7 +389,11 @@ impl Session {
         let handle = g.handle;
         match ev {
             WorldEvent::Reward { exp, jp, gold, monster } => {
-                let (candidate, leveled) = reward_candidate(self.character_snapshot().unwrap(), exp, jp, gold);
+                let Some(snapshot) = self.character_snapshot() else {
+                    self.detach_world_without_save();
+                    anyhow::bail!("reward lost world ownership; closing without a stale save");
+                };
+                let (candidate, leveled) = reward_candidate(snapshot, exp, jp, gold);
                 // Do not hold the world lock over SQL or expose an award before COMMIT.
                 if let Err(error) = characters::save(&ctx.chars, &candidate).await {
                     // A failed COMMIT can have an uncertain outcome. Never let normal

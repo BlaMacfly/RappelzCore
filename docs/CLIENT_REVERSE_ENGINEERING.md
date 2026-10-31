@@ -195,3 +195,7 @@ texture or script has been decoded or rendered successfully.
    parser tests and the hash-matched static entry points; preserve originals.
 
 The original executable and supplied DLL/resource files remain unchanged.
+
+## Progression follow-up, 2026-10-31
+
+[Fresh job-level/resource validation](JOB_PROGRESSION_VALIDATION.md) supersedes the absence of successful native answers for this new cycle: REA6.4.0/Ghidra12.1.4 CLI returned function **0x006d7d50–0x006d7da6**, 87bytes, Evidence `ev_0277dcfe82d7a5652d55d27f9007df42e5b927a82e4033b81a113ce66e9072bc`, on the same SHA-256-bound SFrame. It constructs ID410, length11, normal checksum and one four-byte argument at +7. The MCP lookup still timed out at300seconds; its zero-answer snapshot is distinguished from the successful CLI snapshot/Evidence retained under the new ignored validation run. No SFrame runtime was executed. Archived BasicStat/Exp91/SummonExp are also recovered with exact schema/hash/row evidence and lossless companions. Current-job purchases are implemented and verified with two Rust clients; original cipher/version interoperability, cumulative character EXP, derived/job-history stats and exact official Epic remain unresolved. No decompiler output or original source/assets are published.

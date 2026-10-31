@@ -1517,3 +1517,7 @@ jp_addition: i16 (0xa)
 
 - `SFrame.exe` (chargeurs listés en §1.1).
 - Définitions RappelzRDBTool : https://github.com/glandu2/RappelzRDBTool (`Databases/lua/*.lua`, `Base/include/DataType.h`).
+
+## Tables de progression retrouvées dans les archives, 31/10/2026
+
+La [validation de progression](../JOB_PROGRESSION_VALIDATION.md) retrouve `db_basicstat.rdb` (3923×16octets, huit i16), `db_exp.rdb` (300×40octets, cinq i64, schémaExp91) et `db_summonexp.rdb` (200×24octets, trois i64). Les niveaux EXP sont implicites, index+1 ; les anciens schémas Exp24octets ne correspondent pas. Les42 `Job.stati_id` trouvent leur base. Le lecteur dédié `progression::ProgressionBook` et les compagnons `Progression/*.dbc` stockent les i64 en deux cellules32bits low/high, sans float ni conversion générique tronquée. Tous les champs sont comparés aux ressources brutes, dans les installations serveur/client. EXP300=`272233208401492000` est conservée exactement. Les propriétés cumulatives et bonus effectifs ne sont pas déduits de la seule forme des tables : les références primaires et limites sont explicites dans le rapport. Les anciennes observations des29 fichiers loose restent historiques.

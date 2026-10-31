@@ -4,6 +4,7 @@
 pub mod archive;
 pub mod dbcstore;
 pub mod layout;
+pub mod progression;
 pub mod rdb;
 pub mod skills;
 pub mod restoration;

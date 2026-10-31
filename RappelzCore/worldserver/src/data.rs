@@ -18,6 +18,7 @@ pub struct JobInfo {
     pub name: String,
     pub job_class: i32,
     pub job_depth: i32,
+    pub stat_id: i32,
 }
 
 #[derive(Clone, Debug)]
@@ -44,6 +45,7 @@ pub struct Teleport {
 }
 
 pub struct GameData {
+    pub progression:Option<rz_rappelz::progression::ProgressionBook>,
     pub restoration:Option<rz_rappelz::restoration::RestorationBook>,
     pub skills:Option<rz_rappelz::skills::SkillBook>,
     pub jobs: HashMap<i32, JobInfo>,
@@ -110,6 +112,7 @@ impl GameData {
                             name: strings.get(r.int("text_id")).to_string(),
                             job_class: r.int("job_class"),
                             job_depth: r.int("job_depth"),
+                            stat_id: r.int("stati_id"),
                         },
                     );
                 }
@@ -224,7 +227,11 @@ impl GameData {
         let restoration=match rz_rappelz::restoration::RestorationBook::open(&dbc_dir) {
             Ok(book)=>Some(book),Err(error)=>{tracing::warn!("{error}: restoration casting unavailable");None}
         };
-        Ok(Self { restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns })
+        let progression=match rz_rappelz::progression::ProgressionBook::open(&dbc_dir) {
+            Ok(book)=>{tracing::info!(">> progression : {:?} statistiques/niveaux/invocations",book.counts());Some(book)},
+            Err(error)=>{tracing::warn!("Progression du métier indisponible : {error}");None},
+        };
+        Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns })
     }
 
     pub fn find_teleport(&self, name: &str) -> Option<&Teleport> {

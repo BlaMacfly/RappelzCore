@@ -136,6 +136,7 @@ impl Session {
                 self.leave_world().await?;
                 self.sc_result(p.id, result::SUCCESS, 0);
             }
+            rz_proto::job::CS_JOB_LEVEL_UP => self.level_up_job(rz_proto::job::CsJobLevelUp::from_packet(&p)?).await?,
             rz_proto::party::CS_PARTY_HELLO if self.in_game.is_some() => {
                 let version=rz_proto::party::CsPartyHello::from_packet(&p)?.0;
                 let handle=self.in_game.as_ref().unwrap().handle;
@@ -441,7 +442,11 @@ impl Session {
 
     /// Met à jour le personnage depuis l'état du monde et le sauvegarde (Player::SaveToDB).
     pub async fn save(&mut self) -> Result<()> {
-        let Some(character)=self.character_snapshot() else {return Ok(())};
+        if self.in_game.is_none() {return Ok(());}
+        let Some(character)=self.character_snapshot() else {
+            self.detach_world_without_save();
+            anyhow::bail!("world ownership lost; refusing a stale character save");
+        };
         if let Err(error)=characters::save(&self.ctx.chars,&character).await {
             // No retry with an older snapshot after an uncertain SQL outcome.
             self.detach_world_without_save();
@@ -457,15 +462,14 @@ impl Session {
         let mut character=g.character.clone();
         {
             let w = self.ctx.world.lock().unwrap();
-            if let Some(p) = w.players.get(&g.handle).filter(|p|p.guid==g.character.guid && p.account_id==g.character.account) {
-                let (x, y) = p.motion.position(w.now());
-                character.position_x = x;
-                character.position_y = y;
-                character.position_z = p.z;
-                character.set_extra("layer",p.layer);
-                character.health = p.hp.max(1) as u32;
-                character.power1 = p.mp.max(0) as u32;
-            }
+            let p = w.players.get(&g.handle).filter(|p|p.guid==g.character.guid && p.account_id==g.character.account)?;
+            let (x, y) = p.motion.position(w.now());
+            character.position_x = x;
+            character.position_y = y;
+            character.position_z = p.z;
+            character.set_extra("layer",p.layer);
+            character.health = p.hp.max(1) as u32;
+            character.power1 = p.mp.max(0) as u32;
         }
         Some(character)
     }

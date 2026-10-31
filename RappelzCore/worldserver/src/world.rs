@@ -897,7 +897,7 @@ mod tests {
         // No real database is reachable by this fixture; any SQL path is a test failure.
         let pool=rz_database::sqlx::mysql::MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(20))
             .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused").unwrap();
-        let data=GameData {restoration:None,skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
+        let data=GameData {progression:None,restoration:None,skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
             monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![]};
         let settings=Settings {realm_id:1,network_key:vec![],characters_per_realm:1,start_level:1,start_money:0,start_positions:[(0.0,0.0);3],
             region_size:180,cell_size:6,move_speed:120,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
@@ -922,6 +922,127 @@ mod tests {
             let notice=msg::ScChat::from_packet(&rx.try_recv().unwrap()).unwrap();
             assert!(notice.message.contains("L'objet reste dans le sac"));assert!(rx.try_recv().is_err());
         }
+    }
+
+    fn install_job_fixture(session:&mut crate::session::Session) {
+        let fixed=|rows:Vec<Vec<u8>>| {let mut bytes=vec![0;132];bytes[128..132].copy_from_slice(&(rows.len() as u32).to_le_bytes());for row in rows {bytes.extend(row);}bytes};
+        let basic=fixed(vec![[302i16,14,16,13,13,20,20,10].into_iter().flat_map(i16::to_le_bytes).collect()]);
+        let exp=fixed((1..=49).map(|level|[i64::from(level),3,if level==2 {0}else{20},(1i64<<53)+1,i64::MAX].into_iter().flat_map(i64::to_le_bytes).collect()).collect());
+        let summon=fixed(vec![[5i64,1068,21798].into_iter().flat_map(i64::to_le_bytes).collect()]);
+        let data=&mut std::sync::Arc::get_mut(&mut session.ctx).unwrap().data;
+        data.progression=Some(rz_rappelz::progression::ProgressionBook::from_rdb(&basic,&exp,&summon).unwrap());
+        for depth in 0..4 {let id=100+depth;data.jobs.insert(id,crate::data::JobInfo{id,name:format!("Fixture{depth}"),job_class:0,job_depth:depth,stat_id:302});}
+        let c=&mut session.in_game.as_mut().unwrap().character;c.set_extra("job",100);c.set_extra("jlv",1);c.set_extra("jp",20);c.set_extra("model0",17);
+    }
+
+    #[tokio::test]
+    async fn job_quotes_keep_wide_costs_and_reject_unknown_corrupt_or_unsupported_rules() {
+        use rz_proto::job::status;
+        let (mut session,_)=isolated_session(None);install_job_fixture(&mut session);
+        let get=|s:&crate::session::Session|crate::job_progression::preview(&s.ctx.data,1,&s.in_game.as_ref().unwrap().character);
+        for (job,cost) in [(100,3),(101,20),(102,(1i64<<53)+1),(103,i64::MAX)] {
+            let c=&mut session.in_game.as_mut().unwrap().character;c.set_extra("job",job);c.set_extra("jp",i64::MAX);
+            let quote=get(&session);assert_eq!((quote.status,quote.cost),(status::READY,Some(cost)));assert_eq!(quote.base,Some((302,[14,16,13,13,20,20,10])));
+        }
+        let c=&mut session.in_game.as_mut().unwrap().character;c.set_extra("job",101);c.set_extra("jlv",2);
+        assert_eq!(get(&session).status,status::MAXIMUM,"zero cost became a free level");
+        let c=&mut session.in_game.as_mut().unwrap().character;c.set_extra("job",100);c.set_extra("jlv",49);
+        assert_eq!(get(&session).status,status::READY);session.in_game.as_mut().unwrap().character.set_extra("jlv",50);
+        assert_eq!(get(&session).status,status::MAXIMUM);
+        for bad in ["0","-1","bad","9223372036854775807"] {session.in_game.as_mut().unwrap().character.set_extra("jlv",bad);assert_eq!(get(&session).status,status::INVALID_CHARACTER);}
+        session.in_game.as_mut().unwrap().character.set_extra("jlv",1);
+        for bad in ["-1","bad","9223372036854775808"] {session.in_game.as_mut().unwrap().character.set_extra("jp",bad);assert_eq!(get(&session).status,status::INVALID_CHARACTER);}
+        let c=&mut session.in_game.as_mut().unwrap().character;c.set_extra("jp",2);c.set_extra("job",100);assert_eq!(get(&session).status,status::JP);
+        session.in_game.as_mut().unwrap().character.set_extra("job",999);assert_eq!(get(&session).status,status::UNKNOWN_JOB);
+        session.in_game.as_mut().unwrap().character.set_extra("job",100);
+        for depth in [-1,4] {std::sync::Arc::get_mut(&mut session.ctx).unwrap().data.jobs.get_mut(&100).unwrap().job_depth=depth;assert_eq!(get(&session).status,status::UNSUPPORTED);}
+        let d=&mut std::sync::Arc::get_mut(&mut session.ctx).unwrap().data;let job=d.jobs.get_mut(&100).unwrap();job.job_depth=0;job.stat_id=1234;
+        assert_eq!(get(&session).status,status::UNSUPPORTED);assert_eq!(session.in_game.as_ref().unwrap().character.extra_i64("model0",0),17);
+    }
+
+    #[tokio::test]
+    async fn job_requests_refuse_invalid_ownership_life_cast_funds_or_missing_profile_without_sql() {
+        let (mut session,mut rx)=isolated_session(None);install_job_fixture(&mut session);session.ctx.chars.close().await;
+        let before=session.in_game.as_ref().unwrap().character.extra.clone();
+        for case in 0..6 {
+            let mut request=rz_proto::job::CsJobLevelUp{target:1};
+            match case {
+                0=>request.target=2,
+                1=>session.ctx.world.lock().unwrap().players.get_mut(&1).unwrap().hp=0,
+                2=>session.in_game.as_mut().unwrap().character.set_extra("jp",0),
+                3=>{std::sync::Arc::get_mut(&mut session.ctx).unwrap().data.progression=None;},
+                4=>session.in_game.as_mut().unwrap().character.set_extra("job",999),
+                _=>{let (d,r)=restoration_fixture();let mut w=session.ctx.world.lock().unwrap();let now=w.cast_clock();assert!(w.begin_restoration(1,&r,d.quote(1).unwrap(),vec![],now));},
+            }
+            // A closed pool would produce Err and detach if this refusal touched SQL.
+            session.level_up_job(request).await.unwrap();assert!(session.in_game.is_some());assert!(session.ctx.world.lock().unwrap().players.contains_key(&1));
+            let packets:Vec<_>=std::iter::from_fn(||rx.try_recv().ok()).collect();
+            let result=packets.iter().find(|p|p.id==msg::ScResult::ID).map(|p|msg::ScResult::from_packet(p).unwrap()).unwrap();
+            assert_eq!(result.request,rz_proto::job::CS_JOB_LEVEL_UP);assert_ne!(result.result,0);
+            assert!(packets.iter().all(|p|p.id!=game::ScExpUpdate::ID && p.id!=game::ScLevelUpdate::ID));
+            session.ctx.world.lock().unwrap().players.get_mut(&1).unwrap().hp=50;
+            session.in_game.as_mut().unwrap().character.extra=before.clone();
+            if case==3 {install_job_fixture(&mut session);}
+        }
+        assert_eq!(session.in_game.as_ref().unwrap().character.extra,before);
+    }
+
+    #[tokio::test]
+    async fn job_previews_require_opt_in_and_remain_private_even_when_catalog_is_unavailable() {
+        let (mut session,mut rx)=isolated_session(None);install_job_fixture(&mut session);
+        session.send_job_progress();assert!(rx.try_recv().is_err());
+        session.enable_skills(rz_proto::skills::VERSION);
+        let packets:Vec<_>=std::iter::from_fn(||rx.try_recv().ok()).collect();
+        let preview=rz_proto::job::ScJobProgress::from_packet(packets.iter().find(|p|p.id==rz_proto::job::SC_JOB_PROGRESS).unwrap()).unwrap();
+        assert_eq!((preview.target,preview.job,preview.job_level,preview.jp,preview.cost,preview.status),(1,100,1,20,Some(3),rz_proto::job::status::READY));
+        std::sync::Arc::get_mut(&mut session.ctx).unwrap().data.progression=None;
+        session.send_job_progress();assert!(rx.try_recv().is_err(),"profile-absent legacy traffic changed");
+    }
+
+    #[tokio::test]
+    async fn failed_job_commit_detaches_without_publishing_a_gain_or_stale_cleanup_save() {
+        let (mut session,mut rx)=isolated_session(None);install_job_fixture(&mut session);
+        session.enable_skills(rz_proto::skills::VERSION);while rx.try_recv().is_ok(){}
+        session.ctx.chars.close().await;
+        let result=session.level_up_job(rz_proto::job::CsJobLevelUp{target:1}).await;
+        assert!(result.is_err());assert!(session.in_game.is_none()&&session.skill_catalog.is_none()&&session.events_rx.is_none());
+        assert!(!session.ctx.world.lock().unwrap().players.contains_key(&1));
+        assert!(rx.try_recv().is_err(),"failed COMMIT announced a job level or wallet change");
+        session.leave_world().await.unwrap();
+    }
+
+    #[test]
+    fn job_level_publication_changes_no_vitals_and_rechecks_current_observer_visibility() {
+        let (mut world,mut receivers)=test_world();world.players.get_mut(&1).unwrap().enter.creature.level=1;
+        let (mut extra,_)=test_world();let mut hidden=extra.players.remove(&1).unwrap();let (tx,mut hidden_rx)=tokio::sync::mpsc::unbounded_channel();hidden.handle=3;hidden.layer=1;hidden.tx=tx;world.add_player(hidden);
+        let p=&world.players[&1];let before=(p.hp,p.mp,p.max_hp,p.max_mp,p.attack,p.defence,p.enter.creature.level);
+        world.publish_job_level(1,1,2);
+        for rx in &mut receivers {let update=game::ScLevelUpdate::from_packet(&rx.try_recv().unwrap()).unwrap();assert_eq!((update.handle,update.level,update.job_level),(1,1,2));assert!(rx.try_recv().is_err());}
+        assert!(hidden_rx.try_recv().is_err());let p=&world.players[&1];assert_eq!((p.hp,p.mp,p.max_hp,p.max_mp,p.attack,p.defence,p.enter.creature.level),before);
+        world.players.get_mut(&2).unwrap().motion=Motion::at(900.,0.);world.publish_job_level(1,1,3);
+        assert!(receivers[1].try_recv().is_err(),"stale visibility leaked job-level update");
+    }
+
+    #[tokio::test]
+    async fn stale_replaced_session_cannot_save_its_snapshot_or_remove_the_new_owner() {
+        for lobby in [false,true] {
+            let (mut session,mut rx)=isolated_session(None);session.ctx.chars.close().await;
+            {let mut w=session.ctx.world.lock().unwrap();let p=w.players.get_mut(&1).unwrap();p.guid=999;p.account_id=999;}
+            assert!(session.character_snapshot().is_none());
+            let result=if lobby {session.leave_world().await}else{session.save().await};
+            assert!(result.unwrap_err().to_string().contains("world ownership lost"),"stale save reached SQL");
+            assert!(session.in_game.is_none());assert_eq!(session.ctx.world.lock().unwrap().players[&1].guid,999);assert!(rx.try_recv().is_err());
+            session.leave_world().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn stale_queued_reward_cannot_overwrite_a_reauthenticated_character() {
+        let (mut session,mut rx)=isolated_session(None);session.ctx.chars.close().await;
+        {let mut w=session.ctx.world.lock().unwrap();let mut player=w.remove_player(1).unwrap();player.handle=3;w.add_player(player);}
+        let result=session.handle_world_event(WorldEvent::Reward{exp:5,jp:3,gold:10,monster:"Fixture".into()}).await;
+        assert!(result.unwrap_err().to_string().contains("reward lost world ownership"));assert!(session.in_game.is_none());
+        assert_eq!(session.ctx.world.lock().unwrap().players[&3].guid,1);assert!(rx.try_recv().is_err());session.leave_world().await.unwrap();
     }
 
     #[tokio::test]
