@@ -117,7 +117,6 @@ async fn main() -> Result<()> {
     let data_dir = PathBuf::from(conf.string("DataDir", "."));
     tracing::info!("Chargement des données depuis {}", data_dir.display());
     let data = data::GameData::load(&data_dir, &world_db).await?;
-    characters::reset_online(&chars).await?;
     let max_guid = characters::max_guid(&chars).await?;
     let max_item_guid = characters::max_item_guid(&chars).await?;
     let max_creature_guid = rz_database::world::max_creature_guid(&world_db).await?;
@@ -161,10 +160,14 @@ async fn main() -> Result<()> {
 
     let realm_id = ctx.settings.realm_id;
     let start_time = chrono::Utc::now().timestamp();
-    auth::update_realm_status(&ctx.login, realm_id, true, 0.0).await?;
+    anyhow::ensure!(realm_id != 0, "RealmID must be positive");
 
     let bind = format!("{}:{}", conf.string("BindIP", "0.0.0.0"), conf.int("WorldServerPort", 4514u16));
     let listener = TcpListener::bind(&bind).await.with_context(|| format!("écoute sur {bind}"))?;
+    // A competing start must fail its bind before it can clear a live world's flags.
+    characters::reset_online(&ctx.chars).await?;
+    auth::reset_realm_online(&ctx.login, realm_id).await?;
+    auth::update_realm_status(&ctx.login, realm_id, true, 0.0).await?;
     tracing::info!("Worldserver prêt sur {bind} (royaume {realm_id}). Tapez « help » pour la console.");
 
     // Visibilité (ENTER/LEAVE) recalculée en continu.

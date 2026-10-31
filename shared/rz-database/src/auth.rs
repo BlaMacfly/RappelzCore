@@ -155,6 +155,16 @@ pub async fn set_online(db: &MySqlPool, account_id: u32, realm_id: u32) -> Resul
     Ok(())
 }
 
+/// Recover stale account flags after an unclean world exit, without touching other realms.
+pub async fn reset_realm_online(db: &MySqlPool, realm_id: u32) -> Result<()> {
+    anyhow::ensure!(realm_id != 0, "a positive realm ID is required for startup recovery");
+    sqlx::query("UPDATE account SET online = 0 WHERE online = ?")
+        .bind(realm_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 pub struct Realm {
     pub id: u32,

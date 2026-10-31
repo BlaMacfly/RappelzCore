@@ -1,5 +1,7 @@
 # Native terrain validation during stalled and reset TCP connections
 
+Historical stalled/reset TCP cycle. The later [forced worldserver restart validation](TERRAIN_RESTART_VALIDATION.md) kills and restarts an actual isolated world process against copied persistent data. Counts, hashes and untested limits below belong to this earlier network cycle.
+
 Verified **2026-10-31** with two Windows x64 clients, the existing loopback database/auth/world services and new ordinary GM-0 fixtures **32/33**. This follows [WARP/map-change validation](TERRAIN_WARP_VALIDATION.md). No server process is stopped, and no server/gameplay/schema/asset change is made.
 
 ## Scope and implementation
