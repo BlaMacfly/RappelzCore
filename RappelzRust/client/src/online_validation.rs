@@ -19,6 +19,7 @@ pub enum OnlineValidation {
     Revival(combat::revival::RevivalValidation),
     Visibility(combat::visibility::VisibilityValidation),
     Layer(combat::layer::LayerValidation),
+    Party(combat::party::PartyValidation),
 }
 
 impl OnlineValidation {
@@ -37,6 +38,7 @@ impl OnlineValidation {
     pub fn layer(plan: PathBuf, app: &App) -> Result<Self> {
         Ok(Self::Layer(combat::layer::LayerValidation::new(plan, app)?))
     }
+    pub fn party(plan:PathBuf,app:&App)->Result<Self> {Ok(Self::Party(combat::party::PartyValidation::new(plan,app)?))}
     pub fn message(&mut self, message: &str) {
         match self {
             Self::Addons(v) => v.message(message),
@@ -44,6 +46,7 @@ impl OnlineValidation {
             Self::Revival(v) => v.message(message),
             Self::Visibility(v) => v.message(message),
             Self::Layer(v) => v.message(message),
+            Self::Party(v) => v.message(message),
         }
     }
     pub fn tick(&mut self, app: &mut App) -> Result<bool> {
@@ -53,6 +56,7 @@ impl OnlineValidation {
             Self::Revival(v) => v.tick(app),
             Self::Visibility(v) => v.tick(app),
             Self::Layer(v) => v.tick(app),
+            Self::Party(v) => v.tick(app),
         }
     }
     pub fn fail(&mut self, error: anyhow::Error) {
@@ -62,6 +66,7 @@ impl OnlineValidation {
             Self::Revival(v) => v.fail(error),
             Self::Visibility(v) => v.fail(error),
             Self::Layer(v) => v.fail(error),
+            Self::Party(v) => v.fail(error),
         }
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
@@ -71,6 +76,7 @@ impl OnlineValidation {
             Self::Revival(v) => v.finish(app),
             Self::Visibility(v) => v.finish(app),
             Self::Layer(v) => v.finish(app),
+            Self::Party(v) => v.finish(app),
         }
     }
 }

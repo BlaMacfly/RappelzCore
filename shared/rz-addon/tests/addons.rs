@@ -355,6 +355,138 @@ fn unit_layer_keeps_unknown_nil_known_zero_and_suppresses_identity_discovery_eve
 }
 
 #[test]
+fn party_roster_invitation_and_vitals_follow_actual_state_and_do_not_repeat_on_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    debug_addon(dir.path());
+    let mut rt = AddonRuntime::new(dir.path());
+    rt.load().unwrap();
+    let mut s = state();
+    rt.update_state(s.clone());
+    rt.drain_messages();
+    assert!(text(&rt).contains("Party: ?"));
+    s.party = Some(vec![]);
+    s.party_members = Some(0);
+    rt.update_state(s.clone());
+    assert!(!rt
+        .drain_messages()
+        .iter()
+        .any(|m| m.contains("PARTY_MEMBERS_CHANGED")));
+    assert!(text(&rt).contains("Party: 0  Member: (none)"));
+    s.party_invite = Some("Inviter".into());
+    rt.update_state(s.clone());
+    rt.update_state(s.clone());
+    assert_eq!(
+        rt.drain_messages()
+            .iter()
+            .filter(|m| m.contains("EVENT PARTY_INVITE_REQUEST Inviter"))
+            .count(),
+        1
+    );
+    s.party_invite = None;
+    s.party_leader = Some(7);
+    s.party_members = Some(1);
+    s.party = Some(vec![UnitState {
+        handle: 9,
+        name: "Companion".into(),
+        level: Some(1),
+        layer: Some(0),
+        health: Some(100),
+        max_health: Some(100),
+        mana: Some(50),
+        max_mana: Some(50),
+    }]);
+    rt.update_state(s.clone());
+    let messages = rt.drain_messages();
+    assert!(messages
+        .iter()
+        .any(|m| m.contains("EVENT PARTY_MEMBERS_CHANGED ")));
+    assert!(messages
+        .iter()
+        .any(|m| m.contains("EVENT RAPPELZ_PARTY_INVITE_CLOSED ")));
+    assert!(text(&rt).contains("Party: 1  Member: Companion"));
+    s.party.as_mut().unwrap()[0].health = Some(0);
+    s.party.as_mut().unwrap()[0].mana = Some(0);
+    rt.update_state(s.clone());
+    rt.update_state(s.clone());
+    let messages = rt.drain_messages();
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("EVENT UNIT_HEALTH party1 "))
+            .count(),
+        1
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("EVENT UNIT_MANA party1 "))
+            .count(),
+        1
+    );
+    assert!(!messages
+        .iter()
+        .any(|m| m.contains("PARTY_MEMBERS_CHANGED") || m.contains("PLAYER_DEAD")));
+    rt.reload().unwrap();
+    assert!(!rt
+        .drain_messages()
+        .iter()
+        .any(|m| m.contains("EVENT PARTY_MEMBERS_CHANGED ")
+            || m.contains("EVENT PARTY_INVITE_REQUEST ")));
+    s.party_leader = Some(9);
+    rt.update_state(s.clone());
+    assert_eq!(
+        rt.drain_messages()
+            .iter()
+            .filter(|m| m.contains("EVENT PARTY_MEMBERS_CHANGED "))
+            .count(),
+        1
+    );
+    s.party = Some(vec![]);
+    s.party_members = Some(0);
+    s.party_leader = None;
+    rt.update_state(s);
+    assert!(text(&rt).contains("Party: 0  Member: (none)"));
+    assert!(rt.errors().is_empty());
+}
+
+#[test]
+fn party_unit_tokens_preserve_unknown_and_zero_and_reject_unsupported_indices() {
+    let dir = tempfile::tempdir().unwrap();
+    addon(
+        dir.path(),
+        "Party",
+        "",
+        r#"
+        local f=CreateFrame("Frame");f:RegisterEvent("CHECK")
+        f:SetScript("OnEvent",function()
+            print(GetNumPartyMembers(),UnitName("party1"),UnitHealth("party1"),UnitMana("party1"),UnitLayer("party1"),UnitName("party0"),UnitName("party8"),GetPartyInviteName())
+        end)
+    "#,
+    );
+    let mut rt = AddonRuntime::new(dir.path());
+    rt.load().unwrap();
+    rt.dispatch(Event::new("CHECK", vec![]));
+    assert!(rt.drain_messages()[0].contains("nil nil nil nil nil nil nil nil"));
+    let mut s = state();
+    s.party_members = Some(1);
+    s.party = Some(vec![UnitState {
+        handle: 9,
+        name: "Peer".into(),
+        health: Some(0),
+        mana: Some(0),
+        layer: Some(0),
+        ..Default::default()
+    }]);
+    rt.update_state(s);
+    rt.dispatch(Event::new("CHECK", vec![]));
+    assert!(rt
+        .drain_messages()
+        .iter()
+        .any(|m| m.contains("1 Peer 0 0 0 nil nil nil")));
+    assert!(rt.errors().is_empty());
+}
+
+#[test]
 fn failures_are_attributed_and_isolated_and_instruction_limit_cannot_be_swallowed() {
     let dir = tempfile::tempdir().unwrap();
     addon(

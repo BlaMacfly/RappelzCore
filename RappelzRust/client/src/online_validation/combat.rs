@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use crate::{App, NetCmd, NetEvent};
 
 pub(super) mod layer;
+pub(super) mod party;
 pub(super) mod revival;
 pub(super) mod visibility;
 
@@ -31,6 +32,8 @@ pub struct PacketTrace {
     dialogs: Vec<Value>,
     denied_attacks: Vec<Value>,
     targets: Vec<u32>,
+    party_states: Vec<Value>,
+    party_chats: Vec<Value>,
     errors: Vec<String>,
 }
 
@@ -48,6 +51,8 @@ impl PacketTrace {
             + self.dialogs.len()
             + self.denied_attacks.len()
             + self.targets.len()
+            + self.party_states.len()
+            + self.party_chats.len()
             + self.errors.len()
             >= 2048
         {
@@ -78,9 +83,13 @@ impl PacketTrace {
                 }
                 NetEvent::Warp { x, y, z, layer } => self.warps.push(json!({"x":x,"y":y,"z":z,"layer":layer})),
                 NetEvent::LoginResult(l) => self.logins.push(json!({"handle":l.handle,"name":l.name,"layer":l.layer,"x":l.x,"y":l.y})),
+                NetEvent::Chat {sender,chat_type,message} if *chat_type==rz_proto::msg::chat_type::PARTY => {
+                    self.party_chats.push(json!({"sender":sender,"message":message}));
+                }
                 NetEvent::Move(m) => self.moves.push(json!({"handle":m.handle,"time":m.start_time,
                     "layer":m.tlayer,"speed":m.speed,"points":m.points.iter().map(|p|[p.x,p.y]).collect::<Vec<_>>(),"order":self.order})),
                 NetEvent::Packet(p) => match p.id {
+                    rz_proto::party::SC_PARTY_STATE=>self.party_states.push(party_state(&rz_proto::party::ScPartyState::from_packet(p)?)),
                     id::TS_SC_DIALOG => {
                         let d = game::ScDialog::from_packet(p)?;
                         self.dialogs.push(json!({"npc":d.npc_handle,"kind":"dialog","order":self.order}));
@@ -130,7 +139,8 @@ impl PacketTrace {
     fn json(&self) -> Value {
         json!({"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
             "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors,
-            "logins":self.logins,"dialogs":self.dialogs,"denied_attacks":self.denied_attacks,"targets":self.targets})
+            "logins":self.logins,"dialogs":self.dialogs,"denied_attacks":self.denied_attacks,"targets":self.targets,
+            "party_states":self.party_states,"party_chats":self.party_chats})
     }
 }
 
@@ -299,6 +309,12 @@ pub struct CombatValidation {
 
 fn unit(unit: &UnitState) -> Value {
     json!({"handle":unit.handle,"name":unit.name,"level":unit.level,"layer":unit.layer,"hp":unit.health,"max_hp":unit.max_health,"mp":unit.mana,"max_mp":unit.max_mana})
+}
+
+fn party_state(state:&rz_proto::party::ScPartyState) -> Value {
+    json!({"id":state.party_id,"leader":state.leader,"members":state.members.iter().map(|m|
+        json!({"handle":m.handle,"name":m.name,"level":m.level,"layer":m.layer,"hp":m.hp,"max_hp":m.max_hp,"mp":m.mp,"max_mp":m.max_mp})).collect::<Vec<_>>(),
+        "invite":state.invite.as_ref().map(|i|json!({"inviter":i.inviter,"name":i.name,"seconds":i.seconds_left}))})
 }
 
 fn read(path: &Path) -> Option<Value> {

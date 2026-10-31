@@ -26,7 +26,9 @@ ajoute les combats répétés et le refus des requêtes hors visibilité. La [mo
 vérifie désormais son rendu et sa position chez l'observateur ainsi que les événements Lua.
 Le [suivi des déplacements](docs/VISIBILITY_VALIDATION.md) reprend les trajets lors des apparitions et vérifie les sorties de portée.
 Les [changements de couche](docs/LAYER_VALIDATION.md) vérifient la séparation, le refus des interactions masquées et la couche sauvegardée au retour du personnage avec deux clients.
-L'espace de développement combiné passe 100 tests Rust et 18 tests Python ; chaque branche conserve son périmètre serveur/client compilable.
+Les [groupes de joueurs](docs/PARTY_VALIDATION.md) ajoutent invitations avec acceptation, gestion du chef, discussion privée et PV/PM synchronisés,
+vérifiés après dégâts réels et changement de couche. L'espace combiné passe 110 tests Rust et 22 tests Python ; chaque branche conserve son périmètre serveur/client compilable.
+La [feuille de route du jeu](docs/GAMEPLAY_ROADMAP.md) recense les systèmes encore incomplets.
 
 - **RappelzCore** utilise **exactement le schéma SQL d'AzerothCore** (`acore_auth`, `acore_characters`,
   `acore_world`, importé du dépôt officiel, commit `3179ea3` du 25/10/2026), son format de configuration
@@ -194,7 +196,7 @@ mots de passe de 16 caractères max (règle AzerothCore).
 ## Vérifications des développements précédents
 
 Cette liste contient des résultats conservés des travaux précédents. Les vérifications du
-30–31/10/2026 (100 tests Rust et 18 tests Python réussis, compilation optimisée et 125 212 ressources identiques) sont séparées
+30–31/10/2026 (110 tests Rust et 22 tests Python réussis, compilation optimisée et 125 212 ressources identiques) sont séparées
 des anciens résultats serveur/base de données dans [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md).
 
 Pour installer l'addon sur un client déjà converti :

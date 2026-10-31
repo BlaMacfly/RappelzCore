@@ -31,6 +31,10 @@ pub struct GameState {
     pub target: Option<UnitState>,
     pub money: Option<i64>,
     pub party_members: Option<u32>,
+    /// Accepted roster excluding the player, in stable server order. None means unknown.
+    pub party: Option<Vec<UnitState>>,
+    pub party_leader: Option<u32>,
+    pub party_invite: Option<String>,
     /// Incremented by the client only after a changed inventory is accepted.
     pub bag_revision: u64,
 }
@@ -409,7 +413,11 @@ impl AddonRuntime {
                     let unit = match token.as_str() {
                         "player" => state.player.as_ref(),
                         "target" => state.target.as_ref(),
-                        _ => None,
+                        _ => token
+                            .strip_prefix("party")
+                            .and_then(|n| n.parse::<usize>().ok())
+                            .filter(|n| (1..=7).contains(n))
+                            .and_then(|n| state.party.as_ref()?.get(n - 1)),
                     };
                     Ok(match name {
                         "UnitName" => match unit {
@@ -439,6 +447,11 @@ impl AddonRuntime {
         globals.raw_set(
             "GetNumPartyMembers",
             lua.create_function(move |_, ()| Ok(state.borrow().party_members))?,
+        )?;
+        let state = self.state.clone();
+        globals.raw_set(
+            "GetPartyInviteName",
+            lua.create_function(move |_, ()| Ok(state.borrow().party_invite.clone()))?,
         )?;
         let start = self.start;
         globals.raw_set(
@@ -640,6 +653,48 @@ impl AddonRuntime {
         }
         if old.target.as_ref().map(|u| u.handle) != state.target.as_ref().map(|u| u.handle) {
             self.dispatch(Event::new("PLAYER_TARGET_CHANGED", vec![]));
+        }
+        let roster = |s: &GameState| {
+            s.party
+                .as_ref()
+                .map(|members| members.iter().map(|u| u.handle).collect::<Vec<_>>())
+                .unwrap_or_default()
+        };
+        if old.party.is_none() && state.party.is_some() {
+            self.dispatch(Event::new("RAPPELZ_PARTY_STATE_READY", vec![]));
+        }
+        if state.party.is_some()
+            && (roster(&old) != roster(&state) || old.party_leader != state.party_leader)
+        {
+            self.dispatch(Event::new("PARTY_MEMBERS_CHANGED", vec![]));
+        }
+        if old.party_invite != state.party_invite {
+            if let Some(name) = &state.party_invite {
+                self.dispatch(Event::new(
+                    "PARTY_INVITE_REQUEST",
+                    vec![name.clone().into()],
+                ));
+            } else if old.party_invite.is_some() {
+                self.dispatch(Event::new("RAPPELZ_PARTY_INVITE_CLOSED", vec![]));
+            }
+        }
+        for (index, after) in state.party.iter().flatten().enumerate() {
+            let before = old
+                .party
+                .as_ref()
+                .and_then(|v| v.get(index))
+                .filter(|u| u.handle == after.handle);
+            let token = format!("party{}", index + 1);
+            if before.map(|u| (u.health, u.max_health)).unwrap_or_default()
+                != (after.health, after.max_health)
+            {
+                self.dispatch(Event::new("UNIT_HEALTH", vec![token.clone().into()]));
+            }
+            if before.map(|u| (u.mana, u.max_mana)).unwrap_or_default()
+                != (after.mana, after.max_mana)
+            {
+                self.dispatch(Event::new("UNIT_MANA", vec![token.into()]));
+            }
         }
         if old.bag_revision != state.bag_revision {
             self.dispatch(Event::new("BAG_UPDATE", vec![EventArg::Number(0.0)]));

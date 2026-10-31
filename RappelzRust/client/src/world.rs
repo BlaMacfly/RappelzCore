@@ -16,6 +16,8 @@ use crate::net::{NetCmd, NetEvent};
 use crate::rzui::RzUi;
 use crate::terrain::Terrain;
 
+mod party_ui;
+
 const MAP_TILE: f32 = 16128.0;
 const MINIMAP_PIECES: i32 = 16;
 const PIECE: f32 = MAP_TILE / MINIMAP_PIECES as f32;
@@ -74,6 +76,30 @@ mod addon_vitals_tests {
         world.entities.insert(8,Entity::new("Peer".into(),Kind::Player,0.0,0.0,1,None));
         world.apply_server_target(8);assert_eq!(world.target,Some(8));
         world.apply_server_target(0);assert!(world.target.is_none());
+    }
+
+    #[test]
+    fn party_adapter_uses_authoritative_roster_without_disclosing_hidden_world_entities() {
+        use rz_proto::party::{PartyMember,ScPartyState};
+        let mut world=WorldState::from_login(&msg::ScLoginResult {handle:7,hp:100,max_hp:100,mp:50,max_mp:50,..Default::default()},Vec2::ZERO);
+        assert_eq!(world.addon_state().party_members,None);
+        world.on_packet(ScPartyState::default().to_packet(),0.0);
+        assert_eq!(world.addon_state().party_members,Some(0));
+        let member=|handle|PartyMember {handle,name:format!("Player{handle}"),level:1,hp:100,max_hp:100,mp:50,max_mp:50,..Default::default()};
+        let mut state=ScPartyState {party_id:1,leader:7,members:vec![member(7),member(8)],invite:None};
+        state.members[1].layer=1;state.members[1].hp=25;state.members[1].mp=4;
+        world.on_packet(state.to_packet(),0.0);
+        let addon=world.addon_state();assert_eq!(addon.party_members,Some(1));
+        let peer=&addon.party.unwrap()[0];assert_eq!((peer.handle,peer.health,peer.mana,peer.layer),(8,Some(25),Some(4),Some(1)));
+        assert!(world.entities.is_empty());assert!(world.select_target(8).is_none());
+        world.apply_warp(10.0,20.0,0.0,1);assert_eq!(world.party_state(),Some(&state));
+        let mut wrong=state.clone();wrong.members[0].handle=9;wrong.leader=9;
+        world.on_packet(wrong.to_packet(),0.0);assert_eq!(world.party_state(),Some(&state));
+        let mut truncated=state.to_packet();truncated.body.pop();world.on_packet(truncated,0.0);
+        assert_eq!(world.party_state(),Some(&state));
+        world.on_packet(ScPartyState::default().to_packet(),0.0);assert_eq!(world.addon_state().party_members,Some(0));
+        assert!(matches!(WorldState::parse_chat("/p hello"),Some(NetCmd::Chat {chat_type:chat_type::PARTY,message,..}) if message=="hello"));
+        assert!(WorldState::parse_chat("/party ").is_none());
     }
 }
 
@@ -215,6 +241,8 @@ struct FloatText {
 }
 
 pub struct WorldState {
+    party: Option<rz_proto::party::ScPartyState>,
+    show_party: bool,
     clock: Instant,
     handle: u32,
     layer: u8,
@@ -270,6 +298,7 @@ impl WorldState {
         Self {
             clock: Instant::now(),
             handle: lr.handle,
+            party:None,show_party:true,
             layer: lr.layer,
             name: lr.name.clone(),
             me,
@@ -344,7 +373,15 @@ impl WorldState {
                 health: Some(self.hp), max_health: Some(self.max_hp), mana: Some(self.mp), max_mana: Some(self.max_mp),
             }),
             target: self.target.and_then(|h| self.unit(h)),
-            money: self.addon_money, party_members: None, bag_revision: self.bag_revision,
+            money: self.addon_money,
+            party_members: self.party.as_ref().map(|p|p.members.iter().filter(|m|m.handle!=self.handle).count() as u32),
+            party: self.party.as_ref().map(|p|p.members.iter().filter(|m|m.handle!=self.handle).map(|m|rz_addon::UnitState {
+                handle:m.handle,name:m.name.clone(),level:Some(m.level),layer:Some(m.layer),
+                health:Some(m.hp),max_health:Some(m.max_hp),mana:Some(m.mp),max_mana:Some(m.max_mp),
+            }).collect()),
+            party_leader:self.party.as_ref().and_then(|p|(p.leader!=0).then_some(p.leader)),
+            party_invite:self.party.as_ref().and_then(|p|p.invite.as_ref().map(|i|i.name.clone())),
+            bag_revision: self.bag_revision,
         }
     }
 
@@ -378,6 +415,10 @@ impl WorldState {
     }
 
     pub fn experience(&self) -> (i64, i64) { (self.exp, self.jp) }
+    pub fn party_state(&self) -> Option<&rz_proto::party::ScPartyState> {self.party.as_ref()}
+    pub fn party_action(action:&str) -> NetCmd {
+        NetCmd::Chat {chat_type:chat_type::NORMAL,target:String::new(),message:format!(".party {action}")}
+    }
     pub fn layer(&self) -> u8 { self.layer }
     pub fn entity_count(&self) -> usize { self.entities.len() }
     pub fn dialog_open(&self) -> bool { self.dialog.is_some() || self.market.is_some() }
@@ -482,6 +523,7 @@ impl WorldState {
                 let (color, line) = match t {
                     chat_type::WHISPER => (Color::from_rgba(255, 128, 255, 255), format!("[{sender}] chuchote : {message}")),
                     chat_type::NOTICE => (YELLOW, message),
+                    chat_type::PARTY => (Color::from_rgba(120,190,255,255),format!("[Groupe] {sender} : {message}")),
                     _ => (Color::from_rgba(255, 170, 90, 255), format!("[{sender}] : {message}")),
                 };
                 self.log(color, line);
@@ -517,6 +559,11 @@ impl WorldState {
         let previous_inventory = matches!(p.id, gid::TS_SC_INVENTORY | gid::TS_SC_DESTROY_ITEM | gid::TS_SC_ITEM_WEAR_INFO)
             .then(|| self.inventory.clone());
         match p.id {
+            rz_proto::party::SC_PARTY_STATE => {
+                if let Ok(state)=rz_proto::party::ScPartyState::from_packet(&p) {
+                    if state.members.is_empty() || state.members.iter().any(|m|m.handle==self.handle) {self.party=Some(state);}
+                }
+            }
             gid::TS_SC_TARGET => {
                 if let Ok(target)=game::Handle::<{gid::TS_SC_TARGET}>::from_packet(&p) {
                     self.apply_server_target(target.0);
@@ -1008,6 +1055,9 @@ impl WorldState {
         self.draw_minimap(assets, now);
 
         // Fenêtres ouvertes.
+        if is_key_pressed(KeyCode::P) && !self.chat_open {self.show_party = !self.show_party;}
+        if self.party.as_ref().is_some_and(|p|p.invite.is_some()) {self.show_party=true;}
+        if self.show_party {over |= self.draw_party(ui,out);}
         if is_key_pressed(KeyCode::I) && !self.chat_open {
             self.show_inventory = !self.show_inventory;
         }
@@ -1243,6 +1293,10 @@ impl WorldState {
         if let Some(m) = text.strip_prefix("/y ") {
             return Some(chat(chat_type::YELL, "", m));
         }
+        if let Some(m)=text.strip_prefix("/p ").or_else(||text.strip_prefix("/party ")) {
+            return (!m.trim().is_empty()).then(||chat(chat_type::PARTY,"",m.trim()));
+        }
+        if text=="/p" || text=="/party" {return None;}
         Some(chat(chat_type::NORMAL, "", text))
     }
 }

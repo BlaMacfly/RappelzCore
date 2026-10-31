@@ -14,6 +14,8 @@ pub enum PacketError {
     Truncated { id: u16, needed: usize, available: usize },
     #[error("taille de paquet invalide : {0}")]
     BadSize(usize),
+    #[error("paquet {id} : champ invalide ({field})")]
+    Invalid { id: u16, field: &'static str },
 }
 
 pub type Result<T> = std::result::Result<T, PacketError>;

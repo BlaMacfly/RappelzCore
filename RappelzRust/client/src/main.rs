@@ -150,7 +150,7 @@ async fn main() {
     let sfx_volume = config.get("Sound_SFXVolume", "0.7").parse().unwrap_or(0.7);
     let rzui = assets.as_mut().map(|a| rzui::RzUi::new(a, font.clone()));
     let mut app = App {
-        combat_trace: ["-validate-combat","-validate-revival","-validate-visibility","-validate-layer"].iter().any(|flag|arg_value(flag).is_some()).then(Default::default),
+        combat_trace: ["-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party"].iter().any(|flag|arg_value(flag).is_some()).then(Default::default),
         addons: addons::Addons::new(&root),
         addon_realm: "offline".into(),
         rzui,
@@ -196,7 +196,7 @@ async fn main() {
         app.send(NetCmd::Login { host, port, account: account.to_string(), password: password.to_string() });
     }
     let screenshot = arg_value("-screenshot");
-    let validation_flags: Vec<_> = ["-validate-addons","-validate-combat","-validate-revival","-validate-visibility","-validate-layer"]
+    let validation_flags: Vec<_> = ["-validate-addons","-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party"]
         .into_iter().filter_map(|flag|arg_value(flag).map(|path|(flag,path))).collect();
     let validation_args = match validation_flags.as_slice() {
         [] => None,
@@ -208,6 +208,7 @@ async fn main() {
                 "-validate-revival"=>online_validation::OnlineValidation::revival(plan,&app),
                 "-validate-visibility"=>online_validation::OnlineValidation::visibility(plan,&app),
                 "-validate-layer"=>online_validation::OnlineValidation::layer(plan,&app),
+                "-validate-party"=>online_validation::OnlineValidation::party(plan,&app),
                 _=>unreachable!("validation flag comes from the fixed list"),
             })
         }
@@ -368,12 +369,19 @@ impl App {
                         NetEvent::Chat { chat_type, message, .. } if *chat_type == msg::chat_type::NOTICE => Some(message.clone()),
                         _ => None,
                     };
+                    let party_message=match &other {
+                        NetEvent::Chat {chat_type,sender,message} if *chat_type==msg::chat_type::PARTY=>Some((sender.clone(),message.clone())),
+                        _=>None,
+                    };
                     if let (Some(w), Some(a)) = (&mut self.world, &mut self.assets) {
                         w.on_event(other, a);
                     }
                     self.sync_addons();
                     if let Some(message) = system_message {
                         self.addons.runtime.dispatch(rz_addon::Event::new("CHAT_MSG_SYSTEM", vec![message.into()]));
+                    }
+                    if let Some((sender,message))=party_message {
+                        self.addons.runtime.dispatch(rz_addon::Event::new("CHAT_MSG_PARTY",vec![message.into(),sender.into()]));
                     }
                 }
             }

@@ -189,6 +189,7 @@ async fn game_loop(
                     id::TS_SC_LOGIN_RESULT => {
                         let lr = msg::ScLoginResult::from_packet(&p)?;
                         handle = lr.handle;
+                        w.send(&rz_proto::party::CsPartyHello(rz_proto::party::VERSION)).await?;
                         NetEvent::LoginResult(lr)
                     }
                     id::TS_SC_ENTER => NetEvent::Enter(msg::ScEnter::from_packet(&p)?),
