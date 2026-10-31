@@ -1,5 +1,7 @@
 # Native terrain cancellation on teleport and map changes
 
+Historical WARP/map-change cycle. The later [stalled/reset TCP validation](TERRAIN_NETWORK_VALIDATION.md) covers opaque eight-second forwarding stalls, real remote reset/relogin and terrain recovery. Counts, hashes and untested limits below belong to this WARP cycle.
+
 Verified **2026-10-31** against the existing loopback MariaDB/auth/world services with two real Windows x64 clients. This follows [rapid-turn/lobby/TCP cancellation](TERRAIN_CANCELLATION_VALIDATION.md). The server binary, wire format, schemas and original game resources remain unchanged.
 
 ## Defect and fix
