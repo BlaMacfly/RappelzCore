@@ -380,17 +380,6 @@ impl Session {
                 cell_size: s.cell_size,
                 guild_id: 0,
             });
-            let stats = msg::BasicStats {
-                attributes: [10; 7],
-                attack: 10 + c.level as i32 * 2,
-                defence: 5 + c.level as i32,
-                magic_point: 10 + c.level as i32 * 2,
-                magic_defence: 5 + c.level as i32,
-                move_speed: s.move_speed as i16,
-                attack_speed: 100,
-                attack_range: 50,
-            };
-            self.send(&msg::ScStatInfo::from_stats(handle, &stats, 0));
             for (prop, value) in [
                 ("lv", c.level as i64),
                 ("job", c.extra_i64("job", 0)),
@@ -423,10 +412,12 @@ impl Session {
                 max_mp,
                 attack: crate::gameplay::attack_for(c.level),
                 defence: crate::gameplay::defence_for(c.level),
+                move_speed:s.move_speed,
                 attack_target: None,
                 next_attack: 0,
                 last_combat: 0,
             });
+            world.publish_stats(handle);
             world.update_visibility();
             handle
         };
@@ -523,6 +514,7 @@ impl Session {
             (sx, sy)
         };
         p.motion = Motion { x, y, start_time: now, points: req.points.clone(), speed: s.move_speed as f32 * s.speed_scale };
+        p.move_speed=s.move_speed;
         let layer = p.layer;
         let packet = msg::ScMove { start_time: now, handle: g.handle, tlayer: layer, speed: s.move_speed, points: req.points }.to_packet();
         world.broadcast_around(g.handle, &packet, true);

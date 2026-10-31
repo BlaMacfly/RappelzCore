@@ -248,7 +248,11 @@ impl Session {
             }
             gid::TS_CS_QUERY => {
                 let target = game::CsQuery::from_packet(&p)?.0;
-                self.ctx.world.lock().unwrap().query(handle, target);
+                let world=self.ctx.world.lock().unwrap();
+                if self.in_game.as_ref().is_some_and(|g|world.players.get(&handle)
+                    .is_some_and(|p|p.guid==g.character.guid && p.account_id==g.character.account)) {
+                    world.query(handle,target);
+                }
             }
             gid::TS_CS_GAME_TIME => {
                 let now = self.ctx.world.lock().unwrap().now();

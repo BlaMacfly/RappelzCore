@@ -107,6 +107,8 @@ pub struct PlayerEntity {
     pub max_mp: i32,
     pub attack: i32,
     pub defence: i32,
+    /// Configured wire speed; resting Motion::at deliberately has speed zero.
+    pub move_speed: u8,
     pub attack_target: Option<u32>,
     pub next_attack: u32,
     pub last_combat: u32,
@@ -326,6 +328,22 @@ impl World {
         game::ScWearInfo { handle: p.handle, wear_info: p.wear, ..Default::default() }.to_packet()
     }
 
+    /// Send the current owner combat snapshot, never an observer's private statistics.
+    pub fn publish_stats(&self, owner:u32) {
+        let Some(player)=self.players.get(&owner) else {return;};
+        let level=player.enter.creature.level;
+        // Retain the existing opaque template. Only the three checked combat fields
+        // below are authoritative; the second attack slot is not a new left-hand rule.
+        let mut snapshot=msg::ScStatInfo::from_stats(owner,&msg::BasicStats {
+            attributes:[10;7],attack:10+level*2,defence:5+level,
+            magic_point:10+level*2,magic_defence:5+level,move_speed:i16::from(player.move_speed),
+            attack_speed:100,attack_range:50,
+        },0);
+        snapshot.stats[0x1f-0x0b..0x1f-0x0b+4].copy_from_slice(&player.attack.to_le_bytes());
+        snapshot.stats[0x27-0x0b..0x27-0x0b+4].copy_from_slice(&player.defence.to_le_bytes());
+        self.send_to(owner,snapshot.to_packet());
+    }
+
     /// Paquets d'apparition d'un objet du monde (ENTER + données associées).
     fn enter_packets(&self, handle: u32, now: u32) -> Vec<RawPacket> {
         if let Some(p) = self.players.get(&handle) {
@@ -360,6 +378,7 @@ impl World {
         for p in self.enter_packets(handle, now) {
             self.send_to(viewer, p);
         }
+        if viewer==handle {self.publish_stats(handle);}
     }
 
     /// Require an announced object and current visibility: the cached set can lag a tick.
@@ -552,6 +571,7 @@ impl World {
         self.broadcast_around(handle, &game::ScLevelUpdate { handle, level: level as i32, job_level }.to_packet(), true);
         self.broadcast_around(handle, &hpmp, true);
         self.send_to(handle, msg::ScProperty { handle, name: "lv".into(), value: level as i64, text: None }.to_packet());
+        self.publish_stats(handle);
         true
     }
 
@@ -818,7 +838,7 @@ mod tests {
                 z: 0.0, layer: 0, motion: Motion::at(0.0, 0.0), enter: PlayerEnterInfo::default(),
                 wear: [0; game::WEAR_SLOTS], tx, events: tokio::sync::mpsc::unbounded_channel().0,
                 visible: if handle == 2 { HashSet::from([1]) } else { HashSet::new() },
-                hp: 50, max_hp: 100, mp: 20, max_mp: 50, attack: 16, defence: 6,
+                hp: 50, max_hp: 100, mp: 20, max_mp: 50, attack: 16, defence: 6, move_speed:120,
                 attack_target: None, next_attack: 0, last_combat: 0,
             });
         }
@@ -837,6 +857,9 @@ mod tests {
         }
         let property = msg::ScProperty::from_packet(&receivers[0].try_recv().unwrap()).unwrap();
         assert_eq!((property.name.as_str(), property.value), ("lv", 2));
+        let stats=msg::ScStatInfo::from_packet(&receivers[0].try_recv().unwrap()).unwrap().combat_stats().unwrap();
+        assert_eq!(stats,msg::CombatStats{attack:20,defence:8,move_speed:120});
+        assert!(receivers[0].try_recv().is_err());
         assert!(receivers[1].try_recv().is_err());
         world.query(2, 1);
         let enter = msg::ScEnter::from_packet(&receivers[1].try_recv().unwrap()).unwrap();
@@ -844,6 +867,92 @@ mod tests {
         assert_eq!((player.creature.level, player.creature.hp, player.creature.max_hp, player.creature.mp, player.creature.max_mp),
             (2, 120, 120, 60, 60));
         assert!(!world.set_player_level(99, 2, 1));
+    }
+
+    #[test]
+    fn owner_stat_snapshot_uses_live_combat_fields_and_retains_other_payload_bytes() {
+        let (mut world,mut receivers)=test_world();
+        for level in [1u8,2,10,200] {
+            let player=world.players.get_mut(&1).unwrap();
+            player.enter.creature.level=i32::from(level);
+            player.attack=crate::gameplay::attack_for(level);
+            player.defence=crate::gameplay::defence_for(level);
+            player.move_speed=123;
+            let before=(player.hp,player.mp,player.max_hp,player.max_mp);
+            assert_eq!(player.motion.speed,0.,"fixture must be stationary");
+            let legacy=msg::ScStatInfo::from_stats(1,&msg::BasicStats {
+                attributes:[10;7],attack:10+i32::from(level)*2,defence:5+i32::from(level),
+                magic_point:10+i32::from(level)*2,magic_defence:5+i32::from(level),move_speed:123,
+                attack_speed:100,attack_range:50,
+            },0);
+            world.publish_stats(1);
+            let packet=receivers[0].try_recv().unwrap();assert_eq!(packet.to_bytes().len(),110);
+            let stat=msg::ScStatInfo::from_packet(&packet).unwrap();
+            let actual=stat.combat_stats().unwrap();let player=&world.players[&1];
+            assert_eq!(actual,msg::CombatStats{attack:player.attack,defence:player.defence,move_speed:123});
+            for i in 0..98 {if !(20..24).contains(&i) && !(28..32).contains(&i) {assert_eq!(stat.stats[i],legacy.stats[i],"unconfirmed field changed at {i}");}}
+            assert_eq!((player.hp,player.mp,player.max_hp,player.max_mp),before);
+            assert!(receivers[0].try_recv().is_err()&&receivers[1].try_recv().is_err());
+        }
+        // Reading live fields also covers future authoritative modifiers without
+        // silently recalculating a different formula in the notification path.
+        let player=world.players.get_mut(&1).unwrap();player.attack=777;player.defence=333;player.move_speed=91;
+        world.publish_stats(1);
+        assert_eq!(msg::ScStatInfo::from_packet(&receivers[0].try_recv().unwrap()).unwrap().combat_stats(),Some(msg::CombatStats{attack:777,defence:333,move_speed:91}));
+        assert!(receivers[1].try_recv().is_err());
+    }
+
+    #[test]
+    fn owner_queries_refresh_stats_after_warp_without_healing_or_observer_disclosure() {
+        let (mut world,mut receivers)=test_world();
+        for _ in 0..2 {
+            world.query(1,1);
+            let packets:Vec<_>=std::iter::from_fn(||receivers[0].try_recv().ok()).collect();
+            assert_eq!(packets.iter().map(|p|p.id).collect::<Vec<_>>(),vec![msg::ScEnter::ID,game::ScWearInfo::ID,msg::ScStatInfo::ID]);
+            let stats=msg::ScStatInfo::from_packet(packets.last().unwrap()).unwrap().combat_stats().unwrap();
+            assert_eq!(stats,msg::CombatStats{attack:16,defence:6,move_speed:120});
+            assert!(receivers[1].try_recv().is_err());
+        }
+        world.teleport(1,50.,0.,0.);
+        for rx in &mut receivers {while rx.try_recv().is_ok(){}}
+        let player=world.players.get_mut(&1).unwrap();player.attack=99;player.defence=18;player.move_speed=77;
+        let before=(player.hp,player.mp,player.max_hp,player.max_mp);assert_eq!(player.motion.speed,0.);
+        world.query(1,1);
+        let packets:Vec<_>=std::iter::from_fn(||receivers[0].try_recv().ok()).collect();
+        let enter=msg::ScEnter::from_packet(&packets[0]).unwrap();assert_eq!((enter.x,enter.y),(50.,0.));
+        let stats=msg::ScStatInfo::from_packet(packets.last().unwrap()).unwrap().combat_stats().unwrap();
+        assert_eq!(stats,msg::CombatStats{attack:99,defence:18,move_speed:77});
+        let player=&world.players[&1];assert_eq!((player.hp,player.mp,player.max_hp,player.max_mp),before);
+        world.query(2,1);
+        let packets:Vec<_>=std::iter::from_fn(||receivers[1].try_recv().ok()).collect();
+        assert!(packets.iter().any(|p|p.id==msg::ScEnter::ID));
+        assert!(packets.iter().all(|p|p.id!=msg::ScStatInfo::ID),"peer QUERY disclosed private combat stats");
+        world.publish_stats(99);assert!(receivers[0].try_recv().is_err()&&receivers[1].try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn replaced_or_removed_session_cannot_query_private_stats_or_touch_its_replacement() {
+        for replacement in 0..3 {
+            let (mut session,mut old_rx)=isolated_session(None);session.ctx.chars.close().await;
+            let (new_tx,mut new_rx)=tokio::sync::mpsc::unbounded_channel();
+            {
+                let mut world=session.ctx.world.lock().unwrap();
+                if replacement==2 {world.remove_player(1);} else {
+                    let player=world.players.get_mut(&1).unwrap();player.tx=new_tx;
+                    if replacement==0 {player.guid=999;} else {player.account_id=999;}
+                    player.attack=101;player.defence=202;
+                }
+            }
+            let character=session.in_game.as_ref().unwrap().character.clone();
+            session.handle_gameplay(game::Handle::<{game::id::TS_CS_QUERY}>(1).to_packet()).await.unwrap();
+            assert!(old_rx.try_recv().is_err()&&new_rx.try_recv().is_err(),"stale identity caused a stat publication");
+            let world=session.ctx.world.lock().unwrap();
+            if replacement==2 {assert!(!world.players.contains_key(&1));} else {
+                let player=&world.players[&1];assert_eq!((player.attack,player.defence),(101,202));
+                assert_eq!((player.guid,player.account_id),if replacement==0 {(999,1)} else {(1,999)});
+            }
+            assert_eq!(session.in_game.as_ref().unwrap().character.extra,character.extra);
+        }
     }
 
     #[test]

@@ -1015,10 +1015,20 @@ impl Message for ScProperty {
 
 /// TS_SC_STAT_INFO (1000), 110 octets : `handle`, 98 octets de statistiques, `u8 type`
 /// (disposition : `docs/re/network_protocol.md` §8.3 ; offsets ci-dessous depuis +0x0b).
+#[derive(Clone,Debug,PartialEq,Eq)]
 pub struct ScStatInfo {
     pub handle: u32,
     pub stats: [u8; 98],
     pub info_type: u8,
+}
+
+/// Supported owner combat fields from a complete type-0 snapshot. Other fields
+/// remain opaque until their effective gameplay calculation is implemented.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub struct CombatStats {
+    pub attack:i32,
+    pub defence:i32,
+    pub move_speed:i16,
 }
 
 /// Statistiques de base d'un personnage, pour remplir TS_SC_STAT_INFO.
@@ -1036,6 +1046,13 @@ pub struct BasicStats {
 }
 
 impl ScStatInfo {
+    pub fn combat_stats(&self)->Option<CombatStats>{
+        if self.handle==0 || self.info_type!=0{return None;}
+        let i32_at=|offset:usize|i32::from_le_bytes(self.stats[offset-0x0b..offset-0x0b+4].try_into().unwrap());
+        let move_speed=i16::from_le_bytes(self.stats[0x43-0x0b..0x43-0x0b+2].try_into().unwrap());
+        let value=CombatStats{attack:i32_at(0x1f),defence:i32_at(0x27),move_speed};
+        (value.attack>=0&&value.defence>=0&&(0..=255).contains(&value.move_speed)).then_some(value)
+    }
     pub fn from_stats(handle: u32, s: &BasicStats, info_type: u8) -> Self {
         let mut st = [0u8; 98];
         let mut put16 = |off: usize, v: i16| st[off - 0x0b..off - 0x0b + 2].copy_from_slice(&v.to_le_bytes());
@@ -1069,7 +1086,26 @@ impl Message for ScStatInfo {
     fn read(r: &mut Reader) -> Result<Self> {
         let handle = r.u32()?;
         let stats = r.bytes(98)?.try_into().unwrap();
-        Ok(Self { handle, stats, info_type: r.u8()? })
+        let info_type=r.u8()?;
+        if r.remaining()!=0{return Err(crate::packet::PacketError::Invalid{id:Self::ID,field:"stat snapshot length"});}
+        Ok(Self { handle, stats, info_type })
+    }
+}
+
+#[cfg(test)]mod combat_stat_tests{
+    use super::*;
+    #[test]fn stat_snapshot_offsets_are_exact_and_only_full_owner_fields_are_exposed(){
+        let mut p=ScStatInfo{handle:7,stats:[0;98],info_type:0};
+        p.stats[20..24].copy_from_slice(&52i32.to_le_bytes());p.stats[28..32].copy_from_slice(&24i32.to_le_bytes());p.stats[56..58].copy_from_slice(&120i16.to_le_bytes());
+        let bytes=p.to_packet().to_bytes();assert_eq!(bytes.len(),110);assert_eq!(&bytes[31..35],&52i32.to_le_bytes());assert_eq!(&bytes[39..43],&24i32.to_le_bytes());assert_eq!(&bytes[67..69],&120i16.to_le_bytes());
+        assert_eq!(ScStatInfo::from_packet(&p.to_packet()).unwrap().combat_stats(),Some(CombatStats{attack:52,defence:24,move_speed:120}));
+        for kind in [1,2,255]{let mut changed=p.clone();changed.info_type=kind;assert!(changed.combat_stats().is_none());}
+        p.handle=0;assert!(p.combat_stats().is_none());
+    }
+    #[test]fn malformed_or_negative_combat_snapshots_are_rejected(){
+        let base=BasicStats{attributes:[10;7],attack:20,defence:8,magic_point:0,magic_defence:0,move_speed:120,attack_speed:100,attack_range:50};
+        for (attack,defence,move_speed) in [(-1,8,120),(20,-1,120),(20,8,-1),(20,8,256)]{let p=ScStatInfo::from_stats(7,&BasicStats{attack,defence,move_speed,..base.clone()},0);assert!(p.combat_stats().is_none());}
+        let mut p=ScStatInfo::from_stats(7,&base,0).to_packet();p.body.push(0);assert!(ScStatInfo::from_packet(&p).is_err());p.body.truncate(102);assert!(ScStatInfo::from_packet(&p).is_err());
     }
 }
 

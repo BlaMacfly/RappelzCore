@@ -21,6 +21,7 @@ Core lifecycle/state events were observed in the actual native/local-server sess
 | `GetJobPoints()` | Read-only Rappelz extension: accepted own EXP_UPDATE/private job-preview JP, nil until known; zero is preserved. Numeric Lua 5.1 precision limits apply. |
 | `GetJobPointsExact()` | Read-only exact decimal string of the same signed-64-bit JP balance; nil until known, `"0"` for known zero. No double conversion. |
 | `GetJobLevel()` | Read-only own level from the accepted private job preview; nil when unavailable. Initial/reentry state and confirmed purchases are verified with two native clients. |
+| `GetPlayerCombatStat(field)` | Read-only own accepted physical `"attack"`, `"defence"`, or configured `"move_speed"`; nil until a valid full self snapshot, or for unsupported names. Foreign/delta/invalid packets never overwrite it. [Two-client validation](CHARACTER_STATS_VALIDATION.md) verifies XP level-up and reentry; no derived equipment/JLV formulas or target stat API. |
 | `GetTime()` | Monotonic time since this addon host started; survives UI reload. |
 | `print(...)` | Bounded client log and in-world chat output. |
 | Other WoW/game action APIs | Absent; calling one raises the normal attributed Lua nil-function error. No combat/inventory command API is exposed. |
@@ -37,6 +38,7 @@ Core lifecycle/state events were observed in the actual native/local-server sess
 | `PLAYER_ALIVE` | Same player's known nonpositive HP becomes positive; no arguments. Describes implemented automatic revival, not full WoW ghost semantics. Login/UI reload do not fabricate it. |
 | `UNIT_HEALTH` | Known health/max-health tuple changes; `"player"` or `"target"`. |
 | `UNIT_MANA` | Mana/max-mana tuple changes; unit token. |
+| `RAPPELZ_COMBAT_STATS_CHANGED` | No arguments; complete accepted own tuple is readable. Initial discovery/changed tuple/fresh reentry emit; duplicate refresh packets do not. Unknown clearing emits no fabricated numeric change; normal logout retains last readable state. A new addon host after reload discovers current known state. |
 | `PLAYER_LEVEL_UP` | Known player level increases; new level. Initial level discovery is not a fabricated level-up. |
 | `RAPPELZ_LAYER_CHANGED` | Rappelz extension: same player's known layer changes; numeric new layer. Initial discovery, another handle and UI reload do not fabricate it. No layer-changing API is exposed. |
 | `BAG_UPDATE` | Accepted inventory contents change; `0` for the current single logical bag. |
@@ -95,3 +97,5 @@ Handler convention: `function(self, event, ...)`. Legacy `this`, `event`, `arg1`
 | In-game manager and reload | Native overlay; world/network retained. `/reload` interception compiled; native reload button verified. |
 
 See [LUA_ADDON_SYSTEM.md](LUA_ADDON_SYSTEM.md) for limits, storage formats and the tested demonstration.
+
+The [character-stat cycle](CHARACTER_STATS_VALIDATION.md) includes **24 actual Lua tests** within **196 passing Rust tests** (one ignored), plus **123 Python tests**. Two native runtimes observe exact20/8/120→24/10/120 and16/6/120 tuples, stat events3/2, no duplicate callback after own refreshes, and no peer private stats. RappelzDebug displays/logs the same accepted fields; raw base job attributes remain separate.

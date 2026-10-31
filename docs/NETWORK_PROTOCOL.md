@@ -8,6 +8,10 @@ The implemented profile targets the supplied NoLimits SFrame SHA-256 `27f42fc8f6
 
 The detailed investigation distinguishes directly observed offsets/constructors from inferred field meanings. Preserve those distinctions when extending messages: a matching size does not validate every field's gameplay meaning. No original-client connection or packet capture was made during this audit. Historical Rust bot logs demonstrate the local Rust implementations communicating with one another, not proof of interoperability with the original game.
 
+## Private own combat-stat projection
+
+[Character-stat validation](CHARACTER_STATS_VALIDATION.md) retains the existing 110-byte full SC_STAT_INFO layout. Supported fields are right-hand attack at packet+0x1f, defence+0x27 and configured movement speed+0x43. The decoder rejects trailing/truncated payloads; only type0/nonzero own-handle snapshots with nonnegative AP/DEF and speed0..255 update client state. Other fields remain opaque. One server publisher reads actual player combat AP/DEF rather than a divergent login formula, at login, true player level changes and own QUERY. A visible-peer QUERY still publishes public ENTER/WEAR but no private stats; replaced-session GUID/account ownership fails closed. No new opcode or original formula/interoperability claim is introduced. Two clients verify6/5 own packets,3/2 Lua callbacks and no foreign/private leakage across level-up and reentry; the old backend reproduces wrong tuples14/7 and12/6.
+
 ## Shared Rust implementation
 
 `shared/rz-proto` is used by both services, the graphical client and `rz-bot`. It contains stream encryption, TCP reader/writer, framing, encoding and messages in `msg.rs` / `msg_game.rs`. The client runs its Tokio network session separately from rendering and forwards decoded events through channels.
