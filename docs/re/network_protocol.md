@@ -645,3 +645,7 @@ Hits de TS_SC_SKILL (FIRE), taille de chaque entrée selon l'octet `type` en tê
   QUEST_STATUS (601) : [D] ou non disséqués. Aucun paquet « quick slot » dans le parseur (raccourcis
   probablement stockés via TS_SC_PROPERTY [D]).
 - Les noms de champs [D] suivent l'ordre public epic 9.5 ; les offsets marqués [O] font foi.
+
+## 10. Propriétés métier/historique et banques de statistiques, 31/10/2026
+
+La [nouvelle investigation native](../SFRAME_PROGRESSION_RE.md) conserve neuf dossiers REA6.4.0/Ghidra12.1.4, SHA SFrame inchangé. Le parseur PROPERTY0xa29150 lit les deux dwords paquet+0x1c/+0x20 et construit une chaîne `%I64d` dans le message interne kind0x36. Le récepteur joueur0x6cdd70 garde JP sur64bits ; job/JLV et les trois couples job_0/jlv_0…job_2/jlv_2 sont des affectations32bits indépendantes protégées par le handle joueur. Les offsets internes exacts et les Evidence IDs figurent dans le rapport : ce ne sont pas des offsets réseau.0x6afd90 transmet job/JLV aux deux couches de setters0x95cf80→0x941760 et0x95cfa0→0x941780. Le traitement STAT_INFO0x6d2b70 est vérifié séparément. `CHANGE_JOB` dans0x6f5360 appartient au traitement des groupes ; il ne prouve aucune promotion PNJ. Les resets, débits JP, chronologie d’historique et coefficients de bonus serveur restent inconnus.37 repères d’octets/chaînes du PE correspondent ; l’ancienne analyse du constructeur de table0xa1f9f0 est identifiée comme historique. Aucun SFrame exécuté ni protocole Rust modifié dans cette passe.
