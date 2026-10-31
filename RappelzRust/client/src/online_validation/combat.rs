@@ -160,7 +160,7 @@ impl PacketTrace {
         }
     }
 
-    fn json(&self) -> Value {
+    pub(super) fn json(&self) -> Value {
         json!({"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
             "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors,
             "logins":self.logins,"dialogs":self.dialogs,"denied_attacks":self.denied_attacks,"targets":self.targets,

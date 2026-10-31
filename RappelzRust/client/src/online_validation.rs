@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use crate::{App, NetCmd};
 
 mod combat;
+mod terrain;
 pub use combat::PacketTrace;
 
 pub enum OnlineValidation {
@@ -23,6 +24,7 @@ pub enum OnlineValidation {
     Skills(combat::learning::LearningValidation),
     Casting(combat::casting::CastingValidation),
     CorpseSkill(combat::corpse_skill::CorpseSkillValidation),
+    Terrain(terrain::TerrainValidation),
 }
 
 impl OnlineValidation {
@@ -45,6 +47,7 @@ impl OnlineValidation {
     pub fn skills(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::Skills(combat::learning::LearningValidation::new(plan,app)?))}
     pub fn casting(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::Casting(combat::casting::CastingValidation::new(plan,app)?))}
     pub fn corpse_skill(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::CorpseSkill(combat::corpse_skill::CorpseSkillValidation::new(plan,app)?))}
+    pub fn terrain(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::Terrain(terrain::TerrainValidation::new(plan,app)?))}
     pub fn message(&mut self, message: &str) {
         match self {
             Self::Addons(v) => v.message(message),
@@ -56,6 +59,7 @@ impl OnlineValidation {
             Self::Skills(v)=>v.message(message),
             Self::Casting(v)=>v.message(message),
             Self::CorpseSkill(v)=>v.message(message),
+            Self::Terrain(v)=>v.message(message),
         }
     }
     pub fn tick(&mut self, app: &mut App) -> Result<bool> {
@@ -69,6 +73,7 @@ impl OnlineValidation {
             Self::Skills(v)=>v.tick(app),
             Self::Casting(v)=>v.tick(app),
             Self::CorpseSkill(v)=>v.tick(app),
+            Self::Terrain(v)=>v.tick(app),
         }
     }
     pub fn fail(&mut self, error: anyhow::Error) {
@@ -82,6 +87,7 @@ impl OnlineValidation {
             Self::Skills(v)=>v.fail(error),
             Self::Casting(v)=>v.fail(error),
             Self::CorpseSkill(v)=>v.fail(error),
+            Self::Terrain(v)=>v.fail(error),
         }
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
@@ -95,6 +101,7 @@ impl OnlineValidation {
             Self::Skills(v)=>v.finish(app),
             Self::Casting(v)=>v.finish(app),
             Self::CorpseSkill(v)=>v.finish(app),
+            Self::Terrain(v)=>v.finish(app),
         }
     }
 }

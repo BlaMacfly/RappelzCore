@@ -5,6 +5,7 @@ use std::collections::{HashMap,BTreeMap};
 use std::time::Instant;
 
 use macroquad::prelude::*;
+use macroquad::camera::Camera;
 use rz_proto::msg::{self, chat_type, EnterKind, MovePoint};
 use rz_proto::msg_game::{self as game, id as gid};
 use rz_proto::{Message, RawPacket};
@@ -319,6 +320,25 @@ pub struct WorldState {
 }
 
 impl WorldState {
+    pub(crate) fn terrain_validation_view(&mut self, reference: bool, view: usize) {
+        let yaw = std::f32::consts::FRAC_PI_2 + 0.4;
+        (self.cam_yaw, self.cam_pitch, self.cam_dist) = match view {
+            1 => (yaw + std::f32::consts::PI, 0.45, 140.0),
+            2 => (yaw, 0.08, 900.0),
+            3 => (yaw, 1.35, 900.0),
+            _ => (yaw, 0.45, 140.0),
+        };
+        if let Some(terrain) = &mut self.terrain { terrain.validation_reference(reference); }
+    }
+
+    pub(crate) fn terrain_cache_snapshot(&self) -> serde_json::Value {
+        self.terrain.as_ref().map(|t| t.cache_snapshot()).unwrap_or(serde_json::Value::Null)
+    }
+
+    pub(crate) fn terrain_validation_capture(&mut self, path: std::path::PathBuf) {
+        if let Some(terrain) = &mut self.terrain { terrain.validation_capture(path); }
+    }
+
     pub fn new(lr: &msg::ScLoginResult) -> Self {
         Self::from_login(lr, mouse_position().into())
     }
@@ -879,7 +899,7 @@ impl WorldState {
         let cam = self.camera(focus);
         clear_background(Color::from_rgba(150, 185, 220, 255));
         set_camera(&cam);
-        terrain.draw(assets, mx, my);
+        terrain.draw(assets, mx, my, cam.matrix());
         let mut prop_budget = 3;
         terrain.draw_props(assets, &mut self.models, mx, my, &mut prop_budget);
 
