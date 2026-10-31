@@ -21,6 +21,8 @@ pub(super) mod visibility;
 
 #[derive(Default)]
 pub struct PacketTrace {
+    chats: Vec<Value>,
+    network_errors: Vec<String>,
     disconnects: Vec<String>,
     hits: Vec<Value>,
     hpmp: Vec<Value>,
@@ -46,6 +48,7 @@ pub struct PacketTrace {
 impl PacketTrace {
     pub fn observe(&mut self, event: &NetEvent) {
         if self.hits.len()
+            + self.chats.len() + self.network_errors.len()
             + self.disconnects.len()
             + self.hpmp.len()
             + self.cast_events.len()+self.cast_results.len()
@@ -73,6 +76,10 @@ impl PacketTrace {
         self.order = self.order.saturating_add(1);
         let result: Result<()> = (|| {
             match event {
+                NetEvent::Error(reason) => self.network_errors.push(reason.clone()),
+                NetEvent::Chat {sender,chat_type,message} if *chat_type==rz_proto::msg::chat_type::WHISPER => {
+                    self.chats.push(json!({"sender":sender,"chat_type":chat_type,"message":message}));
+                }
                 NetEvent::Disconnected(reason) => self.disconnects.push(reason.clone()),
                 NetEvent::Enter(e) => {
                     let (name, creature, kind) = match &e.kind {
@@ -164,7 +171,7 @@ impl PacketTrace {
     }
 
     pub(super) fn json(&self) -> Value {
-        json!({"disconnects":self.disconnects,"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
+        json!({"chats":self.chats,"network_errors":self.network_errors,"disconnects":self.disconnects,"hits":self.hits,"hpmp":self.hpmp,"levels":self.levels,"experience":self.experience,
             "enters":self.enters,"leaves":self.leaves,"lifecycle":self.lifecycle,"warps":self.warps,"moves":self.moves,"errors":self.errors,
             "logins":self.logins,"dialogs":self.dialogs,"denied_attacks":self.denied_attacks,"targets":self.targets,
             "party_states":self.party_states,"party_chats":self.party_chats,"skill_lists":self.skill_lists,"skill_catalogs":self.skill_catalogs,"learn_results":self.learn_results,"cast_events":self.cast_events,"cast_results":self.cast_results})
@@ -173,6 +180,14 @@ impl PacketTrace {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn network_faults_and_whispers_share_the_bounded_trace() {
+        let mut t=PacketTrace::default();
+        t.observe(&NetEvent::Error("remote reset".into()));
+        for _ in 0..2050 {t.observe(&NetEvent::Chat{sender:"LuaPeer".into(),chat_type:rz_proto::msg::chat_type::WHISPER,message:"probe".into()});}
+        assert_eq!(t.network_errors,["remote reset"]);assert_eq!(t.chats.len(),2047);
+        assert_eq!(t.errors,["combat trace capacity exceeded"]);
+    }
     #[test]
     fn transport_disconnects_are_recorded_and_share_the_trace_capacity() {
         let mut trace=PacketTrace::default();

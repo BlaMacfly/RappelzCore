@@ -14,6 +14,7 @@ mod combat;
 mod terrain;
 mod terrain_cancel;
 mod terrain_warp;
+mod terrain_network;
 pub use combat::PacketTrace;
 
 pub enum OnlineValidation {
@@ -29,6 +30,7 @@ pub enum OnlineValidation {
     Terrain(terrain::TerrainValidation),
     TerrainCancellation(terrain_cancel::TerrainCancellationValidation),
     TerrainWarp(terrain_warp::TerrainWarpValidation),
+    TerrainNetwork(terrain_network::TerrainNetworkValidation),
 }
 
 impl OnlineValidation {
@@ -36,6 +38,7 @@ impl OnlineValidation {
         if let Self::Terrain(validation) = self { validation.before_draw(app); }
         if let Self::TerrainCancellation(validation) = self { validation.before_draw(app); }
         if let Self::TerrainWarp(validation) = self { validation.before_draw(app); }
+        if let Self::TerrainNetwork(validation) = self { validation.before_draw(app); }
     }
     pub fn new(report: PathBuf, app: &App) -> Result<Self> {
         Ok(Self::Addons(AddonValidation::new(report, app)?))
@@ -59,6 +62,7 @@ impl OnlineValidation {
     pub fn terrain(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::Terrain(terrain::TerrainValidation::new(plan,app)?))}
     pub fn terrain_cancel(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::TerrainCancellation(terrain_cancel::TerrainCancellationValidation::new(plan,app)?))}
     pub fn terrain_warp(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::TerrainWarp(terrain_warp::TerrainWarpValidation::new(plan,app)?))}
+    pub fn terrain_network(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::TerrainNetwork(terrain_network::TerrainNetworkValidation::new(plan,app)?))}
     pub fn message(&mut self, message: &str) {
         match self {
             Self::Addons(v) => v.message(message),
@@ -73,6 +77,7 @@ impl OnlineValidation {
             Self::Terrain(v)=>v.message(message),
             Self::TerrainCancellation(v)=>v.message(message),
             Self::TerrainWarp(v)=>v.message(message),
+            Self::TerrainNetwork(v)=>v.message(message),
         }
     }
     pub fn tick(&mut self, app: &mut App) -> Result<bool> {
@@ -89,6 +94,7 @@ impl OnlineValidation {
             Self::Terrain(v)=>v.tick(app),
             Self::TerrainCancellation(v)=>v.tick(app),
             Self::TerrainWarp(v)=>v.tick(app),
+            Self::TerrainNetwork(v)=>v.tick(app),
         }
     }
     pub fn fail(&mut self, error: anyhow::Error) {
@@ -105,6 +111,7 @@ impl OnlineValidation {
             Self::Terrain(v)=>v.fail(error),
             Self::TerrainCancellation(v)=>v.fail(error),
             Self::TerrainWarp(v)=>v.fail(error),
+            Self::TerrainNetwork(v)=>v.fail(error),
         }
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
@@ -121,6 +128,7 @@ impl OnlineValidation {
             Self::Terrain(v)=>v.finish(app),
             Self::TerrainCancellation(v)=>v.finish(app),
             Self::TerrainWarp(v)=>v.finish(app),
+            Self::TerrainNetwork(v)=>v.finish(app),
         }
     }
 }

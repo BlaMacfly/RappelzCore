@@ -12,6 +12,8 @@ use rz_proto::secure::ClientKeyPair;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
+mod validation_proxy;
+
 pub enum NetCmd {
     Login { host: String, port: u16, account: String, password: String },
     SelectServer(u16),
@@ -146,7 +148,11 @@ async fn session(
 
     let server = servers.iter().find(|s| s.index == idx).context("royaume introuvable")?;
     status(&format!("Connexion à {}…", server.name));
-    let stream = TcpStream::connect((server.ip.as_str(), server.port as u16))
+    let proxy=crate::arg_value("-validate-world-proxy");
+    let character=crate::arg_value("-enter");
+    let (game_host,game_port)=validation_proxy::endpoint(host,(&server.ip,server.port as u16),account,
+        character.as_deref(),crate::arg_value("-validate-terrain-network").is_some(),proxy.as_deref())?;
+    let stream = TcpStream::connect((game_host.as_str(), game_port))
         .await
         .with_context(|| format!("connexion à {}:{}", server.ip, server.port))?;
     let (mut r, mut w) = conn::split(stream, rz_proto::cipher::DEFAULT_KEY);
