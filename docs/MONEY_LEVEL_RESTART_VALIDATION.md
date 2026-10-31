@@ -2,6 +2,8 @@
 
 Verified **2026-10-31** with two ordinary Windows x64 clients and **57/57 independent checks**, extending [commit-before-notification validation](REWARD_DURABILITY_VALIDATION.md). A real cooperative kill awards positive currency and crosses an EXP threshold. The same totals and level-derived vitals survive actual process death, restart and a third entry, without a post-combat manual save or a second kill.
 
+Subsequent coverage: [real database process crash/restart](DATABASE_RESTART_VALIDATION.md) retains an earlier positive-currency/level award, rolls back a second pending award, and verifies two-client recovery with the worldserver left running (51 checks).
+
 ## Data and preservation
 
 The NamedDbc reader finds **7,584** converted Monster rows with positive valid gold ranges. Existing monster **651** has level 1, HP **105**, MP **53**, attack **20**, defence **6**, EXP **5**, JP **3** and gold **8–14**. Its original converted row is unchanged. Server Monster.dbc SHA-256 remains `a35771111380ea25022e2d4cb784f9c71e7526f556cbf931e2fe82ffadab0aed`. This is evidence about the supplied converted data, not an assertion of official formula fidelity or natural spawn placement.

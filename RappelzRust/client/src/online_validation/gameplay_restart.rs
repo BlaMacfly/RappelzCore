@@ -40,6 +40,9 @@ pub struct GameplayRestartValidation {
     interrupt_save: bool,
     durable_rewards: bool,
     money_level: bool,
+    database_restart: bool,
+    second_fight: bool,
+    fight_boundary: u64,
     stage: Stage,
     started: Instant,
     since: Instant,
@@ -66,6 +69,7 @@ impl GameplayRestartValidation {
         let p: Value = serde_json::from_slice(&std::fs::read(plan)?)?;
         ensure!(!(p["interrupt_save"]==true && p["durable_rewards"]==true), "choose one save strategy");
         ensure!(p["money_level"]!=true || p["durable_rewards"]==true,"money/level requires durable reward mode");
+        ensure!(p["database_restart"]!=true || p["money_level"]==true,"database restart requires currency profile");
         let role = p["role"].as_str().context("role")?.to_owned();
         ensure!(role == "owner" || role == "witness", "role");
         let peer = p["peer"].as_str().context("peer")?.to_owned();
@@ -87,6 +91,9 @@ impl GameplayRestartValidation {
             interrupt_save: p["interrupt_save"].as_bool().unwrap_or(false),
             durable_rewards: p["durable_rewards"].as_bool().unwrap_or(false),
             money_level: p["money_level"].as_bool().unwrap_or(false),
+            database_restart: p["database_restart"].as_bool().unwrap_or(false),
+            second_fight:false,
+            fight_boundary:0,
             stage: Stage::Join,
             started: Instant::now(),
             since: Instant::now(),
@@ -129,11 +136,17 @@ impl GameplayRestartValidation {
     fn awarded_xp(&self)->(i64,i64) {if self.role=="owner" {if self.money_level {(4,10)} else {(5,3)}} else {(0,0)}}
     fn award_ready(&self,app:&App)->bool {
         let Some(w)=&app.world else {return false};
-        if w.experience()!=self.awarded_xp(){return false;}
+        if w.experience()!=self.fight_expected(){return false;}
         if self.money_level {
             let s=w.addon_state();let Some(p)=s.player else {return false};
             p.level==Some(if self.role=="owner" {3} else {1}) && s.money.is_some_and(|g|if self.role=="owner" {(1008..=1014).contains(&g)} else {g==2000})
         } else {true}
+    }
+    fn fight_expected(&self)->(i64,i64) {if self.second_fight {(9,13)} else {self.awarded_xp()}}
+    fn fight_hits(&self,app:&App)->Vec<Value> {
+        if !self.second_fight {return self.current_hits(app);}
+        let t=self.trace(app);
+        t["hits"].as_array().unwrap().iter().zip(t["hit_orders"].as_array().unwrap()).filter(|(_,o)|o.as_u64().unwrap_or(0)>self.fight_boundary).map(|(h,_)|h.clone()).collect()
     }
     fn ready(&self, name: &str) -> bool {
         self.directory.join(name).exists()
@@ -195,7 +208,7 @@ impl GameplayRestartValidation {
     fn record(&mut self, app: &App, label: &str) {
         let w = app.world.as_ref();
         let s = w.map(|w| w.addon_state()).unwrap_or_default();
-        self.steps.push(json!({"stage":label,"elapsed_ms":self.started.elapsed().as_millis(),"stage_ms":self.since.elapsed().as_millis(),"own":self.own,"peer_handle":self.peer_handle,"monster":self.monster,"boundary":self.boundary,
+        self.steps.push(json!({"stage":label,"elapsed_ms":self.started.elapsed().as_millis(),"stage_ms":self.since.elapsed().as_millis(),"own":self.own,"peer_handle":self.peer_handle,"monster":self.monster,"boundary":self.boundary,"fight_boundary":self.fight_boundary,
             "player":s.player.as_ref().map(|p|json!({"handle":p.handle,"name":p.name,"level":p.level,"hp":p.health,"mp":p.mana,"max_hp":p.max_health,"max_mp":p.max_mana})),"position":w.and_then(|w|w.unit_position(self.own)),
             "motion":w.and_then(|w|w.validation_motion(self.own)),"peer_motion":w.and_then(|w|w.validation_motion(self.peer_handle)),"peer_unit":w.and_then(|w|w.unit(self.peer_handle)).map(|p|json!({"level":p.level,"hp":p.health,"mp":p.mana,"max_hp":p.max_health,"max_mp":p.max_mana})),"target":s.target.map(|p|json!({"handle":p.handle,"hp":p.health})),
             "monster_hp":w.and_then(|w|w.unit(self.monster)).and_then(|p|p.health),"xp_jp":w.map(|w|w.experience()),"money":s.money,"layer":w.map(|w|w.layer()),
@@ -277,7 +290,7 @@ impl GameplayRestartValidation {
             app.addons.error.is_none() && app.addons.runtime.errors().is_empty(),
             "addon errors"
         );
-        if !matches!(self.stage, Stage::Active | Stage::PendingSave | Stage::Down) {
+        if !matches!(self.stage, Stage::Active | Stage::PendingSave | Stage::Down) && !(self.database_restart && self.second_fight) {
             ensure!(app.error.is_none(), "unexpected error {:?}", app.error);
         }
         ensure!(
@@ -481,13 +494,13 @@ impl GameplayRestartValidation {
                     );
                     self.record(app, "WorldDropped");
                     app.error = None;
-                    self.write(&format!("{}.dropped", self.role), json!({"joined":true}))?;
+                    self.write(&format!("{}.dropped", self.role), json!({"joined":true,"unix_ms":SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis()}))?;
                     self.advance(Stage::Reconnect);
                 }
             }
             Stage::Reconnect => {
                 ensure!(app.world.is_none(), "phantom world");
-                if self.ready("clients-reconnect") && self.ready("server-up-1.json") {
+                if self.ready("clients-reconnect") && self.ready(if self.database_restart {"database-up-1.json"} else {"server-up-1.json"}) {
                     self.record(app, "DowntimeHeld");
                     let (host, port) =
                         crate::config::realmlist(&app.root, &app.config.get("locale", "frFR"));
@@ -564,13 +577,19 @@ impl GameplayRestartValidation {
                 }
             }
             Stage::BeforeSave | Stage::PostFight => {
+                if self.database_restart && self.second_fight {
+                    if self.ready("database-killed.json") {
+                        self.record(app,"DatabaseKilled");self.second_fight=false;self.advance(Stage::Down);return Ok(false);
+                    }
+                    if app.world.is_none() {return Ok(false);}
+                }
                 let before = self.stage == Stage::BeforeSave;
-                if self.role=="witness" && !self.announced && self.current_hits(app).iter().filter(|h|h["attacker"]==self.own && h["target"]==self.monster).count()>=3 {
+                if self.role=="witness" && !self.announced && self.fight_hits(app).iter().filter(|h|h["attacker"]==self.own && h["target"]==self.monster).count()>=(if self.second_fight {2} else {3}) {
                     app.send(NetCmd::Raw(rz_proto::msg_game::CsCancelAction{0:self.own}.to_packet()));
-                    self.record(app,if before {"BeforeSaveAssistStopped"} else {"AssistStopped"});self.announced=true;
+                    self.record(app,if self.second_fight {"SecondAssistStopped"} else if before {"BeforeSaveAssistStopped"} else {"AssistStopped"});self.announced=true;
                 }
                 let w = app.world.as_ref().context("world")?;
-                let hits = self.current_hits(app);
+                let hits = self.fight_hits(app);
                 let owner = if self.role == "owner" {
                     self.own
                 } else {
@@ -581,14 +600,19 @@ impl GameplayRestartValidation {
                 }) {
                     return Ok(false);
                 }
+                if self.database_restart && self.second_fight && self.role=="witness" {
+                    self.record(app,"SecondKillObserved");self.write("witness.second-killed",json!({"ready":true}))?;
+                    self.advance(Stage::PendingSave);return Ok(false);
+                }
                 if self.role == "owner" {
                     if !self.award_ready(app) {
-                        if before && self.durable_rewards && w.experience()==self.baseline_xp() {
-                            if !self.announced {self.record(app,"RewardWithheld");self.announced=true;}
+                        if before && self.durable_rewards && w.experience()==(if self.second_fight {self.awarded_xp()} else {self.baseline_xp()}) {
+                            if !self.announced {self.record(app,if self.second_fight {"SecondRewardWithheld"} else {"RewardWithheld"});self.announced=true;}
                             self.write("owner.pending-reward.json",json!({"unix_ms":SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis(),"xp_jp":app.world.as_ref().unwrap().experience(),"level":app.world.as_ref().unwrap().addon_state().player.unwrap().level,"money":app.world.as_ref().unwrap().addon_state().money,"order":self.trace(app)["order"],"monster":self.monster}))?;
                         }
                         return Ok(false);
                     }
+                    ensure!(!self.second_fight,"interrupted reward was unexpectedly announced");
                     self.write(if before {"owner.before-save-rewarded"} else {"owner.rewarded"}, json!({"xp_jp":self.awarded_xp()}))?;
                 } else {
                     ensure!(w.experience() == (0, 0), "private reward leaked");
@@ -622,6 +646,20 @@ impl GameplayRestartValidation {
                 }
             }
             Stage::PendingSave => {
+                if self.database_restart {
+                    if self.ready("database-killed.json") {
+                        self.record(app,"DatabaseKilled");
+                        if self.role=="witness" {
+                            self.record(app,"SaveDuringDatabaseOutage");app.send(NetCmd::ReturnLobby);
+                        }
+                        self.second_fight=false;self.advance(Stage::Down);return Ok(false);
+                    }
+                    if !self.second_fight && self.ready("second-actions-release") && app.world.as_ref().is_some_and(|w|w.living_monster().is_some()) {
+                        self.second_fight=true;self.fight_boundary=self.trace(app)["order"].as_u64().unwrap();
+                        self.record(app,"SecondActionsStarted");self.begin_attack(app)?;self.advance(Stage::BeforeSave);
+                    }
+                    return Ok(false);
+                }
                 if self.ready("server-killed.json") {
                     self.record(app,"ServerKilled");
                     self.advance(Stage::Down);
@@ -719,7 +757,7 @@ impl GameplayRestartValidation {
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
         let success = self.stage == Stage::Done && self.failure.is_none();
-        self.write(&format!("{}.json",self.role),json!({"scenario":if self.durable_rewards {"reward-durable"} else if self.interrupt_save {"save-rollback"} else {"gameplay-restart"},"money_level":self.money_level,"success":success,"failure":self.failure,"role":self.role,"character":self.character,"steps":self.steps,"samples":self.samples,"events":self.events,"audits":self.audits.iter().map(|a|a.snapshot()).collect::<Vec<_>>(),"trace":self.trace(app)}))?;
+        self.write(&format!("{}.json",self.role),json!({"scenario":if self.durable_rewards {"reward-durable"} else if self.interrupt_save {"save-rollback"} else {"gameplay-restart"},"money_level":self.money_level,"database_restart":self.database_restart,"success":success,"failure":self.failure,"role":self.role,"character":self.character,"steps":self.steps,"samples":self.samples,"events":self.events,"audits":self.audits.iter().map(|a|a.snapshot()).collect::<Vec<_>>(),"trace":self.trace(app)}))?;
         Ok(success)
     }
 }

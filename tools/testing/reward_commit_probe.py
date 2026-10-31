@@ -80,6 +80,9 @@ def run(plan,probe):
         marker=dict(pid=server['pid'],unix_ms=time.time_ns()//1_000_000,committed=True,profiles=profiles)
         result.update(committed=profiles,window=marker)
         write(root/'reward-durable-verified',marker)
+        if plan.get('database_restart') is True:
+            from database_reward_probe import finish
+            return finish(db,plan,result)
         wait_until(lambda:(root/'server-killed.json').exists(),5,'real crash after acknowledged reward missing')
         after=db.profiles()
         if after!=profiles:raise RuntimeError('committed reward changed during process crash')
