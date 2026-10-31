@@ -25,9 +25,12 @@ def damage_chain(hits,monster):
 def compare(reports,server,database,pictures,memory):
     checks=[];facts={}
     def check(name,value):checks.append(dict(name=name,passed=bool(value)))
+    rollback=server.get('scenario')=='save-rollback'
     boots=server.get('boots',[]);kill=server.get('kill',{});active=kill.get('activity',{})
+    if rollback:
+        active={r:dict(own=step(reports[r],'BeforeInterruptedSave').get('own'),peer=step(reports[r],'BeforeInterruptedSave').get('peer_handle'),monster=step(reports[r],'BeforeInterruptedSave').get('monster')) for r in ROLES}
     cp=database.get('checkpoint',{});saved=database.get('saved',{});request=database.get('request',{})
-    check('real owned gameplay server kill and restart',server.get('scenario')=='gameplay' and server.get('success') is True and not server.get('cleanup_kill')
+    check('real owned gameplay server kill and restart',server.get('scenario') in ('gameplay','save-rollback') and server.get('success') is True and not server.get('cleanup_kill')
         and len(boots)==2 and boots[0].get('pid')!=boots[1].get('pid') and kill.get('pid')==boots[0].get('pid') and kill.get('graceful') is False
         and kill.get('exit_code') not in (0,None) and kill.get('method')=='owned Popen.kill' and server.get('final_exit_code')==0)
     check('server outage lasts at least five seconds',len(boots)==2 and boots[1].get('unix_ms',0)-kill.get('unix_ms',0)>=5000)
@@ -38,14 +41,35 @@ def compare(reports,server,database,pictures,memory):
     check('unsaved live movement and damage do not overwrite the durable checkpoint',database.get('down')==cp)
     restarted=database.get('restarted',{})
     check('startup online recovery remains scoped',all(restarted.get(r)==dict(account=0,character=0) for r in ROLES) and restarted.get('same_realm')==0 and restarted.get('other_realm')==2)
-    check('both moving combatants are contemporaneous at the kill',set(active)==set(ROLES) and all(
-        a.get('role')==r and a.get('moving') is True and a.get('peer_moving') is True and a.get('distance_from_checkpoint',0)>3
-        and a.get('checkpoint')==checkpoint(r) and 0<=kill.get('unix_ms',0)-a.get('unix_ms',0)<=45
-        and a.get('route_acks',0)>=2 and min(a.get('own_hits',0),a.get('peer_hits',0),a.get('retaliations',0))>=1
-        and 0<a.get('monster_hp',0)<a.get('monster_max_hp',0)==105 and 0<a.get('own_hp',0)<=100 for r,a in active.items()))
-    check('cross-client active identities and real retaliation agree',set(active)==set(ROLES) and active['owner'].get('own')==active['witness'].get('peer')
-        and active['witness'].get('own')==active['owner'].get('peer') and active['owner'].get('monster')==active['witness'].get('monster')
-        and any(a.get('own_hp',100)<100 for a in active.values()))
+    if rollback:
+        probe=database.get('rollback',{});window=probe.get('window',{});waits=probe.get('waits',[]);dirty=probe.get('dirty',{})
+        check('real save requests have two row-modified transactions waiting at settings REPLACE',probe.get('success') is True
+            and probe.get('method')=='owned InnoDB settings row locks' and len(waits)==2 and len({w.get('transaction') for w in waits})==2
+            and all(w.get('modified',0)>0 and 'replace into character_settings' in w.get('query','').lower() for w in waits)
+            and window==kill.get('pending_save') and window.get('locks_held') is True and window.get('pid')==kill.get('pid')
+            and sorted(window.get('waiting_transactions',[]))==sorted(w.get('transaction','') for w in waits)
+            and 0<=kill.get('unix_ms',0)-window.get('unix_ms',0)<=1500
+            and request.get('unix_ms',0)<probe.get('request',{}).get('unix_ms',0)<=window.get('unix_ms',0)
+            and probe.get('request',{}).get('pid')==kill.get('pid') and probe.get('request',{}).get('method')=='console saveall')
+        check('partial uncommitted characters never leak to committed readers',probe.get('before')==probe.get('committed')==cp
+            and set(dirty)==set(ROLES) and all(dirty[r].get('position')==final_position(r) and dirty[r].get('xp')==(5 if r=='owner' else 0)
+                and dirty[r].get('jp')==0 and dirty[r].get('mp')==50 and 0<dirty[r].get('health',0)<=100
+                and dirty[r]==dict(cp.get(r,{}),position=final_position(r),xp=5 if r=='owner' else 0,health=dirty[r].get('health')) for r in ROLES)
+            and any(v.get('health',100)<100 for v in dirty.values()))
+        check('killed transactions disappear and both complete checkpoints survive',probe.get('transactions_gone') is True and probe.get('after')==cp
+            and probe.get('released_unix_ms',0)>=kill.get('unix_ms',0))
+        check('both observers agree on pre-save identities',active['owner'].get('own')==active['witness'].get('peer')
+            and active['witness'].get('own')==active['owner'].get('peer') and active['owner'].get('monster')==active['witness'].get('monster')
+            and active['owner'].get('monster',0)>0)
+    else:
+        check('both moving combatants are contemporaneous at the kill',set(active)==set(ROLES) and all(
+            a.get('role')==r and a.get('moving') is True and a.get('peer_moving') is True and a.get('distance_from_checkpoint',0)>3
+            and a.get('checkpoint')==checkpoint(r) and 0<=kill.get('unix_ms',0)-a.get('unix_ms',0)<=45
+            and a.get('route_acks',0)>=2 and min(a.get('own_hits',0),a.get('peer_hits',0),a.get('retaliations',0))>=1
+            and 0<a.get('monster_hp',0)<a.get('monster_max_hp',0)==105 and 0<a.get('own_hp',0)<=100 for r,a in active.items()))
+        check('cross-client active identities and real retaliation agree',set(active)==set(ROLES) and active['owner'].get('own')==active['witness'].get('peer')
+            and active['witness'].get('own')==active['owner'].get('peer') and active['owner'].get('monster')==active['witness'].get('monster')
+            and any(a.get('own_hp',100)<100 for a in active.values()))
     check('saved post-restart progress is private and singular',set(saved)==set(ROLES) and all(saved[r].get('position')==final_position(r)
         and [saved[r].get(k) for k in ('level','xp','jp','money','mp','online')]==[1,5 if r=='owner' else 0,3 if r=='owner' else 0,0,50,0]
         and 0<saved[r].get('health',0)<=100 for r in ROLES) and any(p.get('health',100)<100 for p in saved.values()))
@@ -53,7 +77,7 @@ def compare(reports,server,database,pictures,memory):
     for i,r in enumerate(ROLES):
         report=reports[r];other=ROLES[1-i];t=report.get('trace',{});logins=t.get('logins',[]);audits=report.get('audits',[])
         fs=[audit_facts(a) for a in audits];facts[r]=fs;hits=epochs(t,'hits','hit_orders');xp=epochs(t,'experience','experience_orders');hit_sets[r]=hits
-        check(r+': native scenario completed',report.get('success') is True and not report.get('failure') and report.get('scenario')=='gameplay-restart' and report.get('role')==r)
+        check(r+': native scenario completed',report.get('success') is True and not report.get('failure') and report.get('scenario')==('save-rollback' if rollback else 'gameplay-restart') and report.get('role')==r)
         check(r+': three bounded distinct world workers all joined',len(fs)==3 and len({f['instance'] for f in fs})==3 and all(not f['failures'] for f in fs))
         check(r+': ordered traces align to three login epochs',len(logins)==3 and [l.get('order',0) for l in logins]==sorted({l.get('order',0) for l in logins})
             and all(l.get('name')==report.get('character') and l.get('layer')==0 for l in logins)
@@ -61,11 +85,17 @@ def compare(reports,server,database,pictures,memory):
         arrived=step(report,'CheckpointArrived');stored=step(report,'CheckpointSaved');joined=step(report,'Joined')
         check(r+': real movement precedes checkpoint save',joined.get('position')!=checkpoint(r) and arrived.get('position')==stored.get('position')==checkpoint(r)
             and stored.get('elapsed_ms',0)>=arrived.get('elapsed_ms',0) and any(m.get('handle')==logins[0].get('handle') and m.get('points')==[checkpoint(r)] for m in t.get('moves',[])) if len(logins)==3 else False)
-        check(r+': active circuit is acknowledged in the original world',len(logins)==3 and any(m.get('handle')==logins[0].get('handle') and len(m.get('points',[]))==16
-            and m['points'][-1]==checkpoint(r) and step(report,'ActionsStarted').get('order',0)<m.get('order',0)<logins[1].get('order',0) for m in t.get('moves',[])))
+        if rollback:
+            before=step(report,'BeforeInterruptedSave')
+            check(r+': live position and advertised reward precede interrupted save',before.get('position')==final_position(r)
+                and before.get('xp_jp')==([5,3] if r=='owner' else [0,0]) and before.get('target',{}).get('hp')==0
+                and before.get('motion',{}).get('moving') is False)
+        else:
+            check(r+': active circuit is acknowledged in the original world',len(logins)==3 and any(m.get('handle')==logins[0].get('handle') and len(m.get('points',[]))==16
+                and m['points'][-1]==checkpoint(r) and step(report,'ActionsStarted').get('order',0)<m.get('order',0)<logins[1].get('order',0) for m in t.get('moves',[])))
         monster=active.get(r,{}).get('monster');own=logins[0].get('handle') if logins else None;peer=active.get(r,{}).get('peer')
         check(r+': both players dealt damage and received retaliation before crash',len(hits)==3 and all(any(h.get('attacker')==p and h.get('target')==monster and h.get('target_hp',0)>0 for h in hits[0]) for p in (own,peer))
-            and any(h.get('attacker')==monster and h.get('damage',0)>0 for h in hits[0]) and damage_chain(hits[0],monster)>0)
+            and any(h.get('attacker')==monster and h.get('damage',0)>0 for h in hits[0]) and (damage_chain(hits[0],monster)==0 if rollback else damage_chain(hits[0],monster)>0))
         dropped=step(report,'WorldDropped');held=step(report,'DowntimeHeld');restored=step(report,'CheckpointRestored');quiet=step(report,'NoReplay')
         check(r+': world dropped and stayed absent through downtime',dropped.get('player') is None and held.get('player') is None and held.get('stage_ms',0)>=4500
             and dropped.get('audit_instance')!=restored.get('audit_instance') and len(t.get('network_errors',[]))+len(t.get('disconnects',[]))==1)
@@ -81,7 +111,7 @@ def compare(reports,server,database,pictures,memory):
         witness_logins=reports['witness'].get('trace',{}).get('logins',[]);witness_handle=witness_logins[1].get('handle') if len(witness_logins)==3 else None
         check(r+': new witness movement is authoritative and observed',any(m.get('handle')==witness_handle and m.get('points')==[final_position('witness')]
             and post.get('boundary',999999)<m.get('order',0)<(logins[2].get('order',0) if len(logins)==3 else 0) for m in t.get('moves',[])))
-        check(r+': exactly one private reward and no pre-crash XP',len(xp)==3 and all(v.get('xp')==v.get('jp')==0 for v in xp[0])
+        check(r+(': uncommitted reward rolled back and fresh reward stays private' if rollback else ': exactly one private reward and no pre-crash XP'),len(xp)==3 and (sum([v.get('xp'),v.get('jp')]==[5,3] for v in xp[0])==(1 if r=='owner' else 0) and all(v.get('handle')==logins[0].get('handle') and [v.get('xp'),v.get('jp')] in ([[0,0],[5,3]] if r=='owner' else [[0,0]]) for v in xp[0]) if rollback else all(v.get('xp')==v.get('jp')==0 for v in xp[0]))
             and sum(v.get('xp')==5 and v.get('jp')==3 for v in xp[1])==(1 if r=='owner' else 0)
             and all(v.get('handle')==logins[1].get('handle') for v in xp[1]) and all([v.get('xp'),v.get('jp')]==([5,3] if r=='owner' else [0,0]) for v in xp[2]))
         durable=step(report,'DurableReentry')
@@ -102,6 +132,10 @@ def compare(reports,server,database,pictures,memory):
     check('both observers saw identical damage sequences in both server lifetimes',all(len(v)==3 for v in hit_sets.values()) and hit_sets['owner'][:2]==hit_sets['witness'][:2])
     assist=step(reports['witness'],'AssistStopped')
     check('witness stops after three assisting hits while monster is alive',assist.get('monster_hp',0)>0 and sum(h.get('attacker')==assist.get('own') and h.get('target')==assist.get('monster') for h in assist.get('hits',[]))==3)
+    if rollback:
+        assist=step(reports['witness'],'BeforeSaveAssistStopped')
+        check('pre-save witness stops assisting before owner receives uncommitted reward',assist.get('monster_hp',0)>0
+            and sum(h.get('attacker')==assist.get('own') and h.get('target')==assist.get('monster') for h in assist.get('hits',[]))==3)
     return dict(success=all(c['passed'] for c in checks),checks=checks,workers=facts,pictures=pictures)
 
 def load_and_compare(root):
@@ -110,6 +144,7 @@ def load_and_compare(root):
         data={p:(root/f'{r}-{p}.ground.png').read_bytes() for p in ('initial','recovered')};sizes=[list(struct.unpack('>II',v[16:24])) if v[:8]==b'\x89PNG\r\n\x1a\n' else [] for v in data.values()]
         pictures[r]=dict(size=sizes[0] if sizes[0]==sizes[1] else [],**{p+'_sha256':hashlib.sha256(v).hexdigest() for p,v in data.items()})
     db={k:read(n) for k,n in [('checkpoint','checkpoint-database.json'),('down','down-profiles.json'),('saved','saved-database.json'),('restarted','restarted-database.json'),('request','checkpoint-requested.json')]}
+    if (root/'save-rollback.json').exists():db['rollback']=read('save-rollback.json')
     return compare({r:read(r+'.json') for r in ROLES},read('server-process.json'),db,pictures,read('memory.json'))
 
 if __name__=='__main__':

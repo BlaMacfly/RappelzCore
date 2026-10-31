@@ -2,6 +2,8 @@
 
 Verified **2026-10-31** with two real Windows x64 clients, a forced worldserver process kill and a restart against the same isolated persistent databases. This extends [terrain-only restart validation](TERRAIN_RESTART_VALIDATION.md). The original database/auth/world services and records remain unchanged; all gameplay below uses clone-only characters **34/35**.
 
+Subsequent coverage: [interrupted character-save transactions](SAVE_ROLLBACK_VALIDATION.md) observes two real partial writes at settings REPLACE, kills the server while they wait and verifies full rollback with two clients (48 checks). The movement-active results below remain historical.
+
 ## Behavior covered and movement fix
 
 The driver deliberately distinguishes a durable checkpoint from unsaved actions. Both players first move to new coordinates and wait for the existing server console `saveall` path to write them. An independent database reader confirms the changed positions, healthy vitals and zero XP/JP before combat is released. Movement and damage after that checkpoint are intentionally not saved before the process kill. Recovery must restore the checkpoint and discard the old route/target/combat context; this is not a promise that unsaved changes survive a crash.

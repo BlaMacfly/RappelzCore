@@ -16,6 +16,8 @@ enum Stage {
     CheckpointWait,
     Initial,
     Active,
+    BeforeSave,
+    PendingSave,
     Down,
     Reconnect,
     Rejoin,
@@ -34,6 +36,7 @@ pub struct GameplayRestartValidation {
     peer: String,
     character: String,
     password: String,
+    interrupt_save: bool,
     stage: Stage,
     started: Instant,
     since: Instant,
@@ -76,6 +79,7 @@ impl GameplayRestartValidation {
             peer,
             character: app.auto_enter.clone().context("character")?,
             password: password.to_owned(),
+            interrupt_save: p["interrupt_save"].as_bool().unwrap_or(false),
             stage: Stage::Join,
             started: Instant::now(),
             since: Instant::now(),
@@ -256,7 +260,7 @@ impl GameplayRestartValidation {
             app.addons.error.is_none() && app.addons.runtime.errors().is_empty(),
             "addon errors"
         );
-        if !matches!(self.stage, Stage::Active | Stage::Down) {
+        if !matches!(self.stage, Stage::Active | Stage::PendingSave | Stage::Down) {
             ensure!(app.error.is_none(), "unexpected error {:?}", app.error);
         }
         ensure!(
@@ -353,6 +357,15 @@ impl GameplayRestartValidation {
                     && self.ready(&format!("release-{label}"))
                 {
                     if self.stage == Stage::Initial && self.ready("actions-release") {
+                        if self.interrupt_save {
+                            self.record(app, "BeforeSaveActionsStarted");
+                            if self.role == "witness" {
+                                self.move_to(app, Self::final_position(&self.role))?;
+                            }
+                            self.begin_attack(app)?;
+                            self.advance(Stage::BeforeSave);
+                            return Ok(false);
+                        }
                         let [x, y] = Self::checkpoint(&self.role);
                         let circuit = vec![
                             MovePoint { x: x + 24., y },
@@ -514,10 +527,11 @@ impl GameplayRestartValidation {
                     self.advance(Stage::Recovered);
                 }
             }
-            Stage::PostFight => {
+            Stage::BeforeSave | Stage::PostFight => {
+                let before = self.stage == Stage::BeforeSave;
                 if self.role=="witness" && !self.announced && self.current_hits(app).iter().filter(|h|h["attacker"]==self.own && h["target"]==self.monster).count()>=3 {
                     app.send(NetCmd::Raw(rz_proto::msg_game::CsCancelAction{0:self.own}.to_packet()));
-                    self.record(app,"AssistStopped");self.announced=true;
+                    self.record(app,if before {"BeforeSaveAssistStopped"} else {"AssistStopped"});self.announced=true;
                 }
                 let w = app.world.as_ref().context("world")?;
                 let hits = self.current_hits(app);
@@ -535,14 +549,21 @@ impl GameplayRestartValidation {
                     if w.experience() != (5, 3) {
                         return Ok(false);
                     }
-                    self.write("owner.rewarded", json!({"xp":5,"jp":3}))?;
+                    self.write(if before {"owner.before-save-rewarded"} else {"owner.rewarded"}, json!({"xp":5,"jp":3}))?;
                 } else {
                     ensure!(w.experience() == (0, 0), "private reward leaked");
                 }
                 if !self.at(app, &self.role, Self::final_position(&self.role))
                     || !self.at(app, self.other(), Self::final_position(self.other()))
-                    || !self.ready("owner.rewarded")
+                    || !self.ready(if before {"owner.before-save-rewarded"} else {"owner.rewarded"})
                 {
+                    return Ok(false);
+                }
+                if before {
+                    let xp_jp = w.experience();
+                    self.record(app, "BeforeInterruptedSave");
+                    self.write(&format!("{}.save-ready",self.role),json!({"role":self.role,"own":self.own,"peer":self.peer_handle,"monster":self.monster,"xp_jp":xp_jp,"position":Self::final_position(&self.role)}))?;
+                    self.advance(Stage::PendingSave);
                     return Ok(false);
                 }
                 self.record(app, "CombatRecovered");
@@ -551,6 +572,12 @@ impl GameplayRestartValidation {
                     json!({"ready":true}),
                 )?;
                 self.advance(Stage::SaveLobby);
+            }
+            Stage::PendingSave => {
+                if self.ready("server-killed.json") {
+                    self.record(app,"ServerKilled");
+                    self.advance(Stage::Down);
+                }
             }
             Stage::SaveLobby => {
                 if self.ready(&format!("{}.finish-ready", self.other())) {
@@ -644,7 +671,7 @@ impl GameplayRestartValidation {
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
         let success = self.stage == Stage::Done && self.failure.is_none();
-        self.write(&format!("{}.json",self.role),json!({"scenario":"gameplay-restart","success":success,"failure":self.failure,"role":self.role,"character":self.character,"steps":self.steps,"samples":self.samples,"events":self.events,"audits":self.audits.iter().map(|a|a.snapshot()).collect::<Vec<_>>(),"trace":self.trace(app)}))?;
+        self.write(&format!("{}.json",self.role),json!({"scenario":if self.interrupt_save {"save-rollback"} else {"gameplay-restart"},"success":success,"failure":self.failure,"role":self.role,"character":self.character,"steps":self.steps,"samples":self.samples,"events":self.events,"audits":self.audits.iter().map(|a|a.snapshot()).collect::<Vec<_>>(),"trace":self.trace(app)}))?;
         Ok(success)
     }
 }

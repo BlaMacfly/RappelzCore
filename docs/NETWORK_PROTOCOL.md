@@ -108,3 +108,7 @@ The [forced-restart regression](TERRAIN_RESTART_VALIDATION.md) connects directly
 ## Movement/combat restart epochs, 2026-10-31
 
 The [gameplay restart regression](GAMEPLAY_RESTART_VALIDATION.md) uses ordinary SC_MOVE, targeting/attack/cancel, console saveall and lobby/login paths against isolated persistent data. Parallel bounded trace-order arrays bind hits, vitals and private XP to three real login epochs without altering existing hit records or wire packets. Raw login vitals distinguish persisted damage from later regeneration. Both clients acknowledge active routes, deal damage and observe retaliation before actual server process death; new-world observation rejects stale actions, and new combat/reward/save/re-entry is independently checked. The client now detects loop movement from unconsumed route distance, including crossings of the final coordinate.
+
+## Interrupted save and advertised progress, 2026-10-31
+
+[Interrupted-save validation](SAVE_ROLLBACK_VALIDATION.md) uses the same real combat/XP, cancel, lobby and login packets with an optional local driver mode. It verifies an owner notification of 5 EXP/3 JP before a save transaction is killed at settings REPLACE; restart correctly returns the uncommitted reward to the 0/0 durable checkpoint. A fresh fight then saves 5/3 through third entry. Trace epochs distinguish these two legitimate rewards from duplicate delivery within one session. No durable-save ACK, reward journal, packet format or automatic reconnection is introduced.
