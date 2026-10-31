@@ -92,3 +92,7 @@ Historical `client-data/bot1.log` and `bot2.log` show simultaneous local login, 
 ## Local transport cancellation regression, 2026-10-31
 
 The internal client `NetCmd::Disconnect` closes the existing TCP session and lets the network loop accept a fresh Login. It reuses normal server EOF persistence/LEAVE cleanup, auth/key negotiation and world login. The [terrain cancellation regression](TERRAIN_CANCELLATION_VALIDATION.md) verifies actual disconnected events, peer old/new handles and three world sessions per client while worker cancellation/join completes. Return-to-lobby remains the existing request path. Wire IDs/structures and Lua action APIs are unchanged.
+
+## Terrain invalidation on WARP, 2026-10-31
+
+The existing server WARP packet keeps its x/y/z/layer structure. The client now invalidates the pending terrain job at the start of production `WorldState::apply_warp`, before destination-map discovery and the next draw. A short jump cancels the pending pre-WARP result even if its global chunk remains wanted; completed cache entries retain their valid coordinate keys. The [native WARP regression](TERRAIN_WARP_VALIDATION.md) uses the existing GM-1 `.go` chat command from two dedicated temporary operators, checks five actual WARP packets each, near-viewer ENTER refresh, distant LEAVE/reappearance, unchanged player handles and a single world login/logout each. It introduces no wire or server change.

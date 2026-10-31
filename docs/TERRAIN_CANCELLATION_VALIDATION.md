@@ -1,5 +1,7 @@
 # Native terrain cancellation: rapid turns, lobby and TCP reconnect
 
+Historical rapid-turn/lobby/TCP cycle. The later [WARP/map-change validation](TERRAIN_WARP_VALIDATION.md) adds immediate invalidation before destination loading, ten native partial interruptions and exact images across three maps. Counts, hashes and untested limits below describe this earlier cycle.
+
 Verified **2026-10-31** with two real Windows x64 clients and the existing loopback database/auth/world services. The previous [cold-terrain cycle](TERRAIN_COLD_VALIDATION.md) validated background blending but did not trigger native cancellation. This cycle exercises cancellation while actual image rows are being calculated and after a completed result is waiting for rendering.
 
 ## Implementation and observability

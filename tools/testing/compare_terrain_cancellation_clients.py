@@ -18,7 +18,7 @@ def audit_facts(a):
     for e in events:
         if e.get("id",0)>0:by_id.setdefault(e["id"],[]).append(e)
     submitted=[e for e in events if e.get("event")=="submitted"]
-    cancelled={e["id"] for e in events if e.get("event") in ("cancel_view","cancel_shutdown")}
+    cancelled={e["id"] for e in events if e.get("event") in ("cancel_view","cancel_shutdown","cancel_warp")}
     failures=[]
     if a.get("limit")!=1024 or a.get("overflow")!=0 or not events:failures.append("audit capacity/overflow")
     if [e.get("order") for e in events]!=list(range(len(events))):failures.append("event order")
@@ -47,7 +47,7 @@ def audit_facts(a):
                 failures.append("unproven upload")
             elif not finished[0]["order"]<polled[0]["order"]<accepted[0]["order"]<e["order"]:
                 failures.append("upload before accepted result")
-    partial_view=[];partial_shutdown=[];ready_view=[]
+    partial_view=[];partial_shutdown=[];partial_warp=[];ready_view=[]
     for id,job in by_id.items():
         partial=any(e["event"]=="finished" and e.get("cancelled") is True and e.get("produced") is False
                     and 0<e.get("rows",0)<1024 for e in job)
@@ -56,13 +56,15 @@ def audit_facts(a):
             and any(e["event"]=="polled_cancelled" for e in job)):partial_view.append(id)
         if (partial and started and any(e["event"]=="shutdown_begin" and e.get("running") is True and 0<e["rows"]<1024 for e in job)
             and any(e["event"]=="cancel_shutdown" for e in job)):partial_shutdown.append(id)
+        if (partial and started and any(e["event"]=="cancel_warp" and e.get("running") is True and 0<e["rows"]<1024 for e in job)
+            and any(e["event"]=="polled_cancelled" for e in job)):partial_warp.append(id)
         if (any(e["event"]=="finished" and e.get("produced") is True for e in job)
             and any(e["event"]=="cancel_view" and e.get("running") is False for e in job)
             and any(e["event"]=="polled_cancelled" for e in job)):ready_view.append(id)
     shutdown=next((e for e in events if e.get("event")=="shutdown_begin"),None)
     duration=events[-1]["us"]-shutdown["us"] if shutdown and events else None
     return {"instance":a.get("instance"),"failures":failures,"partial_view_ids":partial_view,
-        "partial_shutdown_ids":partial_shutdown,"ready_view_ids":ready_view,"cancelled_ids":sorted(cancelled),"jobs":len(submitted),
+        "partial_shutdown_ids":partial_shutdown,"partial_warp_ids":partial_warp,"ready_view_ids":ready_view,"cancelled_ids":sorted(cancelled),"jobs":len(submitted),
         "events":len(events),"join_us":duration}
 
 
