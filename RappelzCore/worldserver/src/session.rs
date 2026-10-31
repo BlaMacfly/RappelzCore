@@ -433,6 +433,8 @@ impl Session {
                 let (x, y) = p.motion.position(w.now());
                 g.character.position_x = x;
                 g.character.position_y = y;
+                g.character.position_z = p.z;
+                g.character.set_extra("layer",p.layer);
                 g.character.health = p.hp.max(1) as u32;
                 g.character.power1 = p.mp.max(0) as u32;
             }

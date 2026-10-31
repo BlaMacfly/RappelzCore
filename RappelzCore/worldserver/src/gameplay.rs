@@ -212,7 +212,11 @@ impl Session {
             gid::TS_CS_CANCEL_ACTION => self.ctx.world.lock().unwrap().stop_attack(handle),
             gid::TS_CS_TARGETING => {
                 let target = game::CsTargeting::from_packet(&p)?.0;
-                self.send(&game::Handle::<{ gid::TS_SC_TARGET }>(target));
+                let accepted = {
+                    let world=self.ctx.world.lock().unwrap();
+                    world.can_see(handle,target,world.now())
+                };
+                self.send(&game::Handle::<{ gid::TS_SC_TARGET }>(if accepted {target} else {0}));
             }
             gid::TS_CS_QUERY => {
                 let target = game::CsQuery::from_packet(&p)?.0;
@@ -269,8 +273,9 @@ impl Session {
     }
 
     fn npc_at(&self, npc_handle: u32) -> Option<(u32, String)> {
+        let viewer=self.in_game.as_ref()?.handle;
         let w = self.ctx.world.lock().unwrap();
-        w.npcs.get(&npc_handle).map(|n| (n.npc_id, n.name.clone()))
+        w.visible_npc(viewer,npc_handle)
     }
 
     /// TS_CS_CONTACT → TS_SC_DIALOG : salutation et menu (boutique si `npc_vendor`).
@@ -297,7 +302,7 @@ impl Session {
             self.dialog_npc = None;
             return;
         }
-        let Some((npc_id, _)) = self.npc_at(npc_handle) else { return };
+        let Some((npc_id, _)) = self.npc_at(npc_handle) else { self.dialog_npc=None; return };
         let items = self.ctx.data.vendors.read().unwrap().get(&(NPC_ENTRY_OFFSET + npc_id)).cloned().unwrap_or_default();
         let items = items
             .into_iter()
@@ -312,7 +317,7 @@ impl Session {
 
     async fn buy(&mut self, code: u32, count: u32) -> Result<()> {
         let Some(npc_handle) = self.dialog_npc else { return Ok(()) };
-        let Some((npc_id, _)) = self.npc_at(npc_handle) else { return Ok(()) };
+        let Some((npc_id, _)) = self.npc_at(npc_handle) else { self.dialog_npc=None; return Ok(()) };
         let sold = self.ctx.data.vendors.read().unwrap().get(&(NPC_ENTRY_OFFSET + npc_id)).is_some_and(|v| v.contains(&code));
         let Some(item) = self.ctx.data.items.get(&code).cloned().filter(|_| sold) else { return Ok(()) };
         let count = count.clamp(1, 999);
@@ -333,7 +338,8 @@ impl Session {
     }
 
     async fn sell(&mut self, item_handle: u32, _count: i64) -> Result<()> {
-        if self.dialog_npc.is_none() {
+        if self.dialog_npc.and_then(|npc|self.npc_at(npc)).is_none() {
+            self.dialog_npc=None;
             return Ok(());
         }
         let worn = self.in_game.as_ref().is_some_and(|g| g.items.iter().any(|i| i.handle() == item_handle && i.worn()));

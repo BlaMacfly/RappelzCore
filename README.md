@@ -23,8 +23,9 @@ The [native local-server regression](docs/LIVE_SERVER_VALIDATION.md) and
 XP-driven level-up and original-data preservation. The [respawn follow-up](docs/RESPAWN_VALIDATION.md)
 adds repeated kills and hidden-query checks. [Player death/revival](docs/REVIVAL_VALIDATION.md) now
 verifies observer rendering/position and Lua transitions. [Movement/visibility](docs/VISIBILITY_VALIDATION.md)
-now resumes late-visible players' routes and validates range removal. The combined development workspace passes
-94 Rust and 14 Python tests; each branch keeps its own buildable server/client scope.
+now resumes late-visible players' routes and validates range removal. [Layer transitions](docs/LAYER_VALIDATION.md)
+verify separation, hidden-interaction denial and saved character re-entry with two clients.
+The combined development workspace passes 100 Rust and 18 Python tests; each branch keeps its own buildable server/client scope.
 
 - **RappelzCore** uses **exactly the AzerothCore SQL schema** (`acore_auth`, `acore_characters`,
   `acore_world`, imported from the official repository, commit `3179ea3` of 2026-10-25). It also
@@ -235,7 +236,7 @@ Constraints inherited from the schema:
 ## Earlier development verification
 
 The following includes retained results from earlier work. Current combined-workspace checks, including
-94 passing Rust tests, the optimized build and 125,212 identical converted assets, are separated from
+100 passing Rust tests, 18 Python tests, the optimized build and 125,212 identical converted assets, are separated from
 historical online/database claims in [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md).
 
 - **Unit tests**: RC4 and checksum vectors taken from the binary, sizes of the 20 observed packets,

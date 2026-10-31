@@ -49,6 +49,8 @@ The Rappelz client does **not** perform a WoW SRP challenge/proof exchange. `rz-
 | NPC shops | `npc_vendor`, using the offset NPC entry. |
 | Quests and teleport locations | `quest_template` and `game_tele` generated from selected DBC fields. |
 
+The [layer validation](LAYER_VALIDATION.md) exposed that saving a character omitted its live layer. `Session::save` now copies it into the existing Rappelz settings `layer` key and also retains live z in `position_z`. Actual logout to the lobby and character re-entry confirmed layer 1 persisted. This required no schema migration or content import; all pre-cycle character/settings records and world data compare unchanged.
+
 `rz-dbimport` reads `DataDir/dbc` and writes SQL for item templates, monster templates, NPC templates/placements, quests and world locations. Its generated SQL contains DELETE statements for those imported datasets; `--apply` is a data replacement/import operation, not a schema migration. Do not apply it to existing production data without reviewing the output and import behavior. This audit did not run it.
 
 Character names currently inherit the 12-character schema limit. Rust storage also uses narrow numeric types, including `u8` level and `u32` rupees/XP; faithful late-game Rappelz limits need explicit evaluation. The settings blob is suitable for the existing small extras, but full pet, skill, quest-progress, party/guild, trade/economy and instance persistence are not established by the mere presence of WoW tables. Add explicit Rappelz extension tables/migrations when their semantics require them, preserving existing data.

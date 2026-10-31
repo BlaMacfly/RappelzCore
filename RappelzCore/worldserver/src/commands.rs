@@ -24,6 +24,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "server", level: 0, help: ".server info — état du serveur" },
     Command { name: "tele", level: 1, help: ".tele <lieu> — téléportation (game_tele)" },
     Command { name: "go", level: 1, help: ".go <x> <y> [z] — téléportation aux coordonnées" },
+    Command { name: "layer", level: 2, help: ".layer <0-255> — change la couche du personnage" },
     Command { name: "summon", level: 2, help: ".summon <joueur> — fait venir un joueur" },
     Command { name: "appear", level: 1, help: ".appear <joueur> — rejoint un joueur" },
     Command { name: "announce", level: 2, help: ".announce <texte> — annonce à tous" },
@@ -97,6 +98,22 @@ pub async fn handle(session: &mut Session, line: &str) -> Result<()> {
                     }
                 }
                 None => world.notify(handle, "Joueur introuvable."),
+            }
+        }
+        "layer" => {
+            let layer = if args.len() == 1 { args[0].parse::<u8>().ok() } else { None };
+            if let Some(layer) = layer {
+                let (exists,switched) = {
+                    let mut world=ctx.world.lock().unwrap();
+                    let switched=world.players.get(&handle).is_some_and(|p|p.layer!=layer);
+                    (world.change_layer(handle,layer),switched)
+                };
+                if exists {
+                    if switched {session.dialog_npc=None;}
+                    reply(&format!("Couche {layer}."));
+                }
+            } else {
+                reply("Usage : .layer <0-255>");
             }
         }
         "announce" => {

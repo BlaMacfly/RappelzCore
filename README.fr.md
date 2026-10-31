@@ -25,7 +25,8 @@ montées de niveau par EXP et données préservées. Le [suivi des réapparition
 ajoute les combats répétés et le refus des requêtes hors visibilité. La [mort/résurrection du joueur](docs/REVIVAL_VALIDATION.md)
 vérifie désormais son rendu et sa position chez l'observateur ainsi que les événements Lua.
 Le [suivi des déplacements](docs/VISIBILITY_VALIDATION.md) reprend les trajets lors des apparitions et vérifie les sorties de portée.
-L'espace de développement combiné passe 94 tests Rust et 14 tests Python ; chaque branche conserve son périmètre serveur/client compilable.
+Les [changements de couche](docs/LAYER_VALIDATION.md) vérifient la séparation, le refus des interactions masquées et la couche sauvegardée au retour du personnage avec deux clients.
+L'espace de développement combiné passe 100 tests Rust et 18 tests Python ; chaque branche conserve son périmètre serveur/client compilable.
 
 - **RappelzCore** utilise **exactement le schéma SQL d'AzerothCore** (`acore_auth`, `acore_characters`,
   `acore_world`, importé du dépôt officiel, commit `3179ea3` du 25/10/2026), son format de configuration
@@ -193,7 +194,7 @@ mots de passe de 16 caractères max (règle AzerothCore).
 ## Vérifications des développements précédents
 
 Cette liste contient des résultats conservés des travaux précédents. Les vérifications du
-30–31/10/2026 (94 tests Rust réussis, compilation optimisée et 125 212 ressources identiques) sont séparées
+30–31/10/2026 (100 tests Rust et 18 tests Python réussis, compilation optimisée et 125 212 ressources identiques) sont séparées
 des anciens résultats serveur/base de données dans [DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md).
 
 Pour installer l'addon sur un client déjà converti :

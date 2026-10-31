@@ -12,6 +12,7 @@ Core lifecycle/state events were observed in the actual native/local-server sess
 | `UnitHealth`, `UnitHealthMax` | Player login/HPMP state; selected entity's known HP. Nil if not known. |
 | `UnitMana`, `UnitManaMax` | Player login/HPMP state and known target player/NPC/monster ENTER/HPMP values. Unknown target values remain nil; known zero is preserved. Two-client combat verified. |
 | `UnitLevel` | Player level/property packets, target entity level; nil until known. |
+| `UnitLayer("player"/"target")` | Read-only Rappelz extension: actual accepted login/WARP layer or target ENTER layer. Nil for unknown/absent units/layers; known zero is preserved. Two-client separation/re-entry verified in [LAYER_VALIDATION.md](LAYER_VALIDATION.md). |
 | `GetMoney()` | Currency/property updates; nil until a value is known. |
 | `GetNumPartyMembers()` | State-backed API exists; native party subsystem not implemented, so nil. No invented zero. |
 | `GetTime()` | Monotonic time since this addon host started; survives UI reload. |
@@ -31,6 +32,7 @@ Core lifecycle/state events were observed in the actual native/local-server sess
 | `UNIT_HEALTH` | Known health/max-health tuple changes; `"player"` or `"target"`. |
 | `UNIT_MANA` | Mana/max-mana tuple changes; unit token. |
 | `PLAYER_LEVEL_UP` | Known player level increases; new level. Initial level discovery is not a fabricated level-up. |
+| `RAPPELZ_LAYER_CHANGED` | Rappelz extension: same player's known layer changes; numeric new layer. Initial discovery, another handle and UI reload do not fabricate it. No layer-changing API is exposed. |
 | `BAG_UPDATE` | Accepted inventory contents change; `0` for the current single logical bag. |
 | `PLAYER_TARGET_CHANGED` | Selected target handle changes, including removal. |
 | `CHAT_MSG_SYSTEM` | Server NOTICE chat received; actual message. Local `print` does not synthesize this event. |

@@ -14,11 +14,13 @@ function RappelzDebugRefresh()
     RappelzDebugInfo:SetText(
         "Player: " .. (UnitName("player") or "(not in world)") ..
         "\nLevel: " .. known(UnitLevel("player")) ..
+        "\nLayer: " .. known(UnitLayer("player")) ..
         "\nHP: " .. known(UnitHealth("player")) .. " / " .. known(UnitHealthMax("player")) ..
         "\nMP: " .. known(UnitMana("player")) .. " / " .. known(UnitManaMax("player")) ..
         "\nMoney: " .. known(GetMoney()) ..
         "\nTarget: " .. (UnitName("target") or "(none)") ..
         "\nTarget level: " .. known(UnitLevel("target")) ..
+        "\nTarget layer: " .. known(UnitLayer("target")) ..
         "\nTarget HP: " .. known(UnitHealth("target")) .. "/" .. known(UnitHealthMax("target")) ..
         " MP: " .. known(UnitMana("target")) .. "/" .. known(UnitManaMax("target")) ..
         "\nClicks: " .. known(RappelzDebugDB.clicks) ..
@@ -32,6 +34,7 @@ function RappelzDebugOnLoad(self)
     self:RegisterEvent("PLAYER_LOGOUT")
     self:RegisterEvent("PLAYER_DEAD")
     self:RegisterEvent("PLAYER_ALIVE")
+    self:RegisterEvent("RAPPELZ_LAYER_CHANGED")
     self:RegisterEvent("UNIT_HEALTH")
     self:RegisterEvent("UNIT_MANA")
     self:RegisterEvent("PLAYER_LEVEL_UP")
@@ -47,12 +50,12 @@ function RappelzDebugOnEvent(self, event, ...)
     RappelzDebugDB.events[event] = (RappelzDebugDB.events[event] or 0) + 1
     local snapshot = {
         event = event, arg = arg, time = GetTime(),
-        name = UnitName("player"), level = UnitLevel("player"),
+        name = UnitName("player"), level = UnitLevel("player"), layer = UnitLayer("player"),
         hp = UnitHealth("player"), maxHP = UnitHealthMax("player"),
         mp = UnitMana("player"), maxMP = UnitManaMax("player"),
         money = GetMoney(), target = UnitName("target"),
         targetHP = UnitHealth("target"), targetMaxHP = UnitHealthMax("target"),
-        targetMP = UnitMana("target"), targetMaxMP = UnitManaMax("target")
+        targetMP = UnitMana("target"), targetMaxMP = UnitManaMax("target"), targetLayer = UnitLayer("target")
     }
     table.insert(RappelzDebugDB.recent, snapshot)
     if #RappelzDebugDB.recent > 32 then table.remove(RappelzDebugDB.recent, 1) end
@@ -60,7 +63,7 @@ function RappelzDebugOnEvent(self, event, ...)
     print("EVENT " .. event .. " " .. known(arg) ..
         " HP=" .. known(snapshot.hp) .. "/" .. known(snapshot.maxHP) ..
         " MP=" .. known(snapshot.mp) .. "/" .. known(snapshot.maxMP) ..
-        " money=" .. known(snapshot.money) .. " targetHP=" .. known(snapshot.targetHP))
+        " money=" .. known(snapshot.money) .. " targetHP=" .. known(snapshot.targetHP) .. " layer=" .. known(snapshot.layer))
     if event == "ADDON_LOADED" and select(1, ...) == "RappelzDebug" then
         RappelzDebugDB.loads = (RappelzDebugDB.loads or 0) + 1
         print("ADDON_LOADED; Lua " .. _VERSION)

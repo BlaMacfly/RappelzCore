@@ -349,7 +349,7 @@ impl World {
     }
 
     /// Require an announced object and current visibility: the cached set can lag a tick.
-    fn can_see(&self, viewer: u32, handle: u32, now: u32) -> bool {
+    pub fn can_see(&self, viewer: u32, handle: u32, now: u32) -> bool {
         let Some(player) = self.players.get(&viewer) else { return false };
         if viewer == handle { return true; }
         if !player.visible.contains(&handle) { return false; }
@@ -369,6 +369,11 @@ impl World {
             return false;
         };
         dist(player.motion.position(now), position) <= self.visibility_distance
+    }
+
+    pub fn visible_npc(&self, viewer: u32, handle: u32) -> Option<(u32,String)> {
+        if !self.can_see(viewer,handle,self.now()) { return None; }
+        self.npcs.get(&handle).map(|npc|(npc.npc_id,npc.name.clone()))
     }
 
     fn move_packet(handle: u32, layer: u8, motion: &Motion, now: u32) -> Option<RawPacket> {
@@ -476,6 +481,25 @@ impl World {
                 for packet in &packets { self.send_to(viewer, packet.clone()); }
             }
         }
+    }
+
+    /// Server-authoritative phase transition; ordinary gameplay cannot select arbitrary layers.
+    pub fn change_layer(&mut self, handle: u32, layer: u8) -> bool {
+        let now = self.now();
+        let Some(player) = self.players.get_mut(&handle) else { return false };
+        if player.layer == layer { return true; }
+        let (x, y) = player.motion.position(now);
+        let z = player.z;
+        player.layer = layer;
+        player.attack_target = None;
+        for monster in self.monsters.values_mut() {
+            if monster.target == Some(handle) {
+                monster.target = None;
+                monster.motion.settle(now);
+            }
+        }
+        self.teleport(handle, x, y, z);
+        true
     }
 
     /// Met à jour l'apparence équipée d'un joueur et la diffuse (TS_SC_WEAR_INFO).
@@ -1024,6 +1048,46 @@ mod tests {
         assert_eq!(world.enter_packets(handle, 500).len(), 1, "finished monster motion replayed");
         world.monsters.get_mut(&handle).unwrap().motion.speed = 0.0;
         assert_eq!(world.enter_packets(handle, 100).len(), 1, "stationary monster emitted motion");
+    }
+
+    #[test]
+    fn layer_change_publishes_warp_visibility_and_clears_combat_before_return() {
+        let (mut world,mut receivers)=test_world();let monster=test_monster(&mut world);
+        world.update_visibility();
+        for rx in &mut receivers {while rx.try_recv().is_ok(){}}
+        world.players.get_mut(&1).unwrap().attack_target=Some(monster);
+        world.monsters.get_mut(&monster).unwrap().target=Some(1);
+        assert!(world.change_layer(1,1));
+        assert_eq!(world.players[&1].layer,1);
+        assert!(world.players[&1].visible.is_empty());
+        assert_eq!(world.players[&1].attack_target,None);
+        assert_eq!(world.monsters[&monster].target,None);
+        let own:Vec<_>=std::iter::from_fn(||receivers[0].try_recv().ok()).collect();
+        let warp=msg::ScWarp::from_packet(&own[0]).unwrap();assert_eq!(warp.layer,1);
+        let packets:Vec<_>=std::iter::from_fn(||receivers[1].try_recv().ok()).collect();
+        assert!(packets.iter().any(|p|p.id==msg::ScLeave::ID && msg::ScLeave::from_packet(p).unwrap().handle==1));
+        assert!(!world.can_see(2,1,world.now()));assert!(!world.can_see(1,2,world.now()));
+        assert!(!world.start_attack(1,monster));
+        while receivers[0].try_recv().is_ok(){}
+        assert!(world.change_layer(1,0));
+        let packets:Vec<_>=std::iter::from_fn(||receivers[1].try_recv().ok()).collect();
+        let enter=msg::ScEnter::from_packet(packets.iter().find(|p|p.id==msg::ScEnter::ID).unwrap()).unwrap();
+        assert_eq!((enter.handle,enter.layer),(1,0));
+        while receivers[0].try_recv().is_ok(){}
+        assert!(world.change_layer(1,0));assert!(receivers[0].try_recv().is_err());
+        assert!(!world.change_layer(999,1));
+    }
+
+    #[test]
+    fn npc_access_rechecks_layer_even_with_stale_announced_handle() {
+        let (mut world,_)=test_world();let npc=NPC_HANDLE_BASE;
+        world.npcs.insert(npc,NpcEntity {handle:npc,npc_id:1001,name:"Fixture".into(),x:0.0,y:0.0,z:0.0,creature:CreatureInfo::default()});
+        world.update_visibility();assert_eq!(world.visible_npc(1,npc).unwrap().0,1001);
+        world.change_layer(1,1);world.players.get_mut(&1).unwrap().visible.insert(npc);
+        assert!(world.visible_npc(1,npc).is_none());
+        world.change_layer(1,0);assert!(world.visible_npc(1,npc).is_some());
+        world.players.get_mut(&1).unwrap().motion=Motion::at(1000.0,0.0);
+        assert!(world.visible_npc(1,npc).is_none());
     }
 
     #[test]
