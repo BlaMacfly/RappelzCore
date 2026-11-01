@@ -121,3 +121,7 @@ Ignored run: `client-data/audit/2026-11-01-sframe-918630-indirect-entry-79d6b204
 ## Unresolved result
 
 The selected ordinary predecessor, SEH, numeric, relative-table and modeled computed-pointer routes provide no confirmed indirect caller. The identity of EDI in 918630 and its relation to MAIN remain unknown. Future evidence must supply an actual computed/registered target and receiver provenance, or a controlled original-runtime observation with its own scope. These bounded negative results do not prove 918630 unreachable, nor do they identify MAIN's activation writer.
+
+## Follow-up: Colosseum warning records, 2026-11-01
+
+The [warning/predicate investigation](SFRAME_COLOSSEUM_RULES_RE.md) reconstructs the four localized warnings carried by 918630, their packed records, selected tests and two internal sinks. It also qualifies related producers and a separately registered ArenaWaiting callback. None supplies a caller or typed MAIN receiver for 918630; its activation question remains open. Original data, installed settings, services and versions remain preserved.
