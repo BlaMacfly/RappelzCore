@@ -129,3 +129,7 @@ The byte verifier checks **5,528 distinct original byte-range records**, includi
 ## Restart point
 
 The selected target-info button/producer/receiver path and the inspected owner-to-interface construction chain are answered statically. Known callback registration and final-window routing are partially answered: runtime subscribers, all interface prehooks and complete fanout remain outside the evidence. **Main-window nonzero +0x458 activation remains unresolved** despite the broader bounded scan. Follow concrete generic property/copy callers or controlled original runtime evidence if available; do not map the target-info window's+0x450 onto main-window+0x458 or invent server permission/stat-generation rules.
+
+## Follow-up: named predicates, prehooks and world order, 2026-11-01
+
+[SFRAME_STAT_ROUTING_RE.md](SFRAME_STAT_ROUTING_RE.md) identifies the previously unnamed context getters and the own-player/creature-slot predicates, distinguishes the weaker storage helper, and binds the pump’s load/world receivers to their actual virtual slots. The selected normal world route processes core stats before interface delivery and sets handled before forwarding; load, secondary-context and display-prehook kind 31 return branches are verified. These facts narrow the earlier predicate/order uncertainty without proving complete UI fanout or runtime/server policy. Extended alias tracking adds seven unrelated stores but still does not identify main CharacterInfo+0x458 activation. Original files, installed data/settings, services and versions remain preserved.
