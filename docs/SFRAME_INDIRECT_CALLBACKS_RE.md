@@ -4,6 +4,8 @@ Verified **2026-11-01** on original x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b
 
 [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, original SFrame PE file/product **9.1.0.0**, embedded **Source9.5.2** build lineage and network literal/profile **201507080**. Exact official Epic/patch remains unconfirmed. These are static observations; the original executable is not run.
 
+The [caption/parser/control follow-up](SFRAME_CAPTION_OWNER_RE.md) identifies the selected global caption handler, qualifies the original class-token translation path and distinguishes immediate subpanel owners. The caption callback is no longer an unidentified recipient; remaining effects and MAIN activation retain explicit limits.
+
 ## Questions and coverage
 
 | Question | Result and boundary |
