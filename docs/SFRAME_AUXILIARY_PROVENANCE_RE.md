@@ -4,6 +4,8 @@ Verified **2026-11-01** on original x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b
 
 [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, original SFrame PE file/product **9.1.0.0**, embedded **Source9.5.2** build lineage and network literal/profile **201507080**. Exact official Epic/patch remains unconfirmed. The original client is not executed.
 
+The [indirect-entry follow-up](SFRAME_918630_INDIRECT_ENTRY_RE.md) provider-confirms the 20 remaining JA overlaps and studies computed/data-relative carriers, preceding code, exception cleanup and 40 neighboring modules. It identifies no actual 918630 caller or MAIN receiver, with explicit model/runtime limits.
+
 ## Typed paths and remaining boundaries
 
 | Field or candidate | Positive source evidence | Qualified result |
