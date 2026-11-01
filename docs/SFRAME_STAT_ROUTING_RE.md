@@ -111,3 +111,7 @@ The verifier checks **858 distinct original byte-range records**, including **30
 ## Restart point
 
 The selected handle predicates and their context identities are answered statically. The normal world-to-interface order is established under its explicit guards; global fanout, all runtime registrations and arbitrary earlier UI effects remain partial. Main alternate-mode activation remains unresolved. Continue from concrete indirect receiver/copy provenance if available, preserve distinctions between storage/UI predicates, and do not turn client routing into server permission, coefficient or emission-policy rules.
+
+## Follow-up: the pending virtual data recipient, 2026-11-01
+
+[SFRAME_WIDGET_DATA_RE.md](SFRAME_WIDGET_DATA_RE.md) resolves the selected 82cb97/b3d010 pointer path through construction, child-name lookup, original archived NUI and default factory/RTTI/virtual-slot evidence. Its parent is SUILoadingProgressWnd and +0x458 is a saved 16-byte rectangle; the default static-control recipient performs geometry assignment. Descriptor creation and finite loading-progress behavior are documented separately from clone/template consumers. This narrows the old indirect-call uncertainty for that path; complete parser/runtime-override/callback coverage and main CharacterInfo mode activation remain unresolved. Original files, data, installed settings, services and versions are preserved.
