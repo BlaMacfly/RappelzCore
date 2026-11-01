@@ -1,5 +1,7 @@
 # SFrame implicit character-sheet copy candidates
 
+**Follow-up:** [Caller investigation for 0x812a90](SFRAME_HELPER_CALLERS_RE.md) checks direct transfers, original literal pointer carriers and relocations, rejecting an apparent branch inside another CALL. A typed default-settings branch duplicates the helper’s selected core effects, without establishing a caller. MAIN activation and computed/runtime entry remain unresolved.
+
 Verified **2026-11-01** on the original x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b938d601aeaebb7b3db0c89fc47755325a98a410d`, using **REA 6.4.0 / Ghidra 12.1.4** and an independent **Capstone 5.0.7** decode. This continues [the indirect-write investigation](SFRAME_INDIRECT_WRITES_RE.md): **all 41 retained implicit MOVSD/STOSD seeds now have locally bounded counts and destination spans**, with **13 new native function dossiers / 11,342 analyzed body bytes** and five procedure-containment observations. **Activation of MAIN SUICharacterInfoWnd byte+0x458 remains unresolved.** No nonzero MAIN-typed writer was recovered.
 
 [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, original SFrame PE **9.1.0.0**, embedded build lineage **Source9.5.2**, network literal/profile **201507080**. The exact official Epic/patch remains unconfirmed. This pass is static; no original-client execution or live object observation is claimed.
