@@ -435,13 +435,13 @@ fn skill_catalog(s:&rz_proto::skills::ScSkillCatalog)->Value {
             "player_level":e.player_level,"job_level":e.job_level,"prerequisites":e.prerequisites,"passive":e.passive,"reason":e.reason})).collect::<Vec<_>>()})
 }
 
-fn read(path: &Path) -> Option<Value> {
+pub(super) fn read(path: &Path) -> Option<Value> {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
 }
 
-fn mark(directory: &Path, name: &str, data: Value) -> Result<()> {
+pub(super) fn mark(directory: &Path, name: &str, data: Value) -> Result<()> {
     let path = directory.join(name);
     let temporary = path.with_extension("tmp");
     std::fs::write(&temporary, serde_json::to_vec_pretty(&data)?)?;

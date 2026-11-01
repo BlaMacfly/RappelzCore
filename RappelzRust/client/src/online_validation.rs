@@ -17,6 +17,7 @@ mod terrain_warp;
 mod terrain_network;
 mod terrain_restart;
 mod gameplay_restart;
+mod soap_shutdown;
 pub use combat::PacketTrace;
 
 pub enum OnlineValidation {
@@ -35,6 +36,7 @@ pub enum OnlineValidation {
     TerrainNetwork(terrain_network::TerrainNetworkValidation),
     TerrainRestart(terrain_restart::TerrainRestartValidation),
     GameplayRestart(gameplay_restart::GameplayRestartValidation),
+    SoapShutdown(soap_shutdown::SoapShutdownValidation),
 }
 
 impl OnlineValidation {
@@ -71,6 +73,7 @@ impl OnlineValidation {
     pub fn terrain_network(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::TerrainNetwork(terrain_network::TerrainNetworkValidation::new(plan,app)?))}
     pub fn terrain_restart(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::TerrainRestart(terrain_restart::TerrainRestartValidation::new(plan,app)?))}
     pub fn gameplay_restart(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::GameplayRestart(gameplay_restart::GameplayRestartValidation::new(plan,app)?))}
+    pub fn soap_shutdown(plan:PathBuf,app:&App)->Result<Self>{Ok(Self::SoapShutdown(soap_shutdown::SoapShutdownValidation::new(plan,app)?))}
     pub fn message(&mut self, message: &str) {
         match self {
             Self::Addons(v) => v.message(message),
@@ -88,6 +91,7 @@ impl OnlineValidation {
             Self::TerrainNetwork(v)=>v.message(message),
             Self::TerrainRestart(v)=>v.message(message),
             Self::GameplayRestart(v)=>v.message(message),
+            Self::SoapShutdown(v)=>v.message(message),
         }
     }
     pub fn tick(&mut self, app: &mut App) -> Result<bool> {
@@ -107,6 +111,7 @@ impl OnlineValidation {
             Self::TerrainNetwork(v)=>v.tick(app),
             Self::TerrainRestart(v)=>v.tick(app),
             Self::GameplayRestart(v)=>v.tick(app),
+            Self::SoapShutdown(v)=>v.tick(app),
         }
     }
     pub fn fail(&mut self, error: anyhow::Error) {
@@ -126,6 +131,7 @@ impl OnlineValidation {
             Self::TerrainNetwork(v)=>v.fail(error),
             Self::TerrainRestart(v)=>v.fail(error),
             Self::GameplayRestart(v)=>v.fail(error),
+            Self::SoapShutdown(v)=>v.fail(error),
         }
     }
     pub fn finish(&self, app: &App) -> Result<bool> {
@@ -145,6 +151,7 @@ impl OnlineValidation {
             Self::TerrainNetwork(v)=>v.finish(app),
             Self::TerrainRestart(v)=>v.finish(app),
             Self::GameplayRestart(v)=>v.finish(app),
+            Self::SoapShutdown(v)=>v.finish(app),
         }
     }
 }
