@@ -4,6 +4,8 @@ Verified **2026-11-01** on original x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b
 
 [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, original SFrame PE **9.1.0.0**, embedded build lineage **Source9.5.2**, network literal/profile **201507080**. Exact official Epic/patch remains unconfirmed. The original client is not executed.
 
+The [indirect-callback follow-up](SFRAME_INDIRECT_CALLBACKS_RE.md) extends the geometry aliases with MAIN+0x118, resolves the constructed placement-message manager and traces MAIN embedded in a child-creation descriptor. Its new selective snapshot supplements this full snapshot and the historical Native index. MAIN activation remains unresolved.
+
 ## Reuse includes archived individual dossiers
 
 The previous canonical bundle contains 378 records and 271 cached primitives. A SHA/profile-bound search also recovers older individual Native records outside that bundle. This pass verifies **39 reused Native functions**, including **10 whose records are outside the previous bundle**, against original body bytes and instruction boundaries. These archived records remain separately cited; they are not silently claimed as newly produced or imported into the current bundle. Reuse the historical index on continuation instead of assuming the latest snapshot contains every historical result.
