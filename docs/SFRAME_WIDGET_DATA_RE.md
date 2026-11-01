@@ -111,3 +111,5 @@ Verification checks **992 distinct original byte-range records**, including 16 s
 ## Restart point
 
 The selected virtual-recipient/rectangle question is answered for the archived/default construction path. Full NUI grammar, live overrides, complete callback effects and main alternate-mode activation remain open. Reuse this typed loading-progress path and its source/destination distinction; a future main-mode investigation needs a concrete CharacterInfo-instance writer or equivalent runtime evidence.
+
+The next [CharacterInfo callback pass](SFRAME_CHARACTER_CALLBACKS_RE.md) recovers 15 fresh functions after a PC restart. It distinguishes name refresh, dimension caches and a separate list-context receiver, verifies child owner assignment and the shared base event delegation, and rechecks three original character-sheet resources. Main alternate-mode activation and exact fold/unfold action binding remain unresolved; reuse its newer closed snapshot for continuation.
