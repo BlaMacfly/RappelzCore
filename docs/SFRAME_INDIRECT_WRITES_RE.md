@@ -1,5 +1,7 @@
 # SFrame indirect character-sheet writes
 
+**Follow-up:** [Implicit-copy bounds](SFRAME_IMPLICIT_COPIES_RE.md) resolves local lengths and DF-qualified spans for all 41 retained implicit seeds. Five long copies share a settings source; their selected system-window callers are traced, with one helper receiver still unbound. MAIN activation remains unresolved; untyped/interior bases retain their limits.
+
 Verified **2026-11-01** on original x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b938d601aeaebb7b3db0c89fc47755325a98a410d`, using **REA 6.4.0 / Ghidra 12.1.4**. This continues [the writer-provenance investigation](SFRAME_MODE_ACTIVATION_RE.md) with **25 new function dossiers / 19,426 analyzed body bytes**, ten focused reference/containment observations and a new bounded address-arithmetic scan. **Nonzero activation of SUICharacterInfoWnd+0x458 remains unresolved.** The concrete parent paths, caption callback and newly selected address escapes below do not identify that setter.
 
 [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, original SFrame PE **9.1.0.0**, embedded build lineage **Source9.5.2**, network literal/profile **201507080**. The exact official Epic/patch remains unconfirmed. Original client execution and live object state are not observations of this static pass.
