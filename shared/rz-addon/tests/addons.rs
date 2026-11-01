@@ -65,6 +65,62 @@ fn combat_stats_callbacks_use_confirmed_whole_snapshots_and_keep_unknown_nil(){
     s.combat_stats=Some(rz_addon::CombatStatsState{attack:24,defence:10,move_speed:120});rt.update_state(s.clone());rt.update_state(s);let m=rt.drain_messages();assert_eq!(m.len(),1);assert!(m[0].contains("STATS 24 10 120"));assert!(rt.errors().is_empty());
 }
 
+#[test]
+fn job_base_lua_callbacks_cover_all_fields_identity_unavailability_logout_and_reload() {
+    let root = tempfile::tempdir().unwrap();
+    addon(root.path(), "Base", "", r#"
+        local function snapshot(event)
+            local job, id = GetJobBaseInfo()
+            print(event, job, id, GetJobBaseStat("strength"), GetJobBaseStat("vitality"),
+                GetJobBaseStat("dexterity"), GetJobBaseStat("agility"), GetJobBaseStat("intelligence"),
+                GetJobBaseStat("wisdom"), GetJobBaseStat("luck"), GetJobBaseStat("attack"))
+        end
+        snapshot("LOAD")
+        local f = CreateFrame("Frame")
+        f:RegisterEvent("RAPPELZ_JOB_BASE_CHANGED") f:RegisterEvent("PLAYER_LOGOUT")
+        f:SetScript("OnEvent", function(self, event) snapshot(event) end)
+    "#);
+    let mut rt = AddonRuntime::new(root.path()); rt.load().unwrap();
+    assert!(rt.drain_messages()[0].contains("LOAD nil nil nil nil nil nil nil nil nil nil"));
+    let mut s = state();
+    let base = rz_addon::JobBaseStatsState { job: 100, stat_id: 42, attributes: [14, 16, 13, 12, 20, 21, 0] };
+    s.job_base_stats = Some(base); rt.update_state(s.clone()); rt.update_state(s.clone());
+    let m = rt.drain_messages(); assert_eq!(m.len(), 1);
+    assert!(m[0].contains("RAPPELZ_JOB_BASE_CHANGED 100 42 14 16 13 12 20 21 0 nil"));
+    s.job_level = Some(2); rt.update_state(s.clone()); assert!(rt.drain_messages().is_empty());
+    s.job_base_stats.as_mut().unwrap().job = 200; rt.update_state(s.clone());
+    assert!(rt.drain_messages()[0].contains("RAPPELZ_JOB_BASE_CHANGED 200 42"));
+    s.job_base_stats = None; rt.update_state(s.clone()); rt.update_state(s.clone());
+    let m = rt.drain_messages(); assert_eq!(m.len(), 1); assert!(m[0].contains("RAPPELZ_JOB_BASE_CHANGED nil nil nil nil nil nil nil nil nil nil"));
+    s.job_base_stats = Some(base); rt.update_state(s.clone()); rt.drain_messages();
+    rt.update_state(GameState::default());
+    let m = rt.drain_messages(); assert_eq!(m.len(), 1); assert!(m[0].contains("PLAYER_LOGOUT 100 42 14 16 13 12 20 21 0 nil"));
+    rt.reload().unwrap();
+    assert!(rt.drain_messages()[0].contains("LOAD nil nil nil nil nil nil nil nil nil nil"));
+    rt.update_state(s); assert_eq!(rt.drain_messages().len(), 1);
+    rt.reload().unwrap(); let m = rt.drain_messages();
+    assert!(m.iter().any(|m| m.contains("LOAD 100 42 14 16 13 12 20 21 0 nil")));
+    assert!(!m.iter().any(|m| m.contains("RAPPELZ_JOB_BASE_CHANGED")));
+    assert!(rt.errors().is_empty());
+}
+
+#[test]
+fn debug_addon_labels_raw_job_base_and_logs_readable_snapshot() {
+    let root = tempfile::tempdir().unwrap(); debug_addon(root.path());
+    let mut rt = AddonRuntime::new(root.path()); rt.load().unwrap(); rt.drain_messages();
+    let mut s = state(); s.job_base_stats = Some(rz_addon::JobBaseStatsState {
+        job: 100, stat_id: 42, attributes: [14, 16, 13, 12, 20, 21, 10],
+    });
+    rt.update_state(s.clone()); rt.update_state(s);
+    let display = text(&rt);
+    for label in ["Job base (raw): 100 / 42", "STR 14 VIT 16 DEX 13 AGI 12", "INT 20 WIS 21 LUCK 10"] {
+        assert!(display.contains(label), "{display}");
+    }
+    let m = rt.drain_messages();
+    assert_eq!(m.iter().filter(|m| m.contains("JOB_BASE 100 42 14 16 13 12 20 21 10")).count(), 1);
+    assert!(rt.errors().is_empty());
+}
+
 fn text(runtime: &AddonRuntime) -> String {
     runtime
         .draw_widgets(1280.0, 720.0)

@@ -1,5 +1,7 @@
 # Rappelz NoLimits — protocole réseau client ↔ serveur (SFrame.exe)
 
+Ajout du 01/11/2026 : [SOAP d’administration](../SOAP_ADMINISTRATION.md) est un service HTTP distinct pour les commandes de console authentifiées ; aucun nouvel opcode original n’est revendiqué. Les [bases brutes du métier dans Lua](../JOB_BASE_ADDON_VALIDATION.md) utilisent l’extension privée SC_JOB_PROGRESS existante, sans changement de format.
+
 Rétro-ingénierie **statique** de `Rappelz NoLimits\SFrame.exe` (PE x86, sha256
 `27f42fc8f6b08df8c239640b938d601aeaebb7b3db0c89fc47755325a98a410d`), avec Ghidra 12.1.4 via REA.
 Le client n'a été ni exécuté, ni connecté au serveur.

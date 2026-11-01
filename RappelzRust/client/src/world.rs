@@ -469,6 +469,7 @@ impl WorldState {
     pub fn addon_state(&self) -> rz_addon::GameState {
         rz_addon::GameState {
             combat_stats:self.combat_stats.map(|s|rz_addon::CombatStatsState{attack:s.attack,defence:s.defence,move_speed:s.move_speed}),
+            job_base_stats: self.job_base_stats(),
             player: Some(rz_addon::UnitState {
                 handle: self.handle, name: self.name.clone(), level: self.addon_level,
                 layer: Some(self.layer),

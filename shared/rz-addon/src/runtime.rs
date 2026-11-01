@@ -35,9 +35,19 @@ pub struct CombatStatsState {
     pub attack:i32,pub defence:i32,pub move_speed:i16,
 }
 
+/// Confirmed raw job resource base, before equipment, job-level and state bonuses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JobBaseStatsState {
+    pub job: i32,
+    pub stat_id: i32,
+    /// Strength, vitality, dexterity, agility, intelligence, wisdom, luck.
+    pub attributes: [i16; 7],
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GameState {
     pub combat_stats:Option<CombatStatsState>,
+    pub job_base_stats: Option<JobBaseStatsState>,
     pub player: Option<UnitState>,
     pub target: Option<UnitState>,
     pub money: Option<i64>,
@@ -503,6 +513,20 @@ impl AddonRuntime {
         globals.raw_set("GetJobPointsExact",lua.create_function(move |_,()|Ok(state.borrow().job_points.map(|v|v.to_string())))?)?;
         let state=self.state.clone();
         globals.raw_set("GetJobLevel",lua.create_function(move |_,()|Ok(state.borrow().job_level))?)?;
+        let state = self.state.clone();
+        globals.raw_set("GetJobBaseInfo", lua.create_function(move |_, ()| {
+            let base = state.borrow().job_base_stats;
+            Ok((base.map(|b| b.job), base.map(|b| b.stat_id)))
+        })?)?;
+        let state = self.state.clone();
+        globals.raw_set("GetJobBaseStat", lua.create_function(move |_, field: String| {
+            let index = match field.as_str() {
+                "strength" => Some(0), "vitality" => Some(1), "dexterity" => Some(2),
+                "agility" => Some(3), "intelligence" => Some(4), "wisdom" => Some(5),
+                "luck" => Some(6), _ => None,
+            };
+            Ok(state.borrow().job_base_stats.and_then(|b| index.map(|i| b.attributes[i])))
+        })?)?;
         let state=self.state.clone();
         globals.raw_set("GetPlayerCombatStat",lua.create_function(move |_,field:String|{
             Ok(state.borrow().combat_stats.and_then(|s|match field.as_str(){"attack"=>Some(s.attack),"defence"=>Some(s.defence),"move_speed"=>Some(i32::from(s.move_speed)),_=>None}))
@@ -771,6 +795,9 @@ impl AddonRuntime {
             if let Some(level)=state.job_level {self.dispatch(Event::new("RAPPELZ_JOB_LEVEL_CHANGED",vec![EventArg::Number(f64::from(level))]));}
         }
         if old.combat_stats!=state.combat_stats && state.combat_stats.is_some(){self.dispatch(Event::new("RAPPELZ_COMBAT_STATS_CHANGED",vec![]));}
+        if old.job_base_stats != state.job_base_stats {
+            self.dispatch(Event::new("RAPPELZ_JOB_BASE_CHANGED", vec![]));
+        }
         if old.skill_event!=state.skill_event {
             if let Some(e)=&state.skill_event {
                 self.dispatch(Event::new("RAPPELZ_SKILL_EVENT",vec![EventArg::Number(f64::from(e.skill)),e.phase.clone().into(),EventArg::Number(f64::from(e.caster)),EventArg::Number(f64::from(e.amount))]));
