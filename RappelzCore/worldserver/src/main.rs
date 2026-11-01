@@ -216,11 +216,7 @@ async fn main() -> Result<()> {
     loop {
         tokio::select! {
             Some(request) = soap_commands.recv() => {
-                let result = match commands::execute_console(&ctx, &request.command).await {
-                    Ok(result) => result,
-                    Err(_) => commands::ConsoleResult { output: "Échec de la commande côté serveur.".into(), success: false, shutdown: false },
-                };
-                let _ = request.reply.send(result);
+                soap::execute(&ctx, request).await;
             }
             _ = shutdown_request.changed() => { if *shutdown_request.borrow() { break; } }
             accepted = listener.accept() => {

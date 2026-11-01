@@ -16,7 +16,7 @@ SOAP.Port = 7878
 
 Defaults in `conf/worldserver.conf.dist` are **disabled**, loopback, port **7878**. Environment overrides: `AC_SOAP_ENABLED`, `AC_SOAP_IP`, `AC_SOAP_PORT`. An invalid IP/port or occupied enabled SOAP listener fails startup **before any online flags are reset**. Disabled SOAP opens no listener. Installed configuration is not automatically changed.
 
-Use an existing administrator or create a dedicated account in the local console. Grant access with `account set gmlevel <account> 3 <realm-id>` or `account set gmlevel <account> 3 -1`. GM 0/1/2 and other-realm grants are refused. Account/IP bans and account IP locks apply. Revocation/password changes take effect on the next request. SOAP does not create a game session or change account online/session flags.
+Use an existing administrator or create a dedicated account in the local console. Grant access with `account set gmlevel <account> 3 <realm-id>` or `account set gmlevel <account> 3 -1`. GM 0/1/2 and other-realm grants are refused. Account/IP bans and account IP locks apply. Identity, unchanged credential proof and current access are checked again immediately before queued execution; revocation/password changes can also refuse an already queued request. No raw password is retained in the queue. SOAP does not create a game session or change account online/session flags.
 
 HTTP Basic has no transport encryption. Keep loopback for local tools; use HTTPS termination or a secure tunnel for remote access. The built-in listener does not provide TLS.
 
@@ -38,6 +38,8 @@ Replies contain `executeCommandResponse/result` with the matching AC/TC namespac
 
 Commands: `help`, `server info`, `announce <text>`, `saveall`, `account create`, `account set password`, `account set gmlevel`, `server shutdown`/`exit`/`quit`. `saveall` acknowledges a request, not completion of every SQL commit. Player/target-dependent chat commands are not console commands. SOAP and local console execution share the serial world-loop dispatcher; no command shell is started.
 
+GM scope accepts an omitted/default global realm, explicit `-1`, or a positive signed-32-bit realm. Invalid realm text never falls back to global access. Extra scope/create arguments and passwords over sixteen characters are refused before changing the account.
+
 | HTTP | Meaning |
 |---|---|
 | 200 | Successful command, output in `result`. |
@@ -49,6 +51,8 @@ Commands: `help`, `server info`, `announce <text>`, `saveall`, `account create`,
 SOAP 1.1 requires one supported `executeCommand` and one text `command`. SOAP 1.2, WSDL discovery, arbitrary SOAP headers, DTD/entities and nested command markup are unsupported. This is not full gSOAP. Limits: eight connections and eight queued commands; 32 headers with a 16 KiB buffer; 16 KiB body; 4096-byte command; five-second header and fifteen-second connection deadlines. SOAP logs exclude credentials/command arguments. A timeout after queueing can leave a modifying command's result uncertain: inspect state before retrying.
 
 ## Validation
+
+Follow-up: [Interrupted/queued SOAP validation](SOAP_RESILIENCE_VALIDATION.md) passes **26 comparison checks** with a previous-server control, real SQL lock waits, access/password changes during queueing, actual HTTP expiry and shutdown with stdin open. The existing 25 SOAP and 44 two-client checks also pass. **212 Rust / 132 Python** pass. Normal shutdown flushes its reply first; an accepted valid shutdown also survives a closed/expired HTTP reply. A timeout still leaves modifying-command results uncertain and is not a reason to retry automatically.
 
 Isolated copied world **24514**, SOAP **27878**, auth **24615**, MariaDB **3331**, two native clients: **25 HTTP/SOAP checks pass**, plus graceful SOAP shutdown. Both clients receive the same XML-escaped announcement as real Lua `CHAT_MSG_SYSTEM`; both namespaces report two players. Checks cover missing/bad credentials, player/other-realm refusal, bans/IP lock, self-demotion and immediate revocation, chunked/malformed/duplicate/oversized requests, unknown commands, real new-account creation/privilege/password changes, old-password refusal and new-password success. No original account is modified.
 

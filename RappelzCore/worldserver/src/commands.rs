@@ -235,6 +235,12 @@ pub struct ConsoleResult {
     pub shutdown: bool,
 }
 
+fn gm_access_arguments(level: &str, realms: &[&str]) -> Option<(u8, i32)> {
+    let level = level.parse::<u8>().ok().filter(|v| *v <= 3)?;
+    let realm = match realms { [] => -1, [realm] => realm.parse::<i32>().ok()?, _ => return None };
+    (realm == -1 || realm > 0).then_some((level, realm))
+}
+
 /// Shared console/SOAP dispatcher, called serially by the world loop.
 pub async fn execute_console(ctx: &Ctx, line: &str) -> Result<ConsoleResult> {
     let mut result = ConsoleResult { output: String::new(), success: true, shutdown: false };
@@ -252,14 +258,14 @@ pub async fn execute_console(ctx: &Ctx, line: &str) -> Result<ConsoleResult> {
                 "server shutdown | exit",
             ].join("\n");
         }
-        ["account", "create", user, pass, rest @ ..] => {
+        ["account", "create", user, pass, rest @ ..] if rest.len() <= 1 => {
             let email = rest.first().copied().unwrap_or("");
             match auth::create_account(&ctx.login, user, pass, email).await {
                 Ok(id) => result.output = format!("Compte {user} créé (id {id})."),
                 Err(_) => { result.output = "Échec de création du compte.".into(); result.success = false; }
             }
         }
-        ["account", "set", "password", user, pass] => match auth::find_account(&ctx.login, user).await? {
+        ["account", "set", "password", user, pass] if pass.chars().count() <= 16 => match auth::find_account(&ctx.login, user).await? {
             Some(a) => {
                 auth::set_password(&ctx.login, a.id, user, pass).await?;
                 result.output = format!("Mot de passe de {user} modifié.");
@@ -267,9 +273,12 @@ pub async fn execute_console(ctx: &Ctx, line: &str) -> Result<ConsoleResult> {
             None => { result.output = "Compte inconnu.".into(); result.success = false; }
         },
         ["account", "set", "gmlevel", user, level, rest @ ..] => {
-            let realm: i32 = rest.first().and_then(|r| r.parse().ok()).unwrap_or(-1);
-            match (auth::find_account(&ctx.login, user).await?, level.parse::<u8>()) {
-                (Some(a), Ok(lv)) if lv <= 3 => {
+            let Some((lv, realm)) = gm_access_arguments(level, rest) else {
+                result.output = "Usage : account set gmlevel <compte> <0-3> [royaume|-1]".into(); result.success = false;
+                return Ok(result);
+            };
+            match auth::find_account(&ctx.login, user).await? {
+                Some(a) => {
                     auth::set_gm_level(&ctx.login, a.id, lv, realm).await?;
                     result.output = format!("{user} : niveau GM {lv} (royaume {realm}).");
                 }
@@ -286,4 +295,20 @@ pub async fn execute_console(ctx: &Ctx, line: &str) -> Result<ConsoleResult> {
         _ => { result.output = "Commande inconnue (help).".into(); result.success = false; }
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod console_tests {
+    use super::*;
+    #[test] fn gm_access_accepts_only_known_levels_and_explicit_valid_realm_scope() {
+        assert_eq!(gm_access_arguments("3", &[]), Some((3, -1)));
+        assert_eq!(gm_access_arguments("0", &["-1"]), Some((0, -1)));
+        assert_eq!(gm_access_arguments("2", &["1"]), Some((2, 1)));
+        assert_eq!(gm_access_arguments("3", &["2147483647"]), Some((3, i32::MAX)));
+    }
+    #[test] fn malformed_realm_never_falls_back_to_global_access() {
+        for realm in ["bad", "", "-2", "0", "2147483648"] { assert_eq!(gm_access_arguments("3", &[realm]), None); }
+        assert_eq!(gm_access_arguments("3", &["1", "-1"]), None);
+        for level in ["-1", "4", "256", "admin"] { assert_eq!(gm_access_arguments(level, &["1"]), None); }
+    }
 }

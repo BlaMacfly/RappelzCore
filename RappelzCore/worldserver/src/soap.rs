@@ -1,6 +1,6 @@
 //! SOAP 1.1 executeCommand, compatible with the AC/TC RPC envelope.
 //! Authentication uses existing SRP accounts; commands run in the world console queue.
-use std::{net::SocketAddr, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Duration};
+use std::{net::SocketAddr, sync::{Arc, atomic::{AtomicU8, Ordering}}, time::Duration};
 use anyhow::{ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use http_body_util::{BodyExt, Full, Limited};
@@ -8,7 +8,7 @@ use hyper::{body::{Bytes, Incoming}, header, Request, Response, StatusCode};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use rz_common::Config;
 use rz_database::{auth, srp6};
-use tokio::{net::TcpListener, sync::{mpsc, oneshot, Semaphore}, task::JoinSet};
+use tokio::{net::TcpListener, sync::{mpsc, oneshot, watch, Semaphore}, task::JoinSet};
 use crate::{commands::ConsoleResult, Ctx};
 
 const ENVELOPE: &str = "http://schemas.xmlsoap.org/soap/envelope/";
@@ -18,8 +18,62 @@ const DEADLINE: Duration = Duration::from_secs(15);
 type Reply = Response<Full<Bytes>>;
 
 pub struct ConsoleRequest {
-    pub command: String,
-    pub reply: oneshot::Sender<ConsoleResult>,
+    command: String,
+    principal: Principal,
+    reply: oneshot::Sender<CommandOutcome>,
+    delivery: Arc<ShutdownDelivery>,
+}
+
+// No password is retained in a queued command. A password change invalidates its
+// previously authenticated salt/verifier proof before execution.
+struct Principal {
+    account: auth::Account,
+    peer: SocketAddr,
+}
+
+enum Authorization { Allowed(Principal), Denied(StatusCode) }
+enum CommandOutcome { Completed(ConsoleResult), Denied(StatusCode) }
+
+/// Request acceptance and HTTP completion can occur in either order. Signal once
+/// both are known, including a connection dropped before the world executes it.
+struct ShutdownDelivery {
+    state: AtomicU8,
+    shutdown: watch::Sender<bool>,
+}
+impl ShutdownDelivery {
+    fn new(shutdown: watch::Sender<bool>) -> Self { Self { state: AtomicU8::new(0), shutdown } }
+    fn mark(&self, bit: u8) {
+        let before = self.state.fetch_or(bit, Ordering::SeqCst);
+        if before != 3 && (before | bit) == 3 { let _ = self.shutdown.send(true); }
+    }
+    fn request(&self) { self.mark(1); }
+    fn finished(&self) { self.mark(2); }
+}
+struct ConnectionCompletion(Arc<ShutdownDelivery>);
+impl Drop for ConnectionCompletion {
+    fn drop(&mut self) { self.0.finished(); }
+}
+impl ConsoleRequest {
+    fn complete(self, outcome: CommandOutcome) {
+        if matches!(&outcome, CommandOutcome::Completed(result) if result.success && result.shutdown) {
+            self.delivery.request();
+        }
+        let _ = self.reply.send(outcome);
+    }
+}
+
+/// The world loop serializes this with local console commands. Recheck a queued
+/// request's identity, credentials and access before any command side effects.
+pub async fn execute(ctx: &Ctx, request: ConsoleRequest) {
+    let outcome = match revalidate(ctx, &request.principal).await {
+        Ok(StatusCode::OK) => match crate::commands::execute_console(ctx, &request.command).await {
+            Ok(result) => CommandOutcome::Completed(result),
+            Err(_) => CommandOutcome::Completed(ConsoleResult { output: "Échec de la commande côté serveur.".into(), success: false, shutdown: false }),
+        },
+        Ok(status) => CommandOutcome::Denied(status),
+        Err(_) => CommandOutcome::Denied(StatusCode::SERVICE_UNAVAILABLE),
+    };
+    request.complete(outcome);
 }
 
 pub async fn bind(conf: &Config) -> Result<Option<TcpListener>> {
@@ -37,7 +91,7 @@ pub async fn serve(listener: TcpListener, ctx: Arc<Ctx>, queue: mpsc::Sender<Con
     let slots = Arc::new(Semaphore::new(8));
     let mut tasks = JoinSet::new();
     let mut stopping = ctx.shutdown.subscribe();
-    loop {
+    while !*stopping.borrow() {
         tokio::select! {
             _ = stopping.changed() => break,
             Some(_) = tasks.join_next(), if !tasks.is_empty() => {},
@@ -47,19 +101,20 @@ pub async fn serve(listener: TcpListener, ctx: Arc<Ctx>, queue: mpsc::Sender<Con
                 let ctx = ctx.clone(); let queue = queue.clone();
                 tasks.spawn(async move {
                     let _permit = permit;
-                    let shutdown = Arc::new(AtomicBool::new(false));
-                    let flag = shutdown.clone(); let service_ctx = ctx.clone();
+                    let delivery = Arc::new(ShutdownDelivery::new(ctx.shutdown.clone()));
+                    let _completion = ConnectionCompletion(delivery.clone());
+                    let service_ctx = ctx.clone();
                     let service = hyper::service::service_fn(move |request| {
-                        let ctx = service_ctx.clone(); let queue = queue.clone(); let flag = flag.clone();
-                        async move { Ok::<_, std::convert::Infallible>(handle(request, peer, ctx, queue, flag).await) }
+                        let ctx = service_ctx.clone(); let queue = queue.clone(); let delivery = delivery.clone();
+                        async move { Ok::<_, std::convert::Infallible>(handle(request, peer, ctx, queue, delivery).await) }
                     });
                     let mut http = hyper::server::conn::http1::Builder::new();
                     http.keep_alive(false).max_headers(32).max_buf_size(16 * 1024)
                         .timer(TokioTimer::new()).header_read_timeout(Duration::from_secs(5));
                     // A timed-out caller does not cancel an already queued world command.
                     let _ = tokio::time::timeout(DEADLINE, http.serve_connection(TokioIo::new(stream), service)).await;
-                    // Flush the shutdown response before closing the world/listener.
-                    if shutdown.load(Ordering::SeqCst) { let _ = ctx.shutdown.send(true); }
+                    // _completion also runs on cancellation; the world command can
+                    // finish later and still signal shutdown through its delivery.
                 });
             }
         }
@@ -79,17 +134,29 @@ fn credentials(value: &str) -> Option<(String, String)> {
     Some((user.into(), password.into()))
 }
 
-async fn authorize(ctx: &Ctx, user: &str, password: &str, peer: SocketAddr) -> Result<StatusCode, anyhow::Error> {
-    let Some(account) = auth::find_account(&ctx.login, user).await? else { return Ok(StatusCode::UNAUTHORIZED); };
-    if !srp6::check_password(&account.username, password, &account.salt, &account.verifier) { return Ok(StatusCode::UNAUTHORIZED); }
+async fn access_allowed(ctx: &Ctx, account: &auth::Account, peer: SocketAddr) -> Result<bool> {
     let ip = peer.ip().to_string();
     if (account.locked && account.last_ip != ip) || auth::is_banned(&ctx.login, account.id, &ip).await?
         || auth::gm_level(&ctx.login, account.id, ctx.settings.realm_id as i32).await? < 3 {
-        return Ok(StatusCode::FORBIDDEN);
+        return Ok(false);
     }
+    Ok(true)
+}
+async fn authorize(ctx: &Ctx, user: &str, password: &str, peer: SocketAddr) -> Result<Authorization> {
+    let Some(account) = auth::find_account(&ctx.login, user).await? else { return Ok(Authorization::Denied(StatusCode::UNAUTHORIZED)); };
+    if !srp6::check_password(&account.username, password, &account.salt, &account.verifier) { return Ok(Authorization::Denied(StatusCode::UNAUTHORIZED)); }
+    if !access_allowed(ctx, &account, peer).await? { return Ok(Authorization::Denied(StatusCode::FORBIDDEN)); }
     // Never log the command arguments: account commands can contain passwords.
     tracing::info!(account_id = account.id, %peer, "SOAP administrateur authentifié");
-    Ok(StatusCode::OK)
+    Ok(Authorization::Allowed(Principal { account, peer }))
+}
+fn same_credentials(before: &auth::Account, after: &auth::Account) -> bool {
+    before.id == after.id && before.username == after.username && before.salt == after.salt && before.verifier == after.verifier
+}
+async fn revalidate(ctx: &Ctx, principal: &Principal) -> Result<StatusCode> {
+    let Some(account) = auth::find_account(&ctx.login, &principal.account.username).await? else { return Ok(StatusCode::UNAUTHORIZED); };
+    if !same_credentials(&principal.account, &account) { return Ok(StatusCode::UNAUTHORIZED); }
+    Ok(if access_allowed(ctx, &account, principal.peer).await? { StatusCode::OK } else { StatusCode::FORBIDDEN })
 }
 
 fn parse_command(xml: &str) -> Result<(String, String)> {
@@ -137,7 +204,7 @@ fn fault(status: StatusCode, message: &str) -> Reply {
     response(status, format!("<SOAP-ENV:Fault><faultcode>SOAP-ENV:{code}</faultcode><faultstring>{}</faultstring></SOAP-ENV:Fault>", escape(message)))
 }
 
-async fn handle(request: Request<Incoming>, peer: SocketAddr, ctx: Arc<Ctx>, queue: mpsc::Sender<ConsoleRequest>, shutdown: Arc<AtomicBool>) -> Reply {
+async fn handle(request: Request<Incoming>, peer: SocketAddr, ctx: Arc<Ctx>, queue: mpsc::Sender<ConsoleRequest>, delivery: Arc<ShutdownDelivery>) -> Reply {
     if request.method() != hyper::Method::POST {
         let mut reply = fault(StatusCode::METHOD_NOT_ALLOWED, "Utiliser HTTP POST");
         reply.headers_mut().insert(header::ALLOW, header::HeaderValue::from_static("POST")); return reply;
@@ -146,11 +213,11 @@ async fn handle(request: Request<Incoming>, peer: SocketAddr, ctx: Arc<Ctx>, que
     let Some((user, password)) = (if values.len() == 1 { values[0].to_str().ok().and_then(credentials) } else { None }) else {
         return fault(StatusCode::UNAUTHORIZED, "Authentification requise");
     };
-    match authorize(&ctx, &user, &password, peer).await {
-        Ok(StatusCode::OK) => {},
-        Ok(status) => return fault(status, "Accès SOAP refusé"),
+    let principal = match authorize(&ctx, &user, &password, peer).await {
+        Ok(Authorization::Allowed(principal)) => principal,
+        Ok(Authorization::Denied(status)) => return fault(status, "Accès SOAP refusé"),
         Err(_) => return fault(StatusCode::SERVICE_UNAVAILABLE, "Authentification temporairement indisponible"),
-    }
+    };
     let bytes = match Limited::new(request.into_body(), MAX_BODY).collect().await {
         Ok(body) => body.to_bytes(),
         Err(_) => return fault(StatusCode::PAYLOAD_TOO_LARGE, "Corps HTTP invalide ou trop volumineux"),
@@ -158,13 +225,15 @@ async fn handle(request: Request<Incoming>, peer: SocketAddr, ctx: Arc<Ctx>, que
     let parsed = std::str::from_utf8(&bytes).ok().and_then(|xml| parse_command(xml).ok());
     let Some((namespace, command)) = parsed else { return fault(StatusCode::INTERNAL_SERVER_ERROR, "Requête executeCommand SOAP 1.1 invalide"); };
     let (reply, receiver) = oneshot::channel();
-    if queue.try_send(ConsoleRequest { command, reply }).is_err() { return fault(StatusCode::SERVICE_UNAVAILABLE, "Console occupée ou arrêtée"); }
+    let account_id = principal.account.id;
+    if queue.try_send(ConsoleRequest { command, principal, reply, delivery }).is_err() { return fault(StatusCode::SERVICE_UNAVAILABLE, "Console occupée ou arrêtée"); }
+    tracing::info!(account_id, "SOAP commande en attente");
     match receiver.await {
-        Ok(result) if result.success => {
-            shutdown.store(result.shutdown, Ordering::SeqCst);
+        Ok(CommandOutcome::Completed(result)) if result.success => {
             response(StatusCode::OK, format!("<ns1:executeCommandResponse xmlns:ns1=\"{namespace}\"><result>{}</result></ns1:executeCommandResponse>", escape(&result.output)))
         },
-        Ok(result) => fault(StatusCode::INTERNAL_SERVER_ERROR, &result.output),
+        Ok(CommandOutcome::Completed(result)) => fault(StatusCode::INTERNAL_SERVER_ERROR, &result.output),
+        Ok(CommandOutcome::Denied(status)) => fault(status, "Autorisation SOAP expirée ou indisponible"),
         Err(_) => fault(StatusCode::SERVICE_UNAVAILABLE, "Console arrêtée"),
     }
 }
@@ -172,6 +241,56 @@ async fn handle(request: Request<Incoming>, peer: SocketAddr, ctx: Arc<Ctx>, que
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn account() -> auth::Account {
+        auth::Account { id: 1, username: "ADMIN".into(), salt: vec![1; 32], verifier: vec![2; 32],
+            locked: false, last_ip: "127.0.0.1".into(), expansion: 0, locale: 0 }
+    }
+    fn command(delivery: Arc<ShutdownDelivery>) -> (ConsoleRequest, oneshot::Receiver<CommandOutcome>) {
+        let (reply, receiver) = oneshot::channel();
+        (ConsoleRequest { command: "server shutdown".into(), principal: Principal { account: account(), peer: "127.0.0.1:1".parse().unwrap() }, reply, delivery }, receiver)
+    }
+    fn result(success: bool, shutdown: bool) -> CommandOutcome {
+        CommandOutcome::Completed(ConsoleResult { output: String::new(), success, shutdown })
+    }
+    #[test] fn shutdown_waits_for_http_completion_and_signals_only_once() {
+        let (tx, mut rx) = watch::channel(false); let delivery = ShutdownDelivery::new(tx);
+        delivery.request(); assert!(!*rx.borrow());
+        delivery.finished(); assert!(*rx.borrow_and_update());
+        delivery.request(); delivery.finished(); assert!(!rx.has_changed().unwrap());
+    }
+    #[test] fn disconnected_expired_receiver_cannot_cancel_an_accepted_shutdown() {
+        let (tx, rx) = watch::channel(false); let delivery = Arc::new(ShutdownDelivery::new(tx));
+        let (request, receiver) = command(delivery.clone()); drop(receiver);
+        drop(ConnectionCompletion(delivery)); assert!(!*rx.borrow());
+        request.complete(result(true, true)); assert!(*rx.borrow());
+    }
+    #[test] fn response_abandoned_after_world_completion_still_shuts_down() {
+        let (tx, rx) = watch::channel(false); let delivery = Arc::new(ShutdownDelivery::new(tx));
+        let (request, receiver) = command(delivery.clone()); request.complete(result(true, true));
+        drop(receiver); assert!(!*rx.borrow());
+        drop(ConnectionCompletion(delivery)); assert!(*rx.borrow());
+    }
+    #[test] fn failed_denied_and_non_shutdown_commands_never_arm_shutdown() {
+        for outcome in [result(false, true), result(true, false), CommandOutcome::Denied(StatusCode::FORBIDDEN)] {
+            let (tx, rx) = watch::channel(false); let delivery = Arc::new(ShutdownDelivery::new(tx));
+            let (request, receiver) = command(delivery.clone()); drop(receiver);
+            drop(ConnectionCompletion(delivery)); request.complete(outcome); assert!(!*rx.borrow());
+        }
+    }
+    #[tokio::test] async fn cancelled_connection_future_records_completion_before_late_shutdown() {
+        let (tx, rx) = watch::channel(false); let delivery = Arc::new(ShutdownDelivery::new(tx));
+        let completion = ConnectionCompletion(delivery.clone());
+        let task = tokio::spawn(async move { let _completion = completion; std::future::pending::<()>().await; });
+        task.abort(); let _ = task.await; delivery.request(); assert!(*rx.borrow());
+    }
+    #[test] fn queued_credential_proof_rejects_password_rotation_or_account_replacement() {
+        let before = account(); assert!(same_credentials(&before, &before));
+        for field in ["id", "username", "salt", "verifier"] {
+            let mut after = before.clone();
+            match field { "id" => after.id += 1, "username" => after.username.push('2'), "salt" => after.salt[0] += 1, _ => after.verifier[0] += 1 }
+            assert!(!same_credentials(&before, &after));
+        }
+    }
     fn envelope(ns: &str, command: &str) -> String { format!("<s:Envelope xmlns:s=\"{ENVELOPE}\" xmlns:m=\"{ns}\"><s:Body><m:executeCommand><command>{command}</command></m:executeCommand></s:Body></s:Envelope>") }
     #[test] fn accepts_ac_tc_prefixes_cdata_entities_and_optional_dot() {
         for ns in ["urn:AC", "urn:TC"] {
