@@ -11,6 +11,9 @@ end
 
 function RappelzDebugRefresh()
     if RappelzDebugInfo == nil then return end
+    local job, base = nil, nil
+    if GetJobBaseInfo then job, base = GetJobBaseInfo() end
+    local function stat(field) return known(GetJobBaseStat and GetJobBaseStat(field)) end
     RappelzDebugInfo:SetText(
         "Player: " .. (UnitName("player") or "(not in world)") ..
         "\nLevel: " .. known(UnitLevel("player")) .. "  AP: " .. known(GetPlayerCombatStat and GetPlayerCombatStat("attack")) .. "  DEF: " .. known(GetPlayerCombatStat and GetPlayerCombatStat("defence")) ..
@@ -20,6 +23,9 @@ function RappelzDebugRefresh()
         "\nMoney: " .. known(GetMoney()) ..
         "\nParty: " .. known(GetNumPartyMembers()) .. "  Member: " .. (UnitName("party1") or "(none)") ..
         "\nJob level: " .. known(GetJobLevel and GetJobLevel()) .. "  Skills: " .. known(GetNumKnownSkills()) .. "  JP: " .. known(GetJobPointsExact and GetJobPointsExact() or GetJobPoints()) ..
+        "\nJob base (raw): " .. known(job) .. " / " .. known(base) ..
+        "\nSTR " .. stat("strength") .. " VIT " .. stat("vitality") .. " DEX " .. stat("dexterity") .. " AGI " .. stat("agility") ..
+        "\nINT " .. stat("intelligence") .. " WIS " .. stat("wisdom") .. " LUCK " .. stat("luck") ..
         "\nTarget: " .. (UnitName("target") or "(none)") ..
         "\nTarget level: " .. known(UnitLevel("target")) ..
         "\nTarget layer: " .. known(UnitLayer("target")) ..
@@ -43,6 +49,7 @@ function RappelzDebugOnLoad(self)
     self:RegisterEvent("RAPPELZ_JP_CHANGED")
     self:RegisterEvent("RAPPELZ_JOB_LEVEL_CHANGED")
     self:RegisterEvent("RAPPELZ_COMBAT_STATS_CHANGED")
+    self:RegisterEvent("RAPPELZ_JOB_BASE_CHANGED")
     self:RegisterEvent("RAPPELZ_SKILL_EVENT")
     self:RegisterEvent("PARTY_INVITE_REQUEST")
     self:RegisterEvent("RAPPELZ_PARTY_INVITE_CLOSED")
@@ -59,6 +66,8 @@ end
 
 function RappelzDebugOnEvent(self, event, ...)
     local arg = select(1, ...)
+    local job, base = nil, nil
+    if GetJobBaseInfo then job, base = GetJobBaseInfo() end
     RappelzDebugDB.events[event] = (RappelzDebugDB.events[event] or 0) + 1
     local snapshot = {
         event = event, arg = arg, time = GetTime(),
@@ -66,6 +75,7 @@ function RappelzDebugOnEvent(self, event, ...)
         skillCaster = event == "RAPPELZ_SKILL_EVENT" and select(3, ...) or nil,
         skillAmount = event == "RAPPELZ_SKILL_EVENT" and select(4, ...) or nil,
         attack = GetPlayerCombatStat and GetPlayerCombatStat("attack"), defence = GetPlayerCombatStat and GetPlayerCombatStat("defence"), moveSpeed = GetPlayerCombatStat and GetPlayerCombatStat("move_speed"),
+        baseJob = job, baseId = base,
         name = UnitName("player"), level = UnitLevel("player"), layer = UnitLayer("player"),
         hp = UnitHealth("player"), maxHP = UnitHealthMax("player"),
         mp = UnitMana("player"), maxMP = UnitManaMax("player"),
@@ -79,6 +89,13 @@ function RappelzDebugOnEvent(self, event, ...)
     table.insert(RappelzDebugDB.recent, snapshot)
     if #RappelzDebugDB.recent > 32 then table.remove(RappelzDebugDB.recent, 1) end
     RappelzDebugDB.lastPlayer = snapshot
+    if event == "RAPPELZ_JOB_BASE_CHANGED" then
+        local values = {}
+        for _, field in ipairs({"strength", "vitality", "dexterity", "agility", "intelligence", "wisdom", "luck"}) do
+            values[#values + 1] = known(GetJobBaseStat and GetJobBaseStat(field))
+        end
+        print("JOB_BASE " .. known(job) .. " " .. known(base) .. " " .. table.concat(values, " "))
+    end
     if event == "RAPPELZ_SKILL_EVENT" then
         print("SKILL " .. known(arg) .. " " .. known(snapshot.skillPhase) .. " caster=" .. known(snapshot.skillCaster) .. " amount=" .. known(snapshot.skillAmount))
     end

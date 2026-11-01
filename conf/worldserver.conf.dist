@@ -90,3 +90,13 @@ Rappelz.MoveTolerance = 60
 
 Rappelz.NetworkKey = "}h79q~B%al;k'y $E"
 Rappelz.Codepage = "windows-1252"
+
+###################################################################################################
+# SOAP — administration distante, même appel executeCommand que AC/TC (SOAP 1.1)
+# Compte existant avec gmlevel >= 3 pour ce royaume ou -1. Aucun changement de schéma.
+# HTTP Basic : conserver l'écoute locale ou utiliser un relais HTTPS / tunnel pour l'accès distant.
+# Les commandes disponibles sont celles de la console (help), pas les commandes liées à un joueur.
+# Désactivé par défaut. Variables AC_SOAP_ENABLED, AC_SOAP_IP, AC_SOAP_PORT prises en charge.
+SOAP.Enabled = 0
+SOAP.IP = "127.0.0.1"
+SOAP.Port = 7878

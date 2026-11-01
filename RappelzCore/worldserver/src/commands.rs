@@ -224,11 +224,25 @@ fn server_info(ctx: &Ctx) -> String {
 
 /// Commandes de la console du worldserver (stdin), comme `worldserver>` d'AzerothCore.
 pub async fn console(ctx: Arc<Ctx>, line: &str) -> Result<bool> {
+    let result = execute_console(&ctx, line).await?;
+    if !result.output.is_empty() { println!("{}", result.output); }
+    Ok(result.shutdown)
+}
+
+pub struct ConsoleResult {
+    pub output: String,
+    pub success: bool,
+    pub shutdown: bool,
+}
+
+/// Shared console/SOAP dispatcher, called serially by the world loop.
+pub async fn execute_console(ctx: &Ctx, line: &str) -> Result<ConsoleResult> {
+    let mut result = ConsoleResult { output: String::new(), success: true, shutdown: false };
     let args: Vec<&str> = line.split_whitespace().collect();
     match args.as_slice() {
         [] => {}
         ["help"] | ["?"] => {
-            for l in [
+            result.output = [
                 "account create <compte> <mot_de_passe> [email]",
                 "account set password <compte> <mot_de_passe>",
                 "account set gmlevel <compte> <0-3> [royaume|-1]",
@@ -236,42 +250,40 @@ pub async fn console(ctx: Arc<Ctx>, line: &str) -> Result<bool> {
                 "server info",
                 "saveall",
                 "server shutdown | exit",
-            ] {
-                println!("  {l}");
-            }
+            ].join("\n");
         }
         ["account", "create", user, pass, rest @ ..] => {
             let email = rest.first().copied().unwrap_or("");
             match auth::create_account(&ctx.login, user, pass, email).await {
-                Ok(id) => println!("Compte {user} créé (id {id})."),
-                Err(e) => println!("Échec : {e}"),
+                Ok(id) => result.output = format!("Compte {user} créé (id {id})."),
+                Err(_) => { result.output = "Échec de création du compte.".into(); result.success = false; }
             }
         }
         ["account", "set", "password", user, pass] => match auth::find_account(&ctx.login, user).await? {
             Some(a) => {
                 auth::set_password(&ctx.login, a.id, user, pass).await?;
-                println!("Mot de passe de {user} modifié.");
+                result.output = format!("Mot de passe de {user} modifié.");
             }
-            None => println!("Compte inconnu."),
+            None => { result.output = "Compte inconnu.".into(); result.success = false; }
         },
         ["account", "set", "gmlevel", user, level, rest @ ..] => {
             let realm: i32 = rest.first().and_then(|r| r.parse().ok()).unwrap_or(-1);
             match (auth::find_account(&ctx.login, user).await?, level.parse::<u8>()) {
                 (Some(a), Ok(lv)) if lv <= 3 => {
                     auth::set_gm_level(&ctx.login, a.id, lv, realm).await?;
-                    println!("{user} : niveau GM {lv} (royaume {realm}).");
+                    result.output = format!("{user} : niveau GM {lv} (royaume {realm}).");
                 }
-                _ => println!("Usage : account set gmlevel <compte> <0-3> [royaume|-1]"),
+                _ => { result.output = "Usage : account set gmlevel <compte> <0-3> [royaume|-1]".into(); result.success = false; }
             }
         }
-        ["announce", text @ ..] => announce(&ctx, &text.join(" ")),
-        ["server", "info"] => println!("{}", server_info(&ctx)),
+        ["announce", text @ ..] if !text.is_empty() => { announce(ctx, &text.join(" ")); result.output = "Annonce envoyée.".into(); }
+        ["server", "info"] => result.output = server_info(ctx),
         ["saveall"] => {
             let _ = ctx.save_all.send(());
-            println!("Sauvegarde de tous les joueurs demandée.");
+            result.output = "Sauvegarde de tous les joueurs demandée.".into();
         }
-        ["server", "shutdown", ..] | ["exit"] | ["quit"] => return Ok(true),
-        _ => println!("Commande inconnue (help)."),
+        ["server", "shutdown"] | ["exit"] | ["quit"] => { result.shutdown = true; result.output = "Arrêt du serveur demandé.".into(); }
+        _ => { result.output = "Commande inconnue (help).".into(); result.success = false; }
     }
-    Ok(false)
+    Ok(result)
 }

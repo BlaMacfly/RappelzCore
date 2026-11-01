@@ -1,5 +1,7 @@
 # Network protocol implementation
 
+2026-11-01: [SOAP administration](SOAP_ADMINISTRATION.md) adds a separate configurable HTTP/SOAP listener for authenticated console commands. It does not change original game opcodes. [Raw job-base addon access](JOB_BASE_ADDON_VALIDATION.md) consumes the existing private own-player SC_JOB_PROGRESS extension without modifying its wire format.
+
 Audit date: 2026-10-30. The detailed packet/function evidence remains in [re/network_protocol.md](re/network_protocol.md). [CLIENT_REVERSE_ENGINEERING.md](CLIENT_REVERSE_ENGINEERING.md) records executable identity and the limits of its competing version labels; [SERVER_REFERENCES.md](SERVER_REFERENCES.md) compares public implementations.
 
 ## Compatibility target and evidence

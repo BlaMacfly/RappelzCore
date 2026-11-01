@@ -1,5 +1,7 @@
 # Lua addon system
 
+Follow-up **2026-11-01**: [raw job-base access](JOB_BASE_ADDON_VALIDATION.md) adds read-only `GetJobBaseInfo`, `GetJobBaseStat` and `RAPPELZ_JOB_BASE_CHANGED`. RappelzDebug labels/displays the seven resource bases separately from physical combat fields. Two clients pass 44 progression/base checks; 26 Lua integration tests now pass. This adds no effective JLV/equipment formula. [SOAP](SOAP_ADMINISTRATION.md) separately exposes authenticated administrator console RPC; no remote-administration action is added to Lua.
+
 Verified development cycle: 2026-10-30. Implementation: `shared/rz-addon`; native adapter: `RappelzRust/client/src/addons.rs`. This is a working, deliberately limited addon foundation. It does not implement the complete WoW 3.3.5 UI/API.
 
 Follow-up: [LIVE_SERVER_VALIDATION.md](LIVE_SERVER_VALIDATION.md) records a passing native online session, 13 Lua integration tests, actual event traces and preserved original data. RappelzDebug now displays MP/currency and keeps bounded event counters plus the last 32 observed state snapshots. Historical offline-only notes below are retained as the first cycle's verification record.

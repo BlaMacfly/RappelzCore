@@ -5,6 +5,7 @@
 //! puis écoute des joueurs sur `WorldServerPort`, console `worldserver>` sur l'entrée standard.
 
 mod commands;
+mod soap;
 mod data;
 mod gameplay;
 mod job_progression;
@@ -24,7 +25,6 @@ use clap::Parser;
 use rz_common::Config;
 use rz_database::sqlx::MySqlPool;
 use rz_database::{auth, characters};
-use tokio::io::AsyncBufReadExt;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, watch};
 
@@ -165,11 +165,16 @@ async fn main() -> Result<()> {
 
     let bind = format!("{}:{}", conf.string("BindIP", "0.0.0.0"), conf.int("WorldServerPort", 4514u16));
     let listener = TcpListener::bind(&bind).await.with_context(|| format!("écoute sur {bind}"))?;
+    // All enabled listener binds must succeed before changing any online flags.
+    let soap_listener = soap::bind(&conf).await?;
     // A competing start must fail its bind before it can clear a live world's flags.
     characters::reset_online(&ctx.chars).await?;
     auth::reset_realm_online(&ctx.login, realm_id).await?;
     auth::update_realm_status(&ctx.login, realm_id, true, 0.0).await?;
     tracing::info!("Worldserver prêt sur {bind} (royaume {realm_id}). Tapez « help » pour la console.");
+    let (soap_queue, mut soap_commands) = tokio::sync::mpsc::channel::<soap::ConsoleRequest>(8);
+    let soap_task = soap_listener.map(|listener| tokio::spawn(soap::serve(listener, ctx.clone(), soap_queue)));
+    let mut shutdown_request = ctx.shutdown.subscribe();
 
     // Visibilité (ENTER/LEAVE) recalculée en continu.
     let tick_ctx = ctx.clone();
@@ -197,10 +202,27 @@ async fn main() -> Result<()> {
         }
     });
 
-    let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+    // Tokio's blocking stdin worker cannot be cancelled: remote shutdown otherwise
+    // waits for another physical newline before its runtime can exit.
+    let (console_lines, mut stdin) = tokio::sync::mpsc::channel(8);
+    std::thread::Builder::new().name("console-reader".into()).spawn(move || {
+        use std::io::BufRead;
+        for line in std::io::stdin().lock().lines() {
+            let Ok(line) = line else { break; };
+            if console_lines.blocking_send(line).is_err() { break; }
+        }
+    })?;
     let mut console_open = true;
     loop {
         tokio::select! {
+            Some(request) = soap_commands.recv() => {
+                let result = match commands::execute_console(&ctx, &request.command).await {
+                    Ok(result) => result,
+                    Err(_) => commands::ConsoleResult { output: "Échec de la commande côté serveur.".into(), success: false, shutdown: false },
+                };
+                let _ = request.reply.send(result);
+            }
+            _ = shutdown_request.changed() => { if *shutdown_request.borrow() { break; } }
             accepted = listener.accept() => {
                 let (stream, addr) = accepted?;
                 let online = ctx.world.lock().unwrap().players.len();
@@ -211,8 +233,8 @@ async fn main() -> Result<()> {
                 let (reader, writer) = rz_proto::conn::split(stream, &ctx.settings.network_key);
                 tokio::spawn(session::run(ctx.clone(), addr, reader, writer));
             }
-            line = stdin.next_line(), if console_open => match line {
-                Ok(Some(line)) => match commands::console(ctx.clone(), line.trim()).await {
+            line = stdin.recv(), if console_open => match line {
+                Some(line) => match commands::console(ctx.clone(), line.trim()).await {
                     Ok(true) => break,
                     Ok(false) => {}
                     Err(e) => println!("Erreur : {e:#}"),
@@ -225,6 +247,7 @@ async fn main() -> Result<()> {
 
     tracing::info!("Arrêt : sauvegarde des joueurs…");
     let _ = ctx.shutdown.send(true);
+    if let Some(task) = soap_task { let _ = task.await; }
     tokio::time::sleep(Duration::from_secs(2)).await;
     auth::update_realm_status(&ctx.login, realm_id, false, 0.0).await?;
     tracing::info!("Worldserver arrêté.");

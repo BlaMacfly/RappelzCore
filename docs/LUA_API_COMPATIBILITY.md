@@ -1,6 +1,6 @@
 # Lua API compatibility matrix
 
-Verified through 2026-10-31. `## Interface: 30300` preserves a familiar manifest convention; it does not promise automatic WoW addon compatibility. Lua 5.1 executes real scripts. Separate addon VMs deliberately do not share globals.
+Verified through 2026-11-01. `## Interface: 30300` preserves a familiar manifest convention; it does not promise automatic WoW addon compatibility. Lua 5.1 executes real scripts. Separate addon VMs deliberately do not share globals.
 
 Core lifecycle/state events were observed in the actual native/local-server session; see [LIVE_SERVER_VALIDATION.md](LIVE_SERVER_VALIDATION.md). Death/alive transitions and target HP 0→100 were subsequently verified with two native clients in [REVIVAL_VALIDATION.md](REVIVAL_VALIDATION.md). Unknown `(nil, nil)` target vitals do not generate fabricated health/mana changes. Missing level-change HP/MP server broadcasts were corrected for both GM and XP callers.
 
@@ -21,6 +21,8 @@ Core lifecycle/state events were observed in the actual native/local-server sess
 | `GetJobPoints()` | Read-only Rappelz extension: accepted own EXP_UPDATE/private job-preview JP, nil until known; zero is preserved. Numeric Lua 5.1 precision limits apply. |
 | `GetJobPointsExact()` | Read-only exact decimal string of the same signed-64-bit JP balance; nil until known, `"0"` for known zero. No double conversion. |
 | `GetJobLevel()` | Read-only own level from the accepted private job preview; nil when unavailable. Initial/reentry state and confirmed purchases are verified with two native clients. |
+| `GetJobBaseInfo()` | Own confirmed job ID and raw BasicStat resource ID; two nil values when unavailable. |
+| `GetJobBaseStat(field)` | Own raw job base: `strength`, `vitality`, `dexterity`, `agility`, `intelligence`, `wisdom`, `luck`. Unknown/unsupported is nil; zero remains zero. Before JLV/equipment/state modifiers, not effective totals. [Two-client validation](JOB_BASE_ADDON_VALIDATION.md). |
 | `GetPlayerCombatStat(field)` | Read-only own accepted physical `"attack"`, `"defence"`, or configured `"move_speed"`; nil until a valid full self snapshot, or for unsupported names. Foreign/delta/invalid packets never overwrite it. [Two-client validation](CHARACTER_STATS_VALIDATION.md) verifies XP level-up and reentry; no derived equipment/JLV formulas or target stat API. |
 | `GetTime()` | Monotonic time since this addon host started; survives UI reload. |
 | `print(...)` | Bounded client log and in-world chat output. |
@@ -39,6 +41,7 @@ Core lifecycle/state events were observed in the actual native/local-server sess
 | `UNIT_HEALTH` | Known health/max-health tuple changes; `"player"` or `"target"`. |
 | `UNIT_MANA` | Mana/max-mana tuple changes; unit token. |
 | `RAPPELZ_COMBAT_STATS_CHANGED` | No arguments; complete accepted own tuple is readable. Initial discovery/changed tuple/fresh reentry emit; duplicate refresh packets do not. Unknown clearing emits no fabricated numeric change; normal logout retains last readable state. A new addon host after reload discovers current known state. |
+| `RAPPELZ_JOB_BASE_CHANGED` | No arguments; complete own raw job base readable after discovery/identity/value change or in-world clearing. Duplicate/JLV-only previews and reload do not emit. Normal logout retains the last snapshot during PLAYER_LOGOUT, then clears it; fresh entry discovers it again. |
 | `PLAYER_LEVEL_UP` | Known player level increases; new level. Initial level discovery is not a fabricated level-up. |
 | `RAPPELZ_LAYER_CHANGED` | Rappelz extension: same player's known layer changes; numeric new layer. Initial discovery, another handle and UI reload do not fabricate it. No layer-changing API is exposed. |
 | `BAG_UPDATE` | Accepted inventory contents change; `0` for the current single logical bag. |
