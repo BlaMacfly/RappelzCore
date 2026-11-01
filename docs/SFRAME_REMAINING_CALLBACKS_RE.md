@@ -4,6 +4,8 @@ Verified **2026-11-01** on original x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b
 
 [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, original SFrame PE file/product **9.1.0.0**, embedded **Source9.5.2** build lineage and network literal/profile **201507080**. Exact official Epic/patch remains unconfirmed. The original client is not executed.
 
+The [auxiliary-provenance follow-up](SFRAME_AUXILIARY_PROVENANCE_RE.md) identifies selected25c/264 sources as lazy tooltips and260/27c factory products as tooltip controls. It retains external-input and truncated-flow limits, and rechecks the unbound918630 nonzero projection without identifying MAIN activation.
+
 ## What is now qualified
 
 | Proven input or receiver | Selected operation | Result and boundary |
