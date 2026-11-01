@@ -38,9 +38,9 @@ pub struct Session {
     pub skill_catalog:Option<rz_proto::skills::ScSkillCatalog>,
 }
 
-pub async fn run(ctx: Arc<Ctx>, addr: SocketAddr, mut reader: PacketReader, mut writer: PacketWriter) {
+pub async fn run(ctx: Arc<Ctx>, addr: SocketAddr, mut reader: PacketReader, mut writer: PacketWriter) -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<RawPacket>();
-    let writer_task = tokio::spawn(async move {
+    let mut writer_task = tokio::spawn(async move {
         while let Some(p) = rx.recv().await {
             if writer.send_raw(&p).await.is_err() {
                 break;
@@ -57,6 +57,10 @@ pub async fn run(ctx: Arc<Ctx>, addr: SocketAddr, mut reader: PacketReader, mut 
 
     let outcome: Result<()> = async {
         loop {
+            if *shutdown.borrow() {
+                let _ = session.tx.send(msg::ScDisconnectDesc { code: 0 }.to_packet());
+                break;
+            }
             tokio::select! {
                 packet = reader.recv() => {
                     let Some(packet) = packet? else { break };
@@ -83,10 +87,11 @@ pub async fn run(ctx: Arc<Ctx>, addr: SocketAddr, mut reader: PacketReader, mut 
         Ok(())
     }
     .await;
-    if let Err(e) = outcome {
+    if let Err(e) = &outcome {
         tracing::warn!("{addr} : {e:#}");
     }
-    if let Err(e) = session.leave_world().await {
+    let saved = session.leave_world().await;
+    if let Err(e) = &saved {
         tracing::error!("{addr} : sauvegarde à la déconnexion : {e:#}");
         session.detach_world_without_save();
     }
@@ -94,10 +99,19 @@ pub async fn run(ctx: Arc<Ctx>, addr: SocketAddr, mut reader: PacketReader, mut 
     // Remove all world/socket senders before a possibly unavailable auth database.
     // Otherwise SQL recovery delays EOF and can leave a ghost player indefinitely.
     drop(session);
-    let _ = writer_task.await;
-    if let Some(account_id)=account_id {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(2),auth::set_online(&ctx.login,account_id,0)).await;
+    if tokio::time::timeout(std::time::Duration::from_secs(2), &mut writer_task).await.is_err() {
+        writer_task.abort(); let _ = writer_task.await;
     }
+    let account_saved = if let Some(account_id)=account_id {
+        match tokio::time::timeout(std::time::Duration::from_secs(2),auth::set_online(&ctx.login,account_id,0)).await {
+            Ok(result) => result,
+            Err(_) => Err(anyhow::anyhow!("account offline cleanup timed out")),
+        }
+    } else { Ok(()) };
+    saved?;
+    account_saved?;
+    if *ctx.shutdown.borrow() { outcome?; }
+    Ok(())
 }
 
 impl Session {

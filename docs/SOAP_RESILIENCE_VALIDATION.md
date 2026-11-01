@@ -1,5 +1,7 @@
 # SOAP queue, interrupted calls and permission changes
 
+Subsequent verification: [Two active clients at shutdown](SOAP_SHUTDOWN_VALIDATION.md) now covers actual unsaved movement, a six-second SQL delay, complete session draining and restored characters after restart. It fixes the previously untested two-second save grace with 65 checks and an old-server control. The tests below retain their original scope and counts.
+
 Verified **2026-11-01**, RappelzCore **0.1.0 development**. **26 independent comparison checks pass**, together with all **25 existing SOAP checks** and **44 two-client progression/base checks**. The previous compiled server reproduces three concrete defects; the corrected server passes the corresponding real HTTP/SQL cases. No original game executable is run.
 
 ## Corrections

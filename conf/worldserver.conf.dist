@@ -100,3 +100,7 @@ Rappelz.Codepage = "windows-1252"
 SOAP.Enabled = 0
 SOAP.IP = "127.0.0.1"
 SOAP.Port = 7878
+
+# Attente des sauvegardes de toutes les sessions à l'arrêt, en secondes (5..300).
+# Un échec ou dépassement renvoie un code de sortie non nul ; aucune réussite n'est supposée.
+ShutdownTimeout = 30

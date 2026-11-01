@@ -6,6 +6,7 @@
 
 mod commands;
 mod soap;
+mod shutdown;
 mod data;
 mod gameplay;
 mod job_progression;
@@ -178,20 +179,21 @@ async fn main() -> Result<()> {
 
     // Visibilité (ENTER/LEAVE) recalculée en continu.
     let tick_ctx = ctx.clone();
-    tokio::spawn(async move {
+    let world_tick_task = tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(200));
-        loop {
-            tick.tick().await;
-            tick_ctx.world.lock().unwrap().tick();
+        let mut stopping = tick_ctx.shutdown.subscribe();
+        while !*stopping.borrow() {
+            tokio::select! { _ = stopping.changed() => break, _ = tick.tick() => tick_ctx.world.lock().unwrap().tick() }
         }
     });
 
     // Population du royaume et table uptime, comme AzerothCore.
     let status_ctx = ctx.clone();
-    tokio::spawn(async move {
+    let status_task = tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(60));
-        loop {
-            tick.tick().await;
+        let mut stopping = status_ctx.shutdown.subscribe();
+        while !*stopping.borrow() {
+            tokio::select! { _ = stopping.changed() => break, _ = tick.tick() => {} }
             let (online, max, up) = {
                 let w = status_ctx.world.lock().unwrap();
                 (w.players.len(), w.max_online, w.uptime_secs())
@@ -213,8 +215,14 @@ async fn main() -> Result<()> {
         }
     })?;
     let mut console_open = true;
+    let mut sessions = tokio::task::JoinSet::new();
+    let mut shutdown_failures = 0;
     loop {
         tokio::select! {
+            Some(result) = sessions.join_next(), if !sessions.is_empty() => {
+                let failed = match result { Ok(Ok(())) => false, Ok(Err(error)) => { tracing::warn!("Fin de session : {error:#}"); true }, Err(error) => { tracing::warn!("Tâche de session : {error}"); true } };
+                shutdown_failures += usize::from(failed && *shutdown_request.borrow());
+            }
             Some(request) = soap_commands.recv() => {
                 soap::execute(&ctx, request).await;
             }
@@ -227,7 +235,7 @@ async fn main() -> Result<()> {
                     continue;
                 }
                 let (reader, writer) = rz_proto::conn::split(stream, &ctx.settings.network_key);
-                tokio::spawn(session::run(ctx.clone(), addr, reader, writer));
+                sessions.spawn(session::run(ctx.clone(), addr, reader, writer));
             }
             line = stdin.recv(), if console_open => match line {
                 Some(line) => match commands::console(ctx.clone(), line.trim()).await {
@@ -243,9 +251,14 @@ async fn main() -> Result<()> {
 
     tracing::info!("Arrêt : sauvegarde des joueurs…");
     let _ = ctx.shutdown.send(true);
+    drop(listener);
     if let Some(task) = soap_task { let _ = task.await; }
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    auth::update_realm_status(&ctx.login, realm_id, false, 0.0).await?;
+    let _ = world_tick_task.await;
+    let _ = status_task.await;
+    let realm_offline = auth::update_realm_status(&ctx.login, realm_id, false, 0.0).await;
+    let saved = shutdown::drain(&mut sessions, Duration::from_secs(conf.int("ShutdownTimeout", 30u64).clamp(5, 300)), shutdown_failures).await;
+    realm_offline?;
+    saved?;
     tracing::info!("Worldserver arrêté.");
     Ok(())
 }
