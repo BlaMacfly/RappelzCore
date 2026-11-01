@@ -82,3 +82,7 @@ Ignored local run: `client-data/audit/2026-11-01-sframe-notification-window-0a4f
 ## Restart point
 
 Registration/class/resource, the virtual+0xcc registry dispatcher, its kind-0x426 callback and the selected pending-list-to-caption path are answered statically. Complete runtime registration lifetime, all notification actions and the original character-sheet mode trigger remain unresolved. Reuse the complete new functions and three ledgers. Continue from an actual reaching registration/computed target and receiver for 918630, or a source-backed typed MAIN pointer reaching a nonzero mode write. Do not repeat the empty caller query, the old numeric sweeps or retained formatters, and do not use notification list headers or warning text to type MAIN.
+
+## Follow-up: notification actions and countdown, 2026-11-01
+
+The [action/countdown investigation](SFRAME_NOTIFICATION_ACTIONS_RE.md) continues from the identified recipient and mode-writer candidate. Notification close-one/close-all dispatch and cleanup are traced; initialization hides the disable control and no saved disable option is established on the selected path. Typed countdown state and time conversions are separated from MAIN's tab/mode fields; the 918630 receiver and alternate-mode activation remain unresolved. Data, settings, services and versions remain preserved.
