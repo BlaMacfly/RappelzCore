@@ -1,5 +1,7 @@
 # SFrame pointer-delivery provenance and alternate-mode candidates
 
+**Follow-up:** [Concrete MAIN pointer flow](SFRAME_MAIN_POINTER_FLOW_RE.md) now links startup construction, registry lookup and actual message delivery to the sheet. Its 59-entry table and both 69-entry child tables are accounted for; geometry/display effects and archived evidence are qualified separately. MAIN activation remains unresolved.
+
 Verified **2026-11-01** on original x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b938d601aeaebb7b3db0c89fc47755325a98a410d`, using **REA 6.4.0 / Ghidra 12.1.4** and **Capstone 5.0.7**. This continues [the helper-caller investigation](SFRAME_HELPER_CALLERS_RE.md) across **all 102 retained pointer-delivery sites**. **98 sites are bound to provider procedure bodies; four remain original-byte-only.** This pass adds **102 new native function dossiers / 28,405 analyzed body bytes**, 74 containment observations and one incoming-reference query. **MAIN SUICharacterInfoWnd byte+0x458 activation remains unresolved.** No nonzero write with a demonstrated MAIN receiver is recovered.
 
 [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, original SFrame PE **9.1.0.0**, embedded build lineage **Source9.5.2**, network literal/profile **201507080**. The exact official Epic/patch remains unconfirmed. No original target executes in this static pass.
