@@ -4,6 +4,8 @@ Verified **2026-11-01** on original x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b
 
 [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, original SFrame PE file/product **9.1.0.0**, embedded **Source9.5.2** build lineage and network literal/profile **201507080**. Exact official Epic/patch remains unconfirmed. This pass does not execute the original client.
 
+The [remaining-callback follow-up](SFRAME_REMAINING_CALLBACKS_RE.md) qualifies80af50/b6abc0, the whole-MAIN manager route and selected control-slot continuations. It distinguishes noncontiguous Native body ranges from flattened caller metadata, pointer nodes from windows and focus13c from mode458. Unknown auxiliary effects and activation remain bounded.
+
 ## Questions and results
 
 | Question | Qualified result |
