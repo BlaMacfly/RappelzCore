@@ -129,3 +129,7 @@ Local ignored run: `client-data/audit/2026-11-01-sframe-context-menu-routing-4e8
 ## Remaining question
 
 The four warnings, selected predicates and output paths are answered statically; the registered ArenaWaiting callback is independently qualified. **918630's incoming registration/target and EDI receiver are still unknown.** Its call to 8fb010 still projects byte outer+0x458=1 and DWORD outer+0x45c=0, but no evidence binds that outer object to constructed `SUICharacterInfoWnd`. The next investigation must establish an actual reaching target and receiver; neither localized text, neighboring callbacks nor shared field offsets provide that proof. A separate concrete recipient frontier is the registered object for ID 0xd3: retained bootstrap 9cb4e0 references this ID through 9beae0 before the 9e47b0 phase. Follow that source-backed registration route and its actual handler without substituting the already-typed ID-0xd7 waiting window.
+
+## Follow-up: notification window, 2026-11-01
+
+The [window-0xd3 investigation](SFRAME_NOTIFICATION_WINDOW_RE.md) continues the registered-recipient frontier. ID 0xd3 is constructed as SUINotificationWnd; its mode-0 resource registration, virtual+0xcc dispatcher, registered 0x426/pushNotification callback and selected queue-to-caption path are identified. Its list headers are separated from MAIN's mode byte; 918630's receiver and alternate-mode activation remain unresolved. Data, settings, services and versions remain preserved.
