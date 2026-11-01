@@ -1,5 +1,7 @@
 # SFrame caller search for the alternate-mode copy candidate
 
+**Follow-up:** [All 102 pointer deliveries](SFRAME_POINTER_DELIVERIES_RE.md) are now reviewed with 98 provider-contained sites and four raw-only fragments. ABI artifacts, typed container paths and an ArenaWaiting countdown reset are distinguished from MAIN mode. MAIN activation and several helper/virtual receiver effects remain unresolved.
+
 Verified **2026-11-01** on original x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b938d601aeaebb7b3db0c89fc47755325a98a410d`, using **REA 6.4.0 / Ghidra 12.1.4** and **Capstone 5.0.7**. This follows [the implicit-copy investigation](SFRAME_IMPLICIT_COPIES_RE.md) and focuses on the unbound **0x812a90** entry and its inclusive **0x812a90..0x812abc** body. **No ordinary static caller was recovered in the examined forms. MAIN SUICharacterInfoWnd byte+0x458 activation remains unresolved.**
 
 [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, original SFrame PE **9.1.0.0**, embedded build lineage **Source9.5.2**, network literal/profile **201507080**. The exact official Epic/patch remains unconfirmed. This pass performs no original-target execution or live object observation.
