@@ -92,3 +92,7 @@ Ignored local run: `client-data/audit/2026-11-02-sframe-main-render-consumer-9d2
 ## Restart point
 
 Reuse this run's snapshot, rendering/primitive ledgers and historical Native index. The clipping consumer and compatible queue dispatch are closed for the selected contracts; do not repeat them as unknown or expand the primitive table beyond its three slots. Continue only from a demonstrated reaching definition for the argument delivered to MAIN's virtual+0x14, another concrete saved-pointer consumer, or a typed MAIN pointer reaching a nonzero mode write. Preserve the queue allocation/sort, dynamic-table, lifetime, shared-global and indirect-device boundaries. The 6,720-byte local manager-neighborhood probe is explicitly heuristic and partially decoded; it is not whole-class or whole-program coverage. No matching offsets, compatible signatures, absent original PDB or synthetic call establishes 918630's receiver or activation event.
+
+## Follow-up: render entry, 2026-11-02
+
+The [render-entry investigation](SFRAME_MAIN_RENDER_ENTRY_RE.md) continues the context provenance from new window-render dispatch sites. The SBotManager construction/frame path ties owner+0x40 to a constructed SGameViewPort and the same context through SGameManager/SGameInterface, window-render dispatch and the actual viewport drain. MAIN list membership and intact-object guards remain conditions. The alternate-mode trigger and receiver of 918630 remain unresolved. Earlier clipping, queue and callback limits remain applicable. Data and versions remain preserved.
