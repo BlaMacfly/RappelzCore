@@ -1,5 +1,7 @@
 # SFrame interprocedural values and MAIN helper contracts
 
+Follow-up **2026-11-02**: [MAIN child opacity callbacks](SFRAME_MAIN_OPACITY_CALLBACKS_RE.md) qualifies the selected child virtual38→64→28 continuation and its loaded-object effects. Four new Native bodies are separate from this report’s frozen555-root model; the receiver of918630 and MAIN458 trigger remain unresolved.
+
 Verified **2026-11-02**, following the [caller/descendant audit](SFRAME_ENTRY_AND_DESCENDANTS_RE.md), on original x86 SFrame SHA-256 **`27f42fc8f6b08df8c239640b938d601aeaebb7b3db0c89fc47755325a98a410d`**. **The actual receiver of 0x918630 and the nonzero trigger of MAIN+0x458 remain unidentified.** This pass adds a real bounded call/return extension to the former intra-procedure model and **2 new Native helper dossiers / 160 analyzed bytes** on a constructed MAIN call chain.
 
 [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, SFrame file/product **9.1.0.0**, embedded **Source9.5.2** lineage and network literal/profile **201507080**. Exact official Epic/patch remains unconfirmed. Evidence uses **REA 6.4.0 / Ghidra 12.1.4 / Capstone 5.0.7**, profile **`b9d116ea480a02cc8773b19372074a3caf77785cbc080b1ac7133b5110e40b17`**. The original SFrame process is not executed.
