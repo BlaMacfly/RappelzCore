@@ -220,10 +220,20 @@ class QueueController:
 
     def _load_binding(self):
         binding = read_json(self.binding_path)
+        require(isinstance(binding, dict), "Native binding must be an object")
+        # Missing mode preserves the original archive/proof contract and its
+        # persisted fingerprint. A new module must explicitly declare that it
+        # retains no previously verified Native corpus; empty is not inferred.
+        self.retained_native = binding.get("retained_native", "archive")
+        require(self.retained_native in ("archive", "none"), "Unknown retained_native mode")
         for key in ("artifact_sha256", "analysis_profile_digest", "native_index_sha256"):
             require(isinstance(binding.get(key), str) and re.fullmatch(r"[0-9a-f]{64}", binding[key]),
                     f"Invalid native binding {key}")
         require(file_sha256(self.index_path) == binding["native_index_sha256"], "Native index hash mismatch")
+        if self.retained_native == "none":
+            require(not any(key in binding for key in ("source_archive", "proof")),
+                    "retained_native='none' forbids source_archive and proof")
+            return binding
         for key in ("source_archive", "proof"):
             reference = binding.get(key, {})
             require(isinstance(reference, dict) and "path" in reference and "sha256" in reference,
@@ -247,6 +257,9 @@ class QueueController:
         index = read_json(self.index_path)
         functions = index.get("functions")
         require(isinstance(functions, list), "Native index lacks functions")
+        if self.retained_native == "none":
+            require(not functions, "retained_native='none' requires an empty functions list")
+            return {}
         entries = {}
         for function in functions:
             address = address_key(function.get("address"))
