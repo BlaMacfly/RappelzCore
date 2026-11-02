@@ -1,12 +1,14 @@
 # Global decompilation: verified module checkpoint
 
-Frozen at **2026-11-02T23:10:15.649084+00:00 UTC**. The continuous goal remains active. This checkpoint separates **35 automatic original-native censuses**, **two special original-native censuses** and **one derived nonoriginal PE census**. Three managed assemblies and the extracted launcher payload keep their independent scopes. Running or prepared future analyses are excluded. No reliable overall completion percentage is available.
+Frozen at **2026-11-02T23:54:52.443658+00:00 UTC**. The continuous goal remains active. This checkpoint separates **35 automatic original-native censuses**, **two special original-native censuses** and **one derived nonoriginal PE census**. Three managed assemblies and the extracted launcher payload keep their independent scopes. Running or prepared future analyses are excluded. No reliable overall completion percentage is available.
 
 The supplied NoLimits package label is **1.3.60**. SFrame declares file/product version **9.1.0.0**, contains build lineage **Source9.5.2** and protocol literal **201507080**. The exact official Epic/patch remains unconfirmed; these labels have separate meanings. See [versions](VERSIONS.md).
 
 ## Native pseudocode availability
 
-| Module | Internal entries | External entries | New successful texts | Retained detailed dossiers | Errors |
+The table preserves the closed bulk-census partition: SFrame's 594 retained dossiers and 55,557 later bulk texts are disjoint availability groups at that freeze. New detailed dossiers revisit entries already represented by bulk text and are counted only in the continuation section below.
+
+| Module | Internal entries | External entries | New successful texts | Retained at bulk-census freeze | Errors |
 |---|---:|---:|---:|---:|---:|
 | SFrame | 56,151 | 582 | 55,557 | 594 | 0 |
 | RappelzCmdLauncher | 146 | 61 | 146 | 0 | 0 |
@@ -56,7 +58,7 @@ The derived PE is counted separately:
 
 Across the **38 distinct analyzed target artifacts**, availability totals **127,830 internal entries / 127,824 with text / 6 errors**. This mixed original/derived total does not mean 38 original native files are complete. The packed original `uninstall.exe` still lacks its own stub census; a nonexact derivative cannot silently satisfy that original scope.
 
-The retained SFrame **index of 594 dossiers** is distributed between the **737-record principal archive (563 indexed Evidence IDs present)** and **31 separately pinned historical sources**. All 594 have nonempty pseudocode text checked against exact IDs, target, addresses, profile and source hashes. Its verified body-range union remains **324,379 bytes**, separately bounded against **9,589,018 initialized executable bytes**. Bulk text does not enlarge that detailed-body metric.
+The historical retained SFrame **index of 594 dossiers** is distributed between the **737-record principal archive (563 indexed Evidence IDs present)** and **31 separately pinned historical sources**. All 594 have nonempty pseudocode text checked against exact IDs, target, addresses, profile and source hashes. Its historical verified body-range union is **324,379 bytes**, separately bounded against **9,589,018 initialized executable bytes**. Bulk text does not enlarge that detailed-body metric.
 
 Text availability does not establish complete recovery: **6 retained pseudocodes report an unrecovered jumptable**, and **24 retained Native value-flow graphs are flagged truncated**. These quality limits are distinct from nonempty text and the six producer failures.
 
@@ -73,6 +75,8 @@ The original inventory remains **38 native PE files plus three managed assemblie
 The host restarted at **22:06:14.500000 UTC**. The earlier `xdelta3.exe` attempt had reached its inventory request but had produced no inventory response, bundle, queue database or completed batch. Its files were retained unchanged; it was never marked successful. A root-reviewed fresh audit after confirming the old processes absent recovered **836 internal entries / 836 texts / zero errors**. Only that completed audit contributes to this cohort; no old partial result was counted twice.
 
 Post-restart hashes confirm all **41 original PE files**, **11 protected files**, the installed settings tree and the logical SQL backup unchanged. The SQL/game services were not listening after the reboot and were not started for this static audit. Live SQL contents were not rechecked; the preserved backup and absence of analysis writes do not replace a live database validation.
+
+A fresh checkpoint08 root preservation pass again confirmed all41 original PEs,11 protected files, the entire installed WTF tree and the logical backup unchanged. It did not start services or verify live SQL contents. The module-progress input was copied into an immutable snapshot; its35 original rows remain unchanged, with CRT and Native supplements separate.
 
 ## Bounded configuration study
 
@@ -126,21 +130,32 @@ Its **eight context occurrences represent six generator identities**, not eight 
 
 The **68 extracted PE objects are x64**, have no CLI header and remain outside the native table above. Their independent function censuses and native decompilation are future work. Static import names yield 211 candidate links, without proving runtime loading. Bundled support libraries are not automatically game logic; publisher/license provenance remains unverified.
 
-## Supplemental SFrame CRT results and prepared work
+## Supplemental SFrame CRT recovery
 
-[The SFrame CRT initializer report](SFRAME_CRT_INITIALIZERS.md) separates **ten C entries /1,488 bytes /372 instructions** from **fifteen C++ entries /357 bytes /106 instructions**. Their verified disjoint union contains **25 identities /1,845 bytes /478 instructions**, counted once, with zero new REA Native dossiers or changes to the frozen SFrame row. The ten-C run keeps three embedded warnings; the C++ run keeps one global-overlap warning.
+[The CRT initializer report](SFRAME_CRT_INITIALIZERS.md) now accounts for the finite missing startup frontier: **581 distinct local identities / 581 nonempty texts / 14,608 disjoint original body bytes / 3,769 instructions**. It combines the earlier C10 and C++15 with the completed remaining555 plus separate rank-six case. These custom profiles add **zero REA Native dossiers** or formal Native body bytes and leave the bulk table unchanged.
 
-Two already known C returns were projected in the combined run and aligned to `undefined4 / EAX:4` with other ABI/callee metadata unchanged. They add zero global discoveries. Their C texts nevertheless remained byte-identical and printed void/byte. The installed primary sources explain the observed `DEFAULT → DEFAULT` signature priority: undefined types skip source promotion, leaving output type unlocked. A new explicit32-bit integer/ANALYSIS model is compiled and prepared only; original source signedness is not established, and future rendering is unobserved.
+The new 556 texts retain **30 embedded warnings** (29 globals-overlap, one alloca-probe injection). All 25 indirect-call callbacks were included: 28 calls through six declared slots, corroborated by read-only import references; runtime implementation addresses and successful API effects remain unknown. The closed cyclic body does not prove termination. Rank six is one function with two disjoint ranges (10 + 47 bytes / 12 instructions), after actual exact/containing probes found no owners. Destination 0xbca73a is not an exact initial-census entry; no neighboring owner, split or merge was forced.
 
-Immediate restoration probes after rollback requests were false. The owned process exits, unchanged original/copy hashes and absent read-only private projects are separate observed facts. Corrected JVM home/tmp overrides were effective in combinedV2, but Ghidra settings/cache remained under AppData; full tool-preference isolation is not claimed.
+The completed explicit unsigned32/ANALYSIS return model aligned HighFunction to uint4/EAX4 and changed rendered text for **both known returns (2/2)**. Nonreturn ABI/callee metadata stayed unchanged. It adds no identity and does not recover original signedness or a debug prototype. Signature priority also locks an existing empty input list; that analytical consequence is documented.
 
-The original missing-C++ frontier now has **556 candidates**: a static529/27 split, including25 indirect-call dependencies, one cycle and rank six. `0xbca73a` is **not** an exact entry in the initial census. The prepared full556 phases and their static fragment covers add no new function, body coverage or semantic proof before actual ownership checks. The separate detailed-Native64 review has51 fixture checks and **zero executed Native dossiers**; the detailed corpus remains594.
+All 556 primary results were forced to fresh per-entry files and reconciled with final reports. The verifier passed 35 fixtures and checked source/table/body/import/closure bindings. Immediate restoration remained false; discarded read-only projects are separate observations. The run's earlier Java PID was not captured: closure relies on owned wrapper/batch/completion receipts plus a historical final zero-Java snapshot. Raw pseudocode remains local; no automatic replay of crash partials is authorized.
+
+## Detailed Native continuation
+
+The root-selected, closed pilot captured **64 dossiers**, of which **64 qualify for the new Native index**. The old 594 index stays immutable; the new index is separate. Together they contain **658 distinct dossiers**.
+
+The deduplicated original body union is **326,214  / 9,589,018 initialized executable bytes**. New ranges add **1,835 distinct bytes** beyond the old 324,379-byte union; overlap is deduplicated. These are byte-qualified reported bodies, not exhaustive original function/semantic recovery.
+
+The partial-body/assembly counter is **0**; all64 reported assembly listings are exhaustive for their reported bodies. Byte-qualified body ranges, exhaustive instruction listings and full original-function semantics remain separate claims. The new reports retain **110 warning occurrences** and **0 newly truncated value-flow graphs**. These warning occurrences are not a count of distinct defects or functions. Existing official parser receipts were rehashed, not replayed. Root verification authenticates256 operations, including192 dependent byte/mapping operations; process PIDs2456/28012/25956 were observed dead. Root verification SHA-256: `782d43f469c0d8833c43b80de210787f3b991251ba76e6d036f1b5adec91c10b`.
 
 ## Special original artifacts and the UPX derivative
 
 Original `unins000.exe` now has **2,935 internal entries /2,935 texts /zero errors**. Its qualified10,586-byte Inno-message tail and207 strings remain data-format evidence, not extra functions or game-version labels. Original `NoLimits_Launcher_3.exe` now has **813 internal entries /813 texts /zero errors** in its native bootloader census. Its Python payloads and68 embedded PEs are not covered by those813 native entries.
 
 The separate derived uninstall PE retains SHA-256 `5ef772bfd3c163011967a6c5f8eacb53df2f653337594b0529e548f2296e76d1`, size3,805,696bytes, and the original packed-source → exact UPX5.3.0 tool → derived-output lineage. Its completed census appears only in the derived table. The original packed `uninstall.exe` is not counted as censused by the derivative. Legacy PE13 reconstruction remains nonexact: neither byte identity with a historical unpacked original nor semantic equivalence is established. The uncompressed-stream Adler32 was not independently established. No original, packed copy or derived executable was launched.
+
+
+[The original packed-stub report](UPX_PACKED_STUB.md) now qualifies **184 static instruction decodings /432 physical bytes**, with three overlapping decode pairs sharing four bytes. It identifies declared import calls and a conditional normal handoff matching the derivative entrypoint. This bounded original-byte audit adds no original census or Native dossier; compressed bytes were not treated as code, and runtime behavior remains unobserved.
 
 ## Windows controller recovery
 
@@ -150,9 +165,9 @@ The three final special censuses are counted from closed exports and verificatio
 
 ## Frozen publication pins
 
-The private `coverage-checkpoint-07.local.json` supersedes checkpoint06. Its selection is derived from the35 inherited automatic-original proofs and three additional closed proofs, with two original special rows and one derived row. The previous module report is preserved byte-identically at SHA-256 `f90ee72cb818fcfa2e5d0218ce391c749d42426d95062e9630b090cac9fb9b9b`; checkpoint06 itself is unchanged.
+The private `coverage-checkpoint-08.local.json` supersedes checkpoint07. The 38 bulk target censuses and their original/derived distinction are inherited unchanged. Completed CRT results, typed returns and the bounded original packed-stub audit have separate scopes; the detailed Native continuation is admitted only from the root-selected terminal receipt.
 
-All **6,497 inherited source pins** were freshly rehashed. The old public-report pin is relocated to its preserved private copy only in the new checkpoint, while the new authored report has its own pin. New special operation responses, markers, selector sets, source/profile bindings and existing official-parser receipts were verified offline. CRT supplements, prepared profiles and their source limitations remain separate from provider-census totals. Six live parent documents and mutable controller journals are excluded from fixed proof inputs.
+All **7,600 inherited source pins** are freshly rehashed. Both checkpoint07 public reports were preserved byte-identically before replacement (MODULES SHA-256 `548a619bb67c09e94a74718b122543921f125d7f14491a200d9286dca6134d6b`; CRT SHA-256 `e6b0ae29c89f7adb7ef0050a462446e5e4d7bfaac9661e883f345df7747cb818`). Their pins are relocated to private copies only in checkpoint08; the old checkpoint and frozen sources stay unchanged. Three new/current authored reports have independent pins. Six mutable parent documents and live controller journals remain excluded. No producer or official parser was repeated by this checkpoint.
 
 | Frozen launcher report | Document SHA-256 | Local publication manifest SHA-256 |
 |---|---|---|

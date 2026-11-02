@@ -4,7 +4,7 @@ The continuous decompilation goal remains active. The instruction is to work thr
 
 ## Cross-module follow-up
 
-The [verified module checkpoint 07](GLOBAL_DECOMPILATION_MODULES.md) freezes **37 original native artifacts plus one derived PE**, with **127,830 internal entries /127,824 with text /six retained errors**. Its local `coverage-checkpoint-07.local.json` has SHA-256 `48c2aae1004ff2b076b5e23c58cc5f128b24e81d48d323933310fe97221169ad`; root independently rehashed **7,600 pinned files**. The packed original, 68 embedded PEs, detailed Native coverage and semantic reconstruction retain separate unfinished scopes. [SFrame CRT evidence](SFRAME_CRT_INITIALIZERS.md) qualifies 25 local additions without enlarging the original Native 594 metric. Full556 and subsequent Native results remain outside this frozen selection. The goal continues after publication.
+The [verified module checkpoint 08](GLOBAL_DECOMPILATION_MODULES.md) preserves the **37 original plus one derived bulk cohort** at **127,824 entries with text /six failures**, and separately verifies **658 detailed Native dossiers /326,214 deduplicated original body bytes**. Its local `coverage-checkpoint-08.local.json` has SHA-256 `bb95a6f2d4f4d9b7ffc5b8ad3f61a649f37b367daedf3deabac91325afd0b845`; root rehashed all **9,355 pinned files**. The [CRT frontier](SFRAME_CRT_INITIALIZERS.md) now accounts for 581 local identities through custom profiles; those bytes do not enter formal Native coverage. The [original packed-stub audit](UPX_PACKED_STUB.md) remains distinct from its derived census. Detailed expansion,68 embedded PE members, MAIN activation and semantic reconstruction continue after publication.
 
 ## Target and versions
 
@@ -40,7 +40,7 @@ The publication sources are local files in the ignored directory `client-data/au
 
 The **100%** measures text availability within this SFrame census. It does not measure reviewed behavior, gameplay implementation, semantic correctness, original source recovery, total executable bytes, all package modules or remaining effort. Decompiled text contains generated names and inferred types; it is not the original source.
 
-Detailed Native coverage remains **594 functions**, covering **324,379 / 9,589,018 initialized executable bytes = 3.3828%**. Bulk pseudocode does not increase that byte metric. The denominator includes compiler/runtime code and says nothing directly about gameplay completeness.
+At the frozen checkpoint2022, detailed Native coverage was **594 functions**, covering **324,379 /9,589,018 initialized executable bytes =3.3828%**. The separate checkpoint08 continuation below now qualifies658 dossiers /326,214 body-union bytes. Bulk pseudocode does not increase that byte metric. The denominator includes compiler/runtime code and says nothing directly about gameplay completeness.
 
 The checkpoint export `checkpoints/global-00002022.bundle.json` contains **2,046 Evidence records**, occupies **97,778,601 bytes**, and has SHA-256:
 
@@ -147,15 +147,19 @@ One reviewed UPX tool invocation decompressed an isolated copy to **3,805,696 by
 
 The fifteen-C++/two-known-C-return analysis uses a separate profile. Its first combined wrapper refused a valid Windows path before engine creation; that failure is retained. A corrected path guard is tested against the actual Windows PowerShell runtime before a changed attempt. The two known C entries add zero global discoveries. Results of later experiments remain outside checkpoint 06 until their own body, byte, process and metadata checks pass.
 
-## Verified continuation checkpoint 07
+## Verified continuation checkpoint 08
 
-The three special audits add **24,258 successful texts**: original Unins2,935, original launcher bootloader813 and derived maintenance PE20,510. Original targets and the PE13 derivative retain their own identities. The first128 derived batches survive unchanged across two further controller phases; the final321-batch export and its official parser receipt are closed and verified. A warm snapshot alone is never a final publication receipt. The original packed stub still needs its own focused analysis, and the68 embedded PE members remain separate.
+The closed 64-dossier pilot contributes 64 new detailed Native entries, separate from the immutable 594 baseline. The independent overlay contains **658 distinct dossiers** and **326,214 /9,589,018 initialized executable original bytes** in its deduplicated body union. All 64 new assembly listings cover their reported bodies;110 warning occurrences and original-body/semantic limits remain explicit. The byte fraction measures the SFrame body corpus alone. It is not a global completion percentage.
 
-The [SFrame CRT report](SFRAME_CRT_INITIALIZERS.md) qualifies ten C and fifteen C++ local additions once:25 identities,1,845 original bytes and478 instruction boundaries. It retains warnings, owner/body limits and false immediate rollback observations. Two known return metadata changes align EAX:4 while their rendered texts remain identical. An explicit unsigned interpretation is a separate analytical question; it does not recover original signedness or add a function. The new full556 experiment runs after this checkpoint's freeze, persists individual acquisitions immediately, and requires independent verification before any result is counted.
+The [CRT initializer report](SFRAME_CRT_INITIALIZERS.md) accounts for the finite 581-entry startup frontier:581 local texts,14,608 disjoint original bytes and 3,769 instruction boundaries. The new 556 results and two known explicit return models are independently reconciled with their durable per-entry files. They add zero formal Native dossiers. The two return models changed rendered text under uint4/ANALYSIS; original signedness and parameter semantics are not recovered. Prior warnings, false immediate rollback observations and the uncaptured historical Java PID limitation remain documented.
 
-For long Windows audit paths, use `tools/audit/rea_global_queue_windows.py` with the same arguments as the original controller. The adapter verifies the pinned original controller before loading it and changes only mutable JSON publication to a short sibling temporary name. The original public helper and worker remain byte-identical. **39 provider-free tests pass**:30 existing controller integrity/resume cases under the adapter, plus nine new serialization/path/failure cases. They reproduce the202-character parent that made the old temporary path263 characters. The same Unins worker and its acquired first-batch Evidence were preserved.
+The [original packed-stub report](UPX_PACKED_STUB.md) qualifies 184 static instruction decodings across 432 physical bytes, with overlapping x86 paths and conditional API-return assumptions. It adds no original census or Native dossier. The compressed stream was not decoded as instructions. The distinct nonexact UPX derivative retains its completed 20,510-entry census; neither unpacking nor those producers should be repeated.
 
-Original files, installed WTF settings and the logical SQL backup match their recorded hashes. The services were not restarted for static analysis, and live database contents were not checked after reboot. Raw binaries, decompiled sources and private Evidence stay local; this publication contains authored documentation and analysis coordination tools.
+The next detailed phase uses a reviewed upper bound of 1,024 cases and warm 64-case segments, with portable checkpoints of 32 and volume-based session rotation. Preserved responses and dependent source obligations allow resumption without repeating an acquired Native producer. The public session exporter has no filter/reset operation and its128MiB guard is observed, not a hard quota. The 68 embedded PE members and six original producer errors keep separate reviewed routes.
+
+For long Windows audit paths, the published `tools/audit/rea_global_queue_windows.py` adapter retains the same arguments and the pinned original controller. Its 39 provider-free tests cover 30 inherited controller cases plus nine serialization/path/failure cases. Original helpers and the worker stay unchanged.
+
+All 41 original PEs,11 protected files, installed WTF settings and the logical SQL backup match their recorded hashes. Static analysis did not restart the services or check live SQL after reboot. Raw binaries, decompiled sources and private Evidence stay local; this publication contains authored reports.
 
 ## Evidence and batch limits
 
