@@ -1,5 +1,7 @@
 # SFrame text state, rectangle copies and vector producers
 
+Follow-up **2026-11-02**: [MAIN input, tab events and C208 elements](SFRAME_MAIN_INPUT_AND_TABS_RE.md) qualifies actual parent/event delivery, selected input/tab handlers and the distinct C208 element→nested-record→leafL1c rectangle-copy contract. The C208 insertion/type/lifetime questions, actual 918630 receiver and nonzero MAIN458 activation remain open.
+
 Verified **2026-11-02**, following [constructed receivers and MAIN call contexts](SFRAME_CONSTRUCTED_RECEIVERS_RE.md). **Ten new Native dossiers / 4,162 original body bytes / 1,318 instruction boundaries** qualify the selected auxiliary-state producer and its graphics helpers. **The actual receiver of 918630 and activation of MAIN+0x458 remain unidentified.** No original SFrame process is executed and no gameplay feature is added by this documentation pass.
 
 Target: x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b938d601aeaebb7b3db0c89fc47755325a98a410d`. REA **6.4.0**, Ghidra **12.1.4**, Capstone **5.0.7**, profile `b9d116ea480a02cc8773b19372074a3caf77785cbc080b1ac7133b5110e40b17`. [Versions](VERSIONS.md): Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, SFrame file/product **9.1.0.0**, embedded **Source9.5.2**, network **201507080**. The exact official Epic/patch is unconfirmed.
