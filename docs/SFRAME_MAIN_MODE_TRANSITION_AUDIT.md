@@ -67,3 +67,7 @@ Ignored local audit: `client-data/audit/2026-11-02-sframe-main-mode-transition-2
 ## Required next evidence
 
 A real activation requires a source-bound write of a nonzero value to +0x458 on the same constructed MAIN instance, with its causal entry and state. Alternatively, a reaching transfer to 918630 and the origin/type/state of its entry ECX could establish or reject that candidate. Matching offsets, a shared reset helper, float/int role differences, retained state caps or a synthetic forced state do not supply that evidence. Available native-call runtime tooling advertises Mach-O/LLDB, not a Windows PE data-watchpoint workflow; no original SFrame process or debugger session is assumed. Further static calls need a new concrete anchor; the audited contracts do not currently justify another generic callee sweep. The activation question remains unresolved.
+
+## Follow-up: receiver family and expanded alias states
+
+[Receiver-family and expanded-alias investigation](SFRAME_MODE_RECEIVER_FAMILY_RE.md): 3 new Native dossiers qualify the remaining substantive registered Arena callbacks and the counter widget source. A bounded 16→64 alias expansion adds 22,308 states and resolves one local cap; seven remain. The actual 918630 receiver and MAIN+0x458 trigger remain unidentified. Nine preservation checks pass; gameplay and versions unchanged.
