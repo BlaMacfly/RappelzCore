@@ -76,3 +76,7 @@ The replay provides no new source-supported computed-entry anchor for 0x918630 a
 This pass does not establish any nonzero write to MAIN+0x458 or a constructed receiver for 918630. A derived MAIN object is not supplied by the selected RTTI or targeted relocated-pointer sources. The activation question remains unresolved, and no usable or previously observed alternate mode is presumed.
 
 A decisive continuation still needs an actual reaching transfer or registration to 918630 with the origin/type/state of entry ECX, or a separately qualified nonzero write to +0x458 on the same constructed MAIN object. The typed Arena paths, changed 106-body coverage and exact-TD descendant question now have explicit source bounds. They do not establish universal absence of callers, derived objects or writers, dead code, or a usable alternate feature. The user's request remains an investigation of the code flag, not an already observed alternate mode.
+
+## Follow-up: interprocedural arguments, returns and MAIN helpers
+
+[Interprocedural values and MAIN contracts](SFRAME_INTERPROCEDURAL_RE.md): new bounded argument/EAX-return propagation on 555 retained roots evaluates 329 callee contexts and retains 51 conditional summaries, with one source-bound consumed return and 22 new semantic controls. Two new Native helpers / 160 bytes qualify MAIN.virtual28→b36310→MAIN/loaded-primitive effects; child.virtual38 remains open. No 918630 reaching receiver or MAIN+458 trigger is established. Nine preservation checks pass; versions unchanged.
