@@ -1,5 +1,7 @@
 # SFrame MAIN input, tab events and C+208 elements
 
+Scope follow-up **2026-11-02**: the [continuous global pass](GLOBAL_DECOMPILATION.md) inventories all current SFrame procedures and adds a persistent pseudocode queue. This focused report remains valid at its own checkpoint; MAIN458/918630 and C208 construction questions are still open. The new global goal continues beyond each publication and preserves the detailed Native corpus separately.
+
 Verified **2026-11-02**, following [text state and vector producers](SFRAME_TEXT_STATE_PRODUCERS_RE.md). **16 new Native dossiers / 4,471 original bytes / 1,454 instruction boundaries** qualify MAIN base-input calls, the selected resource controls' input handlers, two distinct tab-event destinations, and the nested C+208 rectangle consumer. **The actual receiver of 918630 and activation of MAIN+0x458 remain unidentified.** This is static analysis; the original client is not executed and no gameplay implementation is added by this pass.
 
 Target: x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b938d601aeaebb7b3db0c89fc47755325a98a410d`. REA **6.4.0**, Ghidra **12.1.4**, Capstone **5.0.7**, profile `b9d116ea480a02cc8773b19372074a3caf77785cbc080b1ac7133b5110e40b17`. [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, SFrame file/product **9.1.0.0**, embedded **Source9.5.2**, network **201507080**. Exact official Epic/patch is unconfirmed.
