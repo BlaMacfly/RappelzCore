@@ -22,6 +22,8 @@ use rz_mpq::{MpqChain, MpqWriter, PreparedFile};
 use rz_rappelz::rdb::{self, Decoder};
 use rz_rappelz::{layout, to_dbc, DataArchive};
 
+mod terrain_pack;
+
 #[derive(Parser)]
 #[command(name = "rz-extractor", version, about = "Conversion client Rappelz → RappelzRust (MPQ/DBC)")]
 struct Cli {
@@ -31,6 +33,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Prépare une texture de terrain opaque en DDS avec mipmaps et patch MPQ séparé.
+    TerrainPack {
+        #[arg(long)] image: PathBuf,
+        /// Chemin original dans le MPQ, par exemple Textures\zone005_grass@normal002.dds.
+        #[arg(long)] texture: String,
+        /// Nouveau dossier de sortie ; un dossier existant n'est jamais remplacé.
+        #[arg(long)] out: PathBuf,
+        #[arg(long, default_value_t = 1024)] size: u32,
+    },
     /// Extrait les tables de progression d'archive en DBC sans perte 64 bits, séparés.
     Progression {
         #[arg(long)] client:PathBuf,
@@ -101,6 +112,7 @@ enum Command {
 fn main() -> Result<()> {
     rz_common::init_logging("info");
     match Cli::parse().command {
+        Command::TerrainPack { image, texture, out, size } => terrain_pack::run(&image, &texture, &out, size),
         Command::Progression{client,out}=>write_progression_profile(&client,&out),
         Command::CorpseSkill{client,out}=>write_corpse_profile(&client,&out),
         Command::Addons { out } => write_example_addon(&out),

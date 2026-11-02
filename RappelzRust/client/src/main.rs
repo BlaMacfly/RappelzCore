@@ -15,6 +15,7 @@ mod net;
 mod online_validation;
 mod rzui;
 mod terrain;
+mod terrain_preview;
 mod world;
 
 use std::path::PathBuf;
@@ -135,6 +136,8 @@ fn data_root() -> PathBuf {
 #[macroquad::main(window_conf)]
 async fn main() {
     rz_common::init_logging("info");
+    let preview_directory = terrain_preview::parse_args(&std::env::args().collect::<Vec<_>>())
+        .unwrap_or_else(|e| { tracing::error!("{e:#}"); std::process::exit(2) });
     prevent_quit(); // Allow PLAYER_LOGOUT and atomic settings saves before the window closes.
     let root = data_root();
     let mut config = ClientConfig::load(&root);
@@ -152,7 +155,7 @@ async fn main() {
     let sfx_volume = config.get("Sound_SFXVolume", "0.7").parse().unwrap_or(0.7);
     let rzui = assets.as_mut().map(|a| rzui::RzUi::new(a, font.clone()));
     let mut app = App {
-        validation_input_locked:arg_value("-validate-skills").is_some() || arg_value("-validate-corpse-skill").is_some() || arg_value("-validate-terrain").is_some() || arg_value("-validate-terrain-cancel").is_some() || arg_value("-validate-terrain-warp").is_some() || arg_value("-validate-terrain-network").is_some() || arg_value("-validate-terrain-restart").is_some() || arg_value("-validate-gameplay-restart").is_some() || arg_value("-validate-soap-shutdown").is_some(),
+        validation_input_locked:preview_directory.is_some() || arg_value("-validate-skills").is_some() || arg_value("-validate-corpse-skill").is_some() || arg_value("-validate-terrain").is_some() || arg_value("-validate-terrain-cancel").is_some() || arg_value("-validate-terrain-warp").is_some() || arg_value("-validate-terrain-network").is_some() || arg_value("-validate-terrain-restart").is_some() || arg_value("-validate-gameplay-restart").is_some() || arg_value("-validate-soap-shutdown").is_some(),
         combat_trace: ["-validate-combat","-validate-revival","-validate-visibility","-validate-layer","-validate-party","-validate-skills","-validate-casting","-validate-corpse-skill","-validate-terrain","-validate-terrain-cancel","-validate-terrain-warp","-validate-terrain-network","-validate-terrain-restart","-validate-gameplay-restart","-validate-soap-shutdown"].iter().any(|flag|arg_value(flag).is_some()).then(Default::default),
         addons: addons::Addons::new(&root),
         addon_realm: "offline".into(),
@@ -231,6 +234,8 @@ async fn main() {
         result
             .unwrap_or_else(|e| { tracing::error!("{e:#}"); std::process::exit(2) })
     });
+    let mut terrain_preview = preview_directory.map(|p| terrain_preview::TerrainPreview::new(p)
+        .unwrap_or_else(|e| { tracing::error!("{e:#}"); std::process::exit(2) }));
     let mut frame = 0u32;
 
     loop {
@@ -239,6 +244,7 @@ async fn main() {
         app.addons.begin_frame(app.screen == Screen::World);
         app.gui.begin_frame();
         if let Some(validation) = &validation { validation.before_draw(&mut app); }
+        if let Some(preview) = &mut terrain_preview { preview.before_draw(&mut app); }
         clear_background(Color::from_rgba(12, 14, 22, 255));
         match app.screen {
             Screen::World => {
@@ -261,9 +267,16 @@ async fn main() {
                 Err(error) => { tracing::error!("{error:#}"); validation.fail(error); break; }
             }
         }
+        if let Some(preview) = &mut terrain_preview {
+            match preview.tick(&mut app) {
+                Ok(true) => break,
+                Ok(false) => {},
+                Err(error) => { tracing::error!("{error:#}"); preview.fail(error); break; }
+            }
+        }
         if let Some(a) = &mut app.assets {
             let wanted = if app.screen == Screen::World { app.field_music } else { audio::LOBBY_MUSIC };
-            if screenshot.is_none() {
+            if screenshot.is_none() && terrain_preview.is_none() {
                 app.audio.play_music(a, wanted).await;
             }
             if app.gui.take_clicked() {
@@ -285,6 +298,9 @@ async fn main() {
         if is_quit_requested() { break; }
     }
     if let Err(e) = app.addons.runtime.shutdown() { tracing::error!("addon settings: {e:#}"); }
+    if let Some(preview) = terrain_preview {
+        if let Err(e) = preview.finish() { tracing::error!("{e:#}"); std::process::exit(1); }
+    }
     if let Some(mut validation) = validation {
         for message in app.addons.runtime.drain_messages() { validation.message(&message); tracing::info!("{message}"); }
         match validation.finish(&app) {

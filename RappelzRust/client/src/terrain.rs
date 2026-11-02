@@ -19,6 +19,7 @@ use crate::models::{self, ModelCache};
 mod audit;
 pub(crate) use audit::AuditHandle;
 mod bake;
+mod direct;
 mod pixels;
 mod worker;
 use pixels::PixelCache;
@@ -36,6 +37,12 @@ const CPU_PIXEL_BYTES: usize = 128 * 1024 * 1024;
 
 struct Chunk {
     mesh: QMesh,
+    direct: Option<String>,
+}
+
+struct DirectTile {
+    texture: Texture2D,
+    bytes: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -93,7 +100,9 @@ struct CacheStats {
     last_submits: usize,
     last_completed_uploads: usize,
     worker_us: u64,
-    wanted_keys: Vec<(i32,i32)>,
+    wanted_keys: Vec<(i32, i32)>,
+    peak_payload: usize,
+    last_direct_builds: usize,
 }
 
 pub struct Terrain {
@@ -108,12 +117,15 @@ pub struct Terrain {
     async_enabled: bool,
     worker_error: Option<String>,
     warp_cancel_enabled: bool,
-    focus_map: Option<(i32,i32)>,
+    focus_map: Option<(i32, i32)>,
     warp_count: usize,
     map_switches: usize,
     reference_validation: bool,
     validation_capture: Option<std::path::PathBuf>,
     layers: HashMap<String, Option<Arc<Rgba>>>,
+    uniform: HashMap<(i32, i32), Option<direct::Source>>,
+    direct_tiles: HashMap<String, DirectTile>,
+    direct_enabled: bool,
     pub view_chunks: i32,
     pub prop_distance: f32,
 }
@@ -151,6 +163,16 @@ impl Terrain {
             reference_validation: false,
             validation_capture: None,
             layers: HashMap::new(),
+            uniform: HashMap::new(),
+            direct_tiles: HashMap::new(),
+            // The managed texture constructor + mip generation is supported by this backend.
+            // Other backends retain the existing baked route (Metal needs explicit mip allocation).
+            // Experimental opt-in: direct/baked boundaries can show a detail discontinuity.
+            direct_enabled: std::env::args().any(|arg| arg == "-terrain-direct-tiles") && unsafe { macroquad::window::get_internal_gl() }
+                .quad_context
+                .info()
+                .backend
+                == macroquad::miniquad::Backend::OpenGl,
             view_chunks: 3,
             prop_distance: 1800.0,
         }
@@ -290,6 +312,7 @@ impl Terrain {
         gx: i32,
         gy: i32,
         supplied: Option<Arc<Vec<u8>>>,
+        direct: Option<&direct::Source>,
     ) -> Option<Chunk> {
         let per_map = (MAP_SIZE / CHUNK) as i32;
         let (mx, my) = (gx.div_euclid(per_map), gy.div_euclid(per_map));
@@ -297,21 +320,54 @@ impl Terrain {
         let (cx, cy) = (gx.rem_euclid(per_map), gy.rem_euclid(per_map));
         let (ox, oy) = (cx as f32 * CHUNK, cy as f32 * CHUNK);
         let key = (gx, gy);
-        let image = if let Some(image) = supplied {
-            self.stats.last_completed_uploads += 1;
-            image
-        } else if let Some(image) = self.pixels.get(key) {
-            self.stats.restored += 1;
-            self.stats.last_restores += 1;
-            image
+        let texture = if let Some(source) = direct {
+            if !self.direct_tiles.contains_key(&source.name) {
+                let image = self.layer_image(assets, &source.name)?;
+                let texture =
+                    Texture2D::from_rgba8(image.width as u16, image.height as u16, &image.pixels);
+                let id = texture.raw_miniquad_id();
+                // No raw handle escapes, and Texture2D retains managed ownership. Acquire the
+                // backend only after the macroquad calls, never across another macroquad call.
+                unsafe {
+                    let gl = macroquad::window::get_internal_gl();
+                    use macroquad::miniquad::{MipmapFilterMode, TextureWrap};
+                    gl.quad_context
+                        .texture_set_wrap(id, TextureWrap::Repeat, TextureWrap::Repeat);
+                    gl.quad_context.texture_generate_mipmaps(id);
+                    gl.quad_context.texture_set_min_filter(
+                        id,
+                        FilterMode::Linear,
+                        MipmapFilterMode::Linear,
+                    );
+                }
+                self.direct_tiles.insert(
+                    source.name.clone(),
+                    DirectTile {
+                        texture,
+                        bytes: direct::mip_bytes(image.width, image.height),
+                    },
+                );
+            }
+            self.stats.last_direct_builds += 1;
+            self.direct_tiles.get(&source.name)?.texture.clone()
         } else {
-            let input = self.bake_input(assets, map.clone(), ox, oy);
-            let image = bake::run(input, &std::sync::atomic::AtomicBool::new(false))?;
-            self.stats.last_bakes += 1;
-            self.pixels.insert(key, image)
+            let image = if let Some(image) = supplied {
+                self.stats.last_completed_uploads += 1;
+                image
+            } else if let Some(image) = self.pixels.get(key) {
+                self.stats.restored += 1;
+                self.stats.last_restores += 1;
+                image
+            } else {
+                let input = self.bake_input(assets, map.clone(), ox, oy);
+                let image = bake::run(input, &std::sync::atomic::AtomicBool::new(false))?;
+                self.stats.last_bakes += 1;
+                self.pixels.insert(key, image)
+            };
+            let texture = Texture2D::from_rgba8(BAKE_PX as u16, BAKE_PX as u16, &image);
+            texture.set_filter(FilterMode::Linear);
+            texture
         };
-        let texture = Texture2D::from_rgba8(BAKE_PX as u16, BAKE_PX as u16, &image);
-        texture.set_filter(FilterMode::Linear);
         let n = CHUNK_CELLS + 1;
         let (wx0, wy0) = (mx as f32 * MAP_SIZE + ox, my as f32 * MAP_SIZE + oy);
         let (i0, j0) = (
@@ -330,7 +386,10 @@ impl Terrain {
                         h,
                         wy0 + j as f32 * map.tile_length,
                     ),
-                    uv: vec2(i as f32 / CHUNK_CELLS as f32, j as f32 / CHUNK_CELLS as f32),
+                    uv: direct.map_or_else(
+                        || vec2(i as f32 / CHUNK_CELLS as f32, j as f32 / CHUNK_CELLS as f32),
+                        |source| source.uv(ox, oy, i, j, map.tile_length),
+                    ),
                     color: Self::lit(&map, vi, vj),
                     normal: Vec4::ZERO,
                 });
@@ -345,6 +404,7 @@ impl Terrain {
             }
         }
         Some(Chunk {
+            direct: direct.map(|source| source.name.clone()),
             mesh: QMesh {
                 vertices,
                 indices,
@@ -391,6 +451,8 @@ impl Terrain {
     }
 
     pub(crate) fn validation_pixel_cache(&mut self, enabled: bool) {
+        // Existing bake/cancellation scenarios deliberately exercise the legacy baker.
+        self.direct_enabled = false;
         let limit = if enabled { CPU_PIXEL_BYTES } else { 0 };
         if self.pixels.limit() != limit {
             self.pixels = PixelCache::new(limit);
@@ -414,25 +476,52 @@ impl Terrain {
         self.worker.as_ref().map(|w| w.audit())
     }
 
-    pub(crate) fn validation_warp_cancel(&mut self, enabled:bool) {self.warp_cancel_enabled=enabled;}
+    pub(crate) fn validation_warp_cancel(&mut self, enabled: bool) {
+        self.warp_cancel_enabled = enabled;
+    }
 
     /// Called from WARP acceptance, before target-map discovery or any new rendering work.
-    pub(crate) fn on_warp(&mut self,x:f32,y:f32) {
-        let map=((x/MAP_SIZE).floor() as i32,(y/MAP_SIZE).floor() as i32);
-        if self.focus_map.is_some_and(|old|old!=map) {self.map_switches+=1;}
-        self.focus_map=Some(map);self.warp_count+=1;
-        if let Some(worker)=&self.worker {
-            worker.warp(((x/CHUNK).floor() as i32,(y/CHUNK).floor() as i32),self.warp_cancel_enabled);
+    pub(crate) fn on_warp(&mut self, x: f32, y: f32) {
+        let map = ((x / MAP_SIZE).floor() as i32, (y / MAP_SIZE).floor() as i32);
+        if self.focus_map.is_some_and(|old| old != map) {
+            self.map_switches += 1;
+        }
+        self.focus_map = Some(map);
+        self.warp_count += 1;
+        if let Some(worker) = &self.worker {
+            worker.warp(
+                ((x / CHUNK).floor() as i32, (y / CHUNK).floor() as i32),
+                self.warp_cancel_enabled,
+            );
         }
     }
 
     pub(crate) fn cache_snapshot(&self) -> serde_json::Value {
+        let source_layers: std::collections::BTreeMap<_,_> = self.layers.iter().filter_map(|(name,im)| im.as_ref().map(|im|
+            (name.clone(),serde_json::json!({"width":im.width,"height":im.height,"rgba_bytes":im.pixels.len()})))).collect();
+        let source_bytes: usize = self
+            .layers
+            .values()
+            .filter_map(|im| im.as_ref())
+            .map(|im| im.pixels.len())
+            .sum();
+        let direct_chunks = self.chunks.values().filter(|c| c.direct.is_some()).count();
+        let direct_tiles: std::collections::BTreeMap<_, _> = self
+            .direct_tiles
+            .iter()
+            .map(|(name, tile)| (name, tile.bytes))
+            .collect();
+        let payload = self.texture_payload();
         serde_json::json!({"bake_px":BAKE_PX,"bytes_per_chunk":BAKE_PX*BAKE_PX*4,
+            "source_layers":source_layers,"source_rgba_bytes":source_bytes,
             "candidates":self.stats.candidates,"wanted":self.stats.wanted,"resident":self.chunks.len(),
             "ready":self.stats.ready,
             "peak_chunks":self.stats.peak_chunks,"built":self.stats.built,"evicted":self.stats.evicted,
-            "texture_payload_bytes":self.chunks.len()*BAKE_PX*BAKE_PX*4,
-            "peak_texture_payload_bytes":self.stats.peak_chunks*BAKE_PX*BAKE_PX*4,
+            "texture_payload_bytes":payload,
+            "peak_texture_payload_bytes":self.stats.peak_payload,
+            "direct_chunks":direct_chunks,"baked_chunks":self.chunks.len()-direct_chunks,
+            "direct_tiles":direct_tiles,"direct_enabled":self.direct_enabled,
+            "last_direct_builds":self.stats.last_direct_builds,
             "reference":self.reference_validation,"missing":self.stats.missing,
             "restored":self.stats.restored,"last_bakes":self.stats.last_bakes,
             "last_restores":self.stats.last_restores,"prepare_us":self.stats.prepare_us,
@@ -447,14 +536,24 @@ impl Terrain {
             "wanted_keys":self.stats.wanted_keys})
     }
 
+    fn texture_payload(&self) -> usize {
+        self.chunks.values().filter(|c| c.direct.is_none()).count() * BAKE_PX * BAKE_PX * 4
+            + self
+                .direct_tiles
+                .values()
+                .map(|tile| tile.bytes)
+                .sum::<usize>()
+    }
+
     /// Construit les morceaux visibles autour de (x, y) et dessine le sol.
     pub fn draw(&mut self, assets: &mut Assets, x: f32, y: f32, clip: Mat4) {
         let prepare = std::time::Instant::now();
-        self.focus_map=Some(((x/MAP_SIZE).floor() as i32,(y/MAP_SIZE).floor() as i32));
+        self.focus_map = Some(((x / MAP_SIZE).floor() as i32, (y / MAP_SIZE).floor() as i32));
         self.stats.last_bakes = 0;
         self.stats.last_restores = 0;
         self.stats.last_submits = 0;
         self.stats.last_completed_uploads = 0;
+        self.stats.last_direct_builds = 0;
         let (gx, gy) = ((x / CHUNK).floor() as i32, (y / CHUNK).floor() as i32);
         let r = self.view_chunks;
         let mut wanted: Vec<(i32, i32)> = (gy - r..=gy + r)
@@ -478,10 +577,55 @@ impl Terrain {
             self.stats.evicted += before - self.chunks.len();
         }
         self.stats.wanted = wanted.len();
-        self.stats.wanted_keys=wanted.clone();
+        self.stats.wanted_keys = wanted.clone();
+        // Classify only newly requested chunks. A shared tile must fit the total baked
+        // payload it replaces; a lone 1024 tile therefore falls back to its 1024 bake.
+        self.uniform.retain(|key, _| nearby.contains(key));
+        let mut routes = HashMap::new();
+        if self.direct_enabled && !self.reference_validation {
+            for &key in &wanted {
+                if !self.uniform.contains_key(&key) {
+                    let per_map = (MAP_SIZE / CHUNK) as i32;
+                    let source = self
+                        .map(assets, key.0.div_euclid(per_map), key.1.div_euclid(per_map))
+                        .and_then(|map| {
+                            let input = self.bake_input(
+                                assets,
+                                map,
+                                key.0.rem_euclid(per_map) as f32 * CHUNK,
+                                key.1.rem_euclid(per_map) as f32 * CHUNK,
+                            );
+                            direct::Source::from_input(&input)
+                        });
+                    self.uniform.insert(key, source);
+                }
+                if let Some(Some(source)) = self.uniform.get(&key) {
+                    routes.insert(key, source.clone());
+                }
+            }
+            let mut counts = HashMap::new();
+            for source in routes.values() {
+                *counts.entry(source.name.clone()).or_insert(0usize) += 1;
+            }
+            routes.retain(|_, source| source.fits(counts[&source.name]));
+        }
+        let before = self.chunks.len();
+        self.chunks.retain(|key, chunk| {
+            chunk.direct.as_deref() == routes.get(key).map(|source| source.name.as_str())
+        });
+        self.stats.evicted += before - self.chunks.len();
+        // Remove mesh references before the last cache reference, including route changes.
+        let used: HashSet<_> = self
+            .chunks
+            .values()
+            .filter_map(|c| c.direct.clone())
+            .collect();
+        self.direct_tiles.retain(|name, _| used.contains(name));
         let keep: HashSet<_> = wanted.iter().copied().collect();
         if let Some(worker) = &self.worker {
-            worker.cancel_unless(|key| self.async_enabled && keep.contains(&key));
+            worker.cancel_unless(|key| {
+                self.async_enabled && keep.contains(&key) && !routes.contains_key(&key)
+            });
         }
         let finished = self.worker.as_mut().and_then(|w| w.poll());
         if let Some(result) = finished {
@@ -493,6 +637,7 @@ impl Terrain {
                 self.async_enabled
                     && keep.contains(&result.key)
                     && !self.chunks.contains_key(&result.key)
+                    && !routes.contains_key(&result.key)
             }) {
                 self.stats.completed += 1;
                 if let Some(w) = &self.worker {
@@ -508,7 +653,7 @@ impl Terrain {
                 }
                 let image = self.pixels.insert(result.key, image);
                 if let Some(chunk) =
-                    self.build_chunk(assets, result.key.0, result.key.1, Some(image))
+                    self.build_chunk(assets, result.key.0, result.key.1, Some(image), None)
                 {
                     self.chunks.insert(result.key, chunk);
                     if let Some(w) = &self.worker {
@@ -522,20 +667,30 @@ impl Terrain {
             }
         }
         // A revisited view can restore several exact images without running the expensive
-        // blend again. Bound uploads to 16 MiB/frame; cold blending remains one/frame.
+        // blend again. At most four restores/direct builds including a completed upload;
+        // each shared tile includes its full mip chain (at most 5.34 MiB).
         for &key in &wanted {
-            if self.stats.last_restores + self.stats.last_completed_uploads >= RESTORES_PER_FRAME {
+            if self.stats.last_restores
+                + self.stats.last_completed_uploads
+                + self.stats.last_direct_builds
+                >= RESTORES_PER_FRAME
+            {
                 break;
             }
-            if !self.chunks.contains_key(&key) && self.pixels.contains(key) {
-                if let Some(c) = self.build_chunk(assets, key.0, key.1, None) {
+            if !self.chunks.contains_key(&key)
+                && (routes.contains_key(&key) || self.pixels.contains(key))
+            {
+                if let Some(c) = self.build_chunk(assets, key.0, key.1, None, routes.get(&key)) {
                     self.chunks.insert(key, c);
                     self.stats.built += 1;
                 }
             }
         }
         if self.worker_error.is_none() && self.stats.last_restores == 0 {
-            if let Some(&key) = wanted.iter().find(|key| !self.chunks.contains_key(key)) {
+            if let Some(&key) = wanted
+                .iter()
+                .find(|key| !self.chunks.contains_key(key) && !routes.contains_key(key))
+            {
                 if self.async_enabled && self.worker.is_some() {
                     if self.worker.as_ref().unwrap().idle() {
                         let per_map = (MAP_SIZE / CHUNK) as i32;
@@ -558,7 +713,7 @@ impl Terrain {
                             }
                         }
                     }
-                } else if let Some(chunk) = self.build_chunk(assets, key.0, key.1, None) {
+                } else if let Some(chunk) = self.build_chunk(assets, key.0, key.1, None, None) {
                     self.chunks.insert(key, chunk);
                     self.stats.built += 1;
                 }
@@ -572,6 +727,7 @@ impl Terrain {
             self.stats.evicted += before - self.chunks.len();
         }
         self.stats.peak_chunks = self.stats.peak_chunks.max(self.chunks.len());
+        self.stats.peak_payload = self.stats.peak_payload.max(self.texture_payload());
         self.stats.ready =
             !wanted.is_empty() && wanted.iter().all(|key| self.chunks.contains_key(key));
         self.stats.missing = wanted

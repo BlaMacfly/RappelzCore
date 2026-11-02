@@ -1267,11 +1267,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "image 0.25.10",
  "rayon",
  "rz-common",
  "rz-dbc",
  "rz-mpq",
  "rz-rappelz",
+ "serde_json",
+ "tempfile",
  "tracing",
 ]
 
