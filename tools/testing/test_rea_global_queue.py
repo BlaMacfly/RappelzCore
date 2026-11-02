@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -56,6 +57,15 @@ class WorkerFixture:
     def operation(self, label=None):
         operations = queue.read_json(self.audit / "plan.json")["operations"]
         return next(op for op in operations if op["label"] == label) if label else operations[-1]
+
+    def without_retained_native(self):
+        """Represent a new module with no archive or proof to load."""
+        self.index.write_text(json.dumps({"functions": []}), encoding="utf-8")
+        binding = {"retained_native": "none", "artifact_sha256": self.artifact,
+                   "analysis_profile_digest": self.profile["digest"], "native_index_sha256": sha(self.index)}
+        self.binding.write_text(json.dumps(binding), encoding="utf-8")
+        (self.audit / "native-archive.json").unlink()
+        (self.audit / "native-proof.json").unlink()
 
     def evidence(self, operation, normalized, workflow=False):
         identity = hashlib.sha256((operation["label"] + operation["tool"]).encode()).hexdigest()
@@ -132,6 +142,137 @@ class GlobalQueueTests(unittest.TestCase):
             self.assertEqual(summary["external_not_applicable"], 1)
             self.assertEqual(summary["internal_thunks"], 1)
             self.assertEqual(self.fixture.operation()["arguments"]["addresses"], ["0x2000", "0x2001"])
+
+    def test_no_retained_native_attempts_every_internal_entry_with_zero_native_counts(self):
+        self.fixture.without_retained_native()
+        self.fixture.inventories()
+        with self.fixture.controller(batch_size=8) as controller:
+            summary = controller.tick()
+            self.assertEqual(summary["state"], "queued_batch")
+            self.assertEqual((summary["detailed_native_total"], summary["detailed_native_in_inventory"]), (0, 0))
+            self.assertEqual((summary["inventory_internal"], summary["external_not_applicable"], summary["internal_thunks"]), (5, 1, 1))
+            self.assertEqual(self.fixture.operation()["arguments"]["addresses"], ["0x1000", "0x2000", "0x2001", "0x2002", "0x2003"])
+            self.fixture.batch()
+            self.assertEqual(controller.tick()["pseudocode_success"], 5)
+            self.assertEqual(controller.tick()["state"], "queued_checkpoint")
+            self.fixture.checkpoint()
+            controller.tick()
+            final = controller.tick()
+            self.assertTrue(final["all_internal_attempted"])
+            self.assertEqual((final["detailed_native_total"], final["pseudocode_success"], final["pending_internal"]), (0, 5, 0))
+            self.assertEqual(final["native_missing_from_inventory"], [])
+            self.assertFalse(queue.read_json(self.fixture.audit / "plan.json")["sealed"])
+
+    def test_no_retained_native_rejects_nonempty_or_missing_function_lists_before_queue_writes(self):
+        self.fixture.without_retained_native()
+        before = (self.fixture.audit / "plan.json").read_bytes()
+        for functions in ([{"address": "0x1000", "evidence_id": "ev_" + "1" * 64}], [{}], None, {}):
+            with self.subTest(functions=functions):
+                self.fixture.index.write_text(json.dumps({"functions": functions}), encoding="utf-8")
+                binding = queue.read_json(self.fixture.binding)
+                binding["native_index_sha256"] = sha(self.fixture.index)
+                self.fixture.binding.write_text(json.dumps(binding), encoding="utf-8")
+                with self.assertRaisesRegex(queue.QueueError, "empty functions list|lacks functions"):
+                    self.fixture.controller()
+                self.assertFalse((self.fixture.audit / "queue.sqlite3").exists())
+                self.assertEqual((self.fixture.audit / "plan.json").read_bytes(), before)
+
+    def test_no_retained_native_forbids_archive_or_proof_even_null_references(self):
+        self.fixture.without_retained_native()
+        binding = queue.read_json(self.fixture.binding)
+        before = (self.fixture.audit / "plan.json").read_bytes()
+        for fields in ({"source_archive": None}, {"proof": None},
+                       {"source_archive": {"path": "absent", "sha256": "0" * 64}, "proof": {}}):
+            with self.subTest(fields=fields):
+                self.fixture.binding.write_text(json.dumps({**binding, **fields}), encoding="utf-8")
+                with self.assertRaisesRegex(queue.QueueError, "forbids source_archive and proof"):
+                    self.fixture.controller()
+                self.assertFalse((self.fixture.audit / "queue.sqlite3").exists())
+                self.assertEqual((self.fixture.audit / "plan.json").read_bytes(), before)
+
+    def test_unknown_retained_native_modes_are_rejected(self):
+        binding = queue.read_json(self.fixture.binding)
+        for mode in ("unknown", "NONE", "", None, False, {}, []):
+            with self.subTest(mode=mode):
+                self.fixture.binding.write_text(json.dumps({**binding, "retained_native": mode}), encoding="utf-8")
+                with self.assertRaisesRegex(queue.QueueError, "Unknown retained_native"):
+                    self.fixture.controller()
+                self.assertFalse((self.fixture.audit / "queue.sqlite3").exists())
+
+    def test_no_retained_native_still_requires_target_profile_and_index_hash(self):
+        self.fixture.without_retained_native()
+        binding = queue.read_json(self.fixture.binding)
+        for key, value in (("artifact_sha256", None), ("analysis_profile_digest", "wrong"),
+                           ("native_index_sha256", "0" * 64)):
+            with self.subTest(key=key):
+                self.fixture.binding.write_text(json.dumps({**binding, key: value}), encoding="utf-8")
+                with self.assertRaisesRegex(queue.QueueError, "Invalid native binding|Native index hash mismatch"):
+                    self.fixture.controller()
+                self.assertFalse((self.fixture.audit / "queue.sqlite3").exists())
+
+    def test_no_retained_native_keeps_inventory_subject_profile_and_marker_binding(self):
+        for case in ("subject", "profile", "marker"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                fixture = WorkerFixture(directory)
+                fixture.without_retained_native()
+                def mutate(evidence):
+                    if case == "subject":
+                        evidence["subject"]["digest"]["sha256"] = "d" * 64
+                    elif case == "profile":
+                        evidence["analysis_profile"]["digest"] = "d" * 64
+                fixture.inventories(mutate)
+                if case == "marker":
+                    path = fixture.audit / "inventory-procedures.done.json"
+                    done = queue.read_json(path)
+                    done["artifact_sha256"] = "d" * 64
+                    path.write_text(json.dumps(done), encoding="utf-8")
+                with fixture.controller() as controller:
+                    with self.assertRaisesRegex(queue.QueueError, "artifact mismatch|profile mismatch"):
+                        controller.tick()
+                    self.assertEqual(controller.summary()["inventory_total"], 0)
+                self.assertEqual(len(queue.read_json(fixture.audit / "plan.json")["operations"]), 2)
+
+    def test_no_retained_native_resume_ingests_ready_job_without_duplicate_or_omitted_entries(self):
+        self.fixture.without_retained_native()
+        self.fixture.inventories()
+        with self.fixture.controller(batch_size=2) as controller:
+            controller.tick()
+            label = self.fixture.operation()["label"]
+            self.assertEqual(self.fixture.operation()["arguments"]["addresses"], ["0x1000", "0x2000"])
+        self.fixture.batch()
+        with self.fixture.controller(batch_size=2) as controller:
+            summary = controller.tick()
+            self.assertEqual((summary["completed_batches"], summary["pseudocode_success"], summary["detailed_native_total"]), (1, 2, 0))
+            controller.tick()
+            self.assertEqual(self.fixture.operation()["arguments"]["addresses"], ["0x2001", "0x2002"])
+            plan = queue.read_json(self.fixture.audit / "plan.json")
+            self.assertEqual(sum(op["label"] == label for op in plan["operations"]), 1)
+
+    def test_changing_existing_archive_queue_to_no_retained_native_is_not_a_resume(self):
+        self.fixture.inventories()
+        with self.fixture.controller(batch_size=2) as controller:
+            controller.tick()
+            before = list(controller.db.execute("SELECT address,state FROM functions ORDER BY address"))
+            before = [tuple(row) for row in before]
+        plan = (self.fixture.audit / "plan.json").read_bytes()
+        self.fixture.without_retained_native()
+        with self.assertRaisesRegex(queue.QueueError, "Native binding changed on resume"):
+            self.fixture.controller()
+        database = sqlite3.connect(self.fixture.audit / "queue.sqlite3")
+        try:
+            self.assertEqual(database.execute("SELECT address,state FROM functions ORDER BY address").fetchall(), before)
+        finally:
+            database.close()
+        self.assertEqual((self.fixture.audit / "plan.json").read_bytes(), plan)
+
+    def test_explicit_archive_mode_preserves_verified_native_entries(self):
+        binding = queue.read_json(self.fixture.binding)
+        self.fixture.binding.write_text(json.dumps({**binding, "retained_native": "archive"}), encoding="utf-8")
+        self.fixture.inventories()
+        with self.fixture.controller(batch_size=8) as controller:
+            summary = controller.tick()
+            self.assertEqual((summary["detailed_native_total"], summary["detailed_native_in_inventory"]), (1, 1))
+            self.assertNotIn("0x1000", self.fixture.operation()["arguments"]["addresses"])
 
     def test_wrong_artifact_is_rejected_without_changing_worker_evidence(self):
         self.fixture.inventories(lambda e: e["subject"]["digest"].update(sha256="d" * 64))
