@@ -4,7 +4,7 @@ The continuous decompilation goal remains active. The instruction is to work thr
 
 ## Cross-module follow-up
 
-The [verified module checkpoint 05](GLOBAL_DECOMPILATION_MODULES.md) freezes 29 native censuses, three managed targets and the separately extracted launcher package. Its local `coverage-checkpoint-05.local.json` has SHA-256 `d1198094a418501e6c7dcc819b703a7ac719554e775e141957a8f9d3b407846b`; root independently rehashed all **5,922 pinned source/proof files**. Native availability is **97,790 entries with text**, with five explicit failures and separate retained Native/graph/body metrics. The [generator pilot](LAUNCHER_PYTHON_GENERATORS.md) and [configuration study](RAPPELZ_CONFIG_RECONSTRUCTION.md) add bounded reconstruction evidence. Subsequent SFrame CRT results and later live module phases remain outside this frozen selection. The goal remains active after publication.
+The [verified module checkpoint 06](GLOBAL_DECOMPILATION_MODULES.md) freezes all 35 original automatic native censuses, with **103,572 internal entries /103,566 entries with text /six explicit errors**. Its local `coverage-checkpoint-06.local.json` has SHA-256 `4ff69df16699960db214c73e795264b01f0f69a74395d6d92a3c1f5c0d8031e5`; root independently rehashed all **6,497 pinned files** after the host reboot. Original special formats, 68 embedded PE members, missing entrypoints, detailed Native/body coverage and semantic reconstruction remain separate unfinished scope. The verified ten-C supplement and reviewed UPX unpack have independent profiles and do not alter those frozen census counts. The goal continues after publication.
 
 ## Target and versions
 
@@ -135,7 +135,17 @@ The ten-C run retains **three embedded decompiler warnings** and unforced return
 
 The distinct run profile is `e47d3ce94c57c15dec80d821dec0c2ab41ad4e73fa5e20a2c9b993220f9ace22`; its post-report SHA-256 is `4ef83112535eda935c716c426199a93c94fd4ca747530f56f97172762577e996`. The scoped independent receipt `sframe-crt-c-pilot-v2-fresh-01/verification.local.json` has SHA-256 `8417f5754acaaad60737ffc7d9a4f6e87f0cf605ae64e1679f10314adfd56fd9`. Success there proves the bounded source/process/byte/body checks, not complete semantics, game runtime or the global objective. These ten additions are counted once across profiles and add no detailed Native dossier.
 
-Original `unins000.exe` has a structurally qualified Inno-message appendix; original `uninstall.exe` has a consistent UPX compressed-stream header. These new routing proofs add no function census. Future unpacking needs a reviewed resource guard and explicit packed-source/tool/derived-output lineage; legacy non-exact PE reconstruction must not be called an original-byte restoration.
+Original `unins000.exe` has a qualified Inno-message appendix. A reviewed UPX decompression now produces a separately hashed maintenance PE; its native census is still pending. Packed-source/tool/derived lineage and the legacy non-exact PE reconstruction limit remain explicit.
+
+## Recovery after the host restart
+
+The confirmed restart at 2026-11-02 22:06:14 UTC ended the first xdelta inventory request before any inventory response, batch, checkpoint or retained export existed. Its original audit and request were preserved. After checking that the recorded processes were dead and ownership locks free, one new isolated audit recovered **836 internal entries**, with no item error. The original interrupted attempt is never marked complete or counted again.
+
+After the reboot, **41 original PE hashes, 11 protected files, the installed WTF tree and the logical SQL backup** match the recorded baseline. The three local services have no listening ports and were not restarted for static analysis. These observations do not verify live SQL after the system crash. All 6,497 frozen checkpoint pins were independently rehashed. One recent preparation notice contains NUL bytes; its original is preserved, the notice is reconstructed separately, and the pinned scripts, plans and profiles passed integrity checks.
+
+One reviewed UPX tool invocation decompressed an isolated copy to **3,805,696 bytes**, SHA-256 `5ef772bfd3c163011967a6c5f8eacb53df2f653337594b0529e548f2296e76d1`. The official tool's two owned processes ended zero under checked memory/CPU limits. The packed original and input copy remained unchanged. The derived PE has five bounded sections and no overlay; legacy PE13 reconstruction does not prove the old unpacked file byte for byte. No function census, independent uncompressed-stream checksum, semantic equivalence or target execution is claimed from this operation. Its later census must bind the packed-source/tool/derived lineage explicitly.
+
+The fifteen-C++/two-known-C-return analysis uses a separate profile. Its first combined wrapper refused a valid Windows path before engine creation; that failure is retained. A corrected path guard is tested against the actual Windows PowerShell runtime before a changed attempt. The two known C entries add zero global discoveries. Results of later experiments remain outside checkpoint 06 until their own body, byte, process and metadata checks pass.
 
 ## Evidence and batch limits
 
