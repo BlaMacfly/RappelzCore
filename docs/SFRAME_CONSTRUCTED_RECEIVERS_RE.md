@@ -1,5 +1,7 @@
 # SFrame constructed graphics receivers and MAIN call contexts
 
+Follow-up **2026-11-02**: [Text state and vector producers](SFRAME_TEXT_STATE_PRODUCERS_RE.md) qualifies the selected later A+20/+24 numerical stores, copied C118 rectangle and ColorBox C1fc insertion/growth. Those specific producer questions are no longer wholly unknown; later C+0x208, actual 918630 receiver and MAIN+0x458 activation remain open.
+
 Verified **2026-11-02**, following [MAIN child opacity callbacks](SFRAME_MAIN_OPACITY_CALLBACKS_RE.md). **Seven new Native dossiers / 1,606 analyzed bytes / 373 instruction boundaries** qualify control/auxiliary construction, sprite-array creation, a MAIN sprite-query adapter and focused-child keyboard dispatch. The actual receiver of **918630** and nonzero activation of **MAIN+0x458 remain unidentified**. No original SFrame process is executed.
 
 Target: x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b938d601aeaebb7b3db0c89fc47755325a98a410d`. REA **6.4.0**, Ghidra **12.1.4**, Capstone **5.0.7**, profile `b9d116ea480a02cc8773b19372074a3caf77785cbc080b1ac7133b5110e40b17` are retained. [Versions](VERSIONS.md) remain Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, SFrame file/product **9.1.0.0**, embedded **Source9.5.2** and network **201507080**. Exact official Epic/patch remains unconfirmed.
@@ -79,7 +81,7 @@ The first owned Native session retains five dossiers before the unrecognized rel
 |---|---|---|
 | 1 | **Actual caller and constructed receiver of 918630** | A reaching transfer/registration binding entry ECX to a real object, not an opaque tag or coincident field offset. |
 | 2 | **Nonzero activation of the same MAIN instance's +458 byte** | A qualified writer or equivalent observed transition; 8fb010 is insufficient until its receiver is bound. |
-| 3 | **Remaining loaded-state origins and effects** | Later A+20 assignment, producers/replacements of C+1fc..200 and C+208..20c, and a concrete owner/alias link where relevant. Constructor zeros do not close later state. |
+| 3 | **Remaining loaded-state origins and effects** | The follow-up qualifies selected A+20/+24 numerical writes and ColorBox C+1fc insertion/growth outside the selected MAIN resource classes. Later C+208..20c producers/replacements and relevant owner aliases remain open; the selected closures do not prove arbitrary runtime state. |
 | 4 | **Reaching branches, recursive callbacks and live activation** | Source-qualified successors beyond the bounded linear/thin model, then an appropriate controlled observation of any identified activation. No usable original-client trigger is currently established. |
 
 Do not repeat the closed selected caption/token path, array construction, selected key wrappers, or old PDB/incoming/whole-text inventories. Runtime replacement and arbitrary corruption are limitations, not fresh static decompilation targets by themselves. The next cycle should follow a concrete receiver/write or one of the recorded remaining producers.
