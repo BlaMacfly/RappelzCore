@@ -1,5 +1,7 @@
 # Development status
 
+**Latest source audit (2026-11-02):** [Computed-entry delta and MAIN descendants](SFRAME_ENTRY_AND_DESCENDANTS_RE.md): the 106-body retained-corpus delta adds 40,990 provider-bounded bytes / 11,417 instructions to the address-propagation model, with no target candidate. Exact MAIN TD reuse in 2,134 retained RTTI tables and 210,912 declared HIGHLOW slots identifies only its own hierarchy/constructor. The actual 918630 caller/receiver and MAIN+0x458 trigger remain unknown. Source-derived audit only; zero new Native analyses or original execution. Nine preservation checks pass; versions unchanged.
+
 **Latest reverse engineering (2026-11-02):** [Receiver-family and expanded-alias investigation](SFRAME_MODE_RECEIVER_FAMILY_RE.md): 3 new Native dossiers qualify the remaining substantive registered Arena callbacks and the counter widget source. A bounded 16→64 alias expansion adds 22,308 states and resolves one local cap; seven remain. The actual 918630 receiver and MAIN+0x458 trigger remain unidentified. Nine preservation checks pass; gameplay and versions unchanged.
 
 **Latest evidence audit (2026-11-02):** [MAIN mode-transition audit](SFRAME_MAIN_MODE_TRANSITION_AUDIT.md): retained typed reads/clears and the unbound 918630 receiver are revalidated. No nonzero MAIN activation or usable alternate-mode trigger is established; prior caps and the Arena counterexample remain explicit. Zero new Native analyses/queries; prior 694-record bundle and snapshot reused. Nine preservation checks pass. Documentation only.
