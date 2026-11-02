@@ -1,5 +1,7 @@
 # MAIN child opacity callbacks and concrete dispatch
 
+Follow-up **2026-11-02**: [Constructed receivers and MAIN call contexts](SFRAME_CONSTRUCTED_RECEIVERS_RE.md) qualifies selected control/auxiliary returns, sprite-array construction and key callbacks, and records the remaining-work priorities. It also reconciles the already-qualified ordinary resource-token translation; runtime selection/overrides remain conditional. The MAIN458 trigger and918630 receiver remain unresolved.
+
 Verified **2026-11-02**, following the [interprocedural MAIN helper investigation](SFRAME_INTERPROCEDURAL_RE.md). **The actual receiver of `0x918630` and the nonzero trigger of `MAIN+0x458` remain unidentified.** This pass adds **four Native dossiers / 321 analyzed bytes / 99 instruction boundaries**, closing the selected child-opacity dispatch and identifying its loaded-object writes and bounds diagnostics. The original SFrame is not executed.
 
 The target is original x86 SFrame SHA-256 `27f42fc8f6b08df8c239640b938d601aeaebb7b3db0c89fc47755325a98a410d`. REA **6.4.0**, Ghidra **12.1.4**, Capstone **5.0.7**, profile `b9d116ea480a02cc8773b19372074a3caf77785cbc080b1ac7133b5110e40b17` are retained. [Versions](VERSIONS.md) stay Core/RappelzRust **0.1.0 development**, NoLimits launcher **1.3.60**, SFrame file/product **9.1.0.0**, embedded **Source9.5.2**, network **201507080**. Exact official Epic/patch remains unconfirmed.
@@ -12,7 +14,7 @@ Existing Native sources qualify initialization and list membership: `8a1ab0 → 
 
 The retained, fully parsed MAIN resource has **one genwnd root and 47 factory children**: static37, simplebutton2, gauge3, tab_sheet1, tab_head2, iconstatic2. The genwnd root is applied to existing MAIN, not counted as another factory child. Basic and Added resources retain their separate 141/72 child blocks. The three cached resource hashes and their earlier archive-transform proof references are reused; archive decoding is not claimed as new work.
 
-Original registration `5b67a0/5b67a5` binds the `static` literal at d36180 to factory b67110. That retained factory allocates 0x2ec and installs exact KUIControlStatic vptr d8d0f0 at b6714e. Resource-token translation, registry success/selection, valid construction and stable vptr/list state remain conditions. The six named class tables below are source-qualified resource candidates, not an assertion that all their instances were observed running.
+Original registration `5b67a0/5b67a5` binds the `static` literal at d36180 to factory b67110. That retained factory allocates 0x2ec and installs exact KUIControlStatic vptr d8d0f0 at b6714e. The selected ordinary resource-token translation is already qualified by the caption/owner report. Registry success/selection, valid construction and stable vptr/list state remain conditions; complete grammar and live overrides are separate limits. The six named class tables below are source-qualified resource candidates, not an assertion that all their instances were observed running.
 
 ## The callback has two original targets
 
