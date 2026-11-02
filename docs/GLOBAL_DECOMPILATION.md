@@ -2,6 +2,10 @@
 
 The continuous decompilation goal remains active. The instruction is to work through the available client functions without requiring repeated requests to continue. This document freezes a verified publication point from **2026-11-02**; a later live phase has already continued beyond it. Completing this inventory will still require analysis, reconstruction and gameplay validation before it establishes functional compatibility.
 
+## Cross-module follow-up
+
+The [verified module checkpoint 03](GLOBAL_DECOMPILATION_MODULES.md) extends the frozen SFrame result below. It covers seven native censuses, three managed targets and the statically extracted launcher package, with separate denominators and remaining unknowns. Its local `coverage-checkpoint-03.local.json` has SHA-256 `9a31f3b1266af0a635c3c02351bbfa591cced4da623d003da983da5851d71874`; a primary replay rehashed all 3,937 pinned source/proof files. Later live modules are deliberately outside that membership. The matching [.NET 2.0 reference pack](https://www.nuget.org/packages/Microsoft.NETFramework.ReferenceAssemblies.net20/1.0.3) is an auxiliary resolution input, not another shipped game module; the linked checkpoint preserves its provenance/validation limits. The global goal remains active after this publication.
+
 ## Target and versions
 
 The current bulk queue covers the supplied `Rappelz NoLimits/SFrame.exe`, PE32 x86, **12,481,536 bytes**, SHA-256 `27f42fc8f6b08df8c239640b938d601aeaebb7b3db0c89fc47755325a98a410d`. It uses the current provider's procedure census, which may omit unidentified code or imperfect function boundaries. It does not yet measure every module in the package.
@@ -46,6 +50,8 @@ The checkpoint export `checkpoints/global-00002022.bundle.json` contains **2,046
 
 The official **REA 6.4.0 `parseEvidenceBundle`** validation passed: 2,022 batches, 55,557 distinct requested selectors, 55,557 successes and zero errors. The older **737-record Native archive** remains separate and unchanged in the previous `2026-11-02-sframe-vector-owner-3e87a1c9` audit. The newer export does not replace that corpus or recreate its detailed dossiers.
 
+An additional one-pass archive audit and targeted historical-file audit now confirm every retained text: **563 exact index IDs in the 737-record main archive plus 31 separately retained historical Native files**, giving 594 nonempty pseudocodes with matching target, address, profile, body and raw/normalized text. The index is not wholly contained in that archive. Six texts contain unrecovered-jumptable warnings and 24 value-flow graphs are truncated; these limitations remain separate from text availability and body-range accounting. The combined local proof `retained-native-text-combined-03.local.json` has SHA-256 `d6351968c26d90300660146f12545440093d4bd974443e178df61ac3f4613794`.
+
 The previous published checkpoint 514 (8,224 new outputs) remains an immutable local baseline. Checkpoint 2022 adds 47,333 further outputs. Every internal entry in this provider census now has pseudocode text, either in the retained Native corpus or the bulk outputs. This closes the census attempt queue, not semantic review or the global decompilation goal: unidentified code, imperfect boundaries and other package modules remain outside this result.
 
 ## Package inventory and remaining scope
@@ -78,6 +84,34 @@ The next completed attempt census is `audiere.dll`, SHA-256 `90e59c4f60941a2838d
 A separately frozen review of the first **1,796 batches / 41,120 new pseudocodes**, with no overlap with the 594 retained Native entries, establishes no new explicit call or qualified receiver for `0x918630`. Three functions (`0x73eef0`, `0x7516e0`, `0x8e7e10`) contain byte writes at object offset `+0x458`; none of their objects is proven to be MAIN. Offset matches and wider writes do not establish activation. The mode trigger remains unknown and requires qualified receiver/provenance evidence before implementation. This search result does not cover the later 14,437 bulk outputs.
 
 The ignored local reports `new-global-main-frontier.local.json` and `new-global-main-review.local.json` have SHA-256 `cb4aa7bdeca38785a86914efaeffabb6f24f2ef3dc8414f8e5dc3ecc41c8e14d` and `fed74bcc25e8ddd8ce7ab6baa2744619d27180882829f0c3fc62ca519f745abf`, respectively.
+
+A later disjoint review of batches **1797..2022 /14,437 texts** completes the bounded text search across all **55,557 new outputs** without rereading the first cohort. It establishes no additional recognized explicit calls to `0x918630` or `0x8fb010`, and no additional byte-write candidate at `+0x458`. This does not resolve indirect calls. Reports `new-global-main-tail-frontier.local.json` and `new-global-main-tail-review.local.json` are pinned by SHA-256 `c3bdc5b179c826aa6a72685ab865631fc2b42b61081d461a6de277a638497902` and `7c398f3bcce0cb89a5cddd82a2a453a62ce294b835089a01bc26d542358aa791`.
+
+Original RTTI, complete-object locators, vtable slots/hierarchies and the six original byte stores now qualify the three earlier candidates on their original dispatch paths:
+
+| Function | Qualified receiver |
+|---|---|
+| `0x73eef0` | `SUIAuctionTenderWnd` |
+| `0x7516e0` | `SUIChattingOptionWnd` |
+| `0x8e7e10` | `SUIRaidSiegeRotationSiegeWnd` |
+
+None of these original RTTI hierarchies contains MAIN's type descriptor. They therefore do not establish MAIN activation; arbitrary or unresolved indirect delivery remains outside this conclusion. The local `new-global-three-receivers.local.json` report has SHA-256 `27223bed9423d6ad463d8a650c6c9e3f07639e1c7838ac653a8fc8a5a67a1b73`. Its bounded byte/instruction work creates no new complete Native dossier and does not change the retained body-coverage metric.
+
+## Later guarded Python application trial
+
+After the extracted-package checkpoint, a separate local adapter for [depyf 0.20.0](https://pypi.org/project/depyf/0.20.0/) attempted the **90 code objects /20,397 instructions** of `NoLimits_Launcher_FR` only. It retained **42 syntax-only successes, 41 partial results, six failures and one five-second timeout**. There are 83 fragments, of which 82 parse as Python AST; AST validity does not make 82 complete decompilations or a reconstructed application. The root module remains partial because exception handling is unsupported, and defaults/stack/branch/yield limitations remain explicit. The timed-out `_fetch_news` object was not repeated unchanged.
+
+The adapter blocks target-code execution and non-AST compilation, replaces the decompiler's evaluation path with literal-only parsing, and blocks process/network actions. The 89 available child receipts pass their six guard self-tests and report no unexpected block events; the timed-out child lacks its final receipt, so the aggregate does **not** claim all 90 guard receipts passed. Original payloads, the frozen 2,166-file extraction tree and the installed/shared tools remained unchanged. No target or recovered source was executed; source validation stopped at AST parsing.
+
+Local `launcher-decompile-depyf-01/report.local.json` and `verification.local.json` have SHA-256 `97832b9898b7800e59d572390a821be7dd951da517017cd5430b632235345ace` and `7965fba25807a16fa89ffc5bc3f658ea7f548e4d67dfab96282679f9929123fe`. This is an explicitly partial application-only attempt, outside the 11,012 other packaged code objects and outside the native table; semantic equivalence is unproven.
+
+## Supplemental launcher entry recovery
+
+A separate official Ghidra 12.1.4 fresh-import experiment recovered four CRT initializer entries absent from RappelzCmdLauncher's first provider inventory: `0x4019e5`, `0x402562`, `0x402bef` and `0x405710`. Before the analytical changes, the experiment matched the original 146 internal entries; after them it had 150. The four new nonoverlapping bodies comprise **90 original bytes /34 instructions**, matched against the original file and their callback-table pointers. All four produced nonempty pseudocode without a reported decompiler error or timeout. The original 146 names/body bounds remained unchanged in that experiment.
+
+This supplements the frozen 146-entry row; it is **not** four new REA Native dossiers or a silent edit of that census. Run profile SHA-256 is `fb56a6b7971892f7b3ee569ef6b9aa32ef45404b3e9868252b2e7c8790ab931b`, and post-report SHA-256 is `b9acdc48bce1474635a531e43df0a7439e9aee42817a5ab247cdf88bfd14d68e`. The original and staged copy are unchanged, and analytical transactions were rolled back after export. The headless child's exit code was not captured reliably and remains unknown; observed reports and byte checks, rather than a guessed zero exit status, support these results.
+
+The analytical main return storage is now `EAX:4`, but its pseudocode still models the security-cookie tail as the result-producing call and does not faithfully recover the original `-1` / `GetLastError()` / `0` returns. Those values are established separately by raw instructions. That first experiment left three initializer return metadata fields unaligned. A second isolated revision now observes all three as `undefined4` in `EAX:4`, leaves the argc bridge unforced, and captures an actual child exit code of zero through its retained handle. It adds no further entry beyond those four and leaves main's cookie-result semantics unresolved. Its run profile is `78a38d2029a653f3904f78b52bc66c57152a2ca769a4de15991b3ebca39f1aa3`, with post-report SHA-256 `c6444f568560dbb26ec588b0b11fa8c31ad22a884312575f03b5adca50cbcb9c`; original/copy hashes are unchanged and transactions are rolled back. This is concrete evidence that text availability alone is insufficient for reconstruction. Local sources are `client-data/audit/2026-11-02-module-rappelzcmdlauncher-89c21a84/launcher-entry-recovery-fresh-02/verification.local.json` and `independent-review.local.json`; the latter has SHA-256 `4b67eb9fdab025c279e98762c752c4310baa137114dcc934a1e1be18d2cb4299`.
 
 ## Evidence and batch limits
 
