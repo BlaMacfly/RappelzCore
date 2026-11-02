@@ -1,6 +1,6 @@
 # Global decompilation: verified module checkpoint
 
-Frozen on **2026-11-02**, from the progress snapshot read at **22:15:12 UTC**. The continuous goal remains active. This checkpoint includes **35 native modules** with verified exports, three managed assemblies and the extracted launcher payload. Later arrivals and running batches are excluded. No overall completion percentage is reported: other modules, unidentified code and semantic reconstruction still lack complete denominators.
+Frozen at **2026-11-02T23:10:15.649084+00:00 UTC**. The continuous goal remains active. This checkpoint separates **35 automatic original-native censuses**, **two special original-native censuses** and **one derived nonoriginal PE census**. Three managed assemblies and the extracted launcher payload keep their independent scopes. Running or prepared future analyses are excluded. No reliable overall completion percentage is available.
 
 The supplied NoLimits package label is **1.3.60**. SFrame declares file/product version **9.1.0.0**, contains build lineage **Source9.5.2** and protocol literal **201507080**. The exact official Epic/patch remains unconfirmed; these labels have separate meanings. See [versions](VERSIONS.md).
 
@@ -43,8 +43,18 @@ The supplied NoLimits package label is **1.3.60**. SFrame declares file/product 
 | lua5.1 | 1,182 | 93 | 1,181 | 0 | 1 |
 | Win98sUpdateUtil | 1,976 | 329 | 1,976 | 0 | 0 |
 | xdelta3 | 836 | 87 | 836 | 0 | 0 |
+| unins000 | 2,935 | 425 | 2,935 | 0 | 0 |
+| NoLimits_Launcher_3 | 813 | 142 | 813 | 0 | 0 |
 
-These censuses contain **103,572 internal entries**, **5,001 external entries**, **102,972 new successful pseudocodes** and **594 retained SFrame dossiers**, with **six recorded failures**. The resulting **103,566 entries with text** measure availability within these provider censuses. Complete bodies, detailed analysis and verified behavior remain separate questions. External entries are excluded from internal attempts. Every included module has a frozen publication, verified official export and operation receipt; SFrame and Audiere retain their historically named verification files.
+The **37 original-artifact censuses** contain **107,320 internal entries**, **5,568 external entries**, **106,720 new successful texts** and **594 retained SFrame dossiers**, with **6 recorded failures**. Their **107,314 entries with text** measure availability within these provider censuses, not complete bodies, original source or verified behavior. External entries are excluded from internal attempts. Unins is inherited from special01 once; it is not counted again by special02.
+
+The derived PE is counted separately:
+
+| Derived artifact | Internal entries | External entries | Successful texts | Errors |
+|---|---:|---:|---:|---:|
+| uninstall UPX PE13 derivative | 20,510 | 786 | 20,510 | 0 |
+
+Across the **38 distinct analyzed target artifacts**, availability totals **127,830 internal entries / 127,824 with text / 6 errors**. This mixed original/derived total does not mean 38 original native files are complete. The packed original `uninstall.exe` still lacks its own stub census; a nonexact derivative cannot silently satisfy that original scope.
 
 The retained SFrame **index of 594 dossiers** is distributed between the **737-record principal archive (563 indexed Evidence IDs present)** and **31 separately pinned historical sources**. All 594 have nonempty pseudocode text checked against exact IDs, target, addresses, profile and source hashes. Its verified body-range union remains **324,379 bytes**, separately bounded against **9,589,018 initialized executable bytes**. Bulk text does not enlarge that detailed-body metric.
 
@@ -54,9 +64,9 @@ Audiere's `0x100519b2` and MSS32's `0x21138c8d` still fail with `Overlapping inp
 
 The other three failures have different causes. `cario.dll` retains two dead-decompiler-process errors at `0x100e9780` and `0x101300f0`; it is a separate target from `libcairo-2.dll`. `d3dx9_40.dll` retains one response-buffer-limit error at `0x1010ad70`. They remain failed items in their original batches, with no text success inferred from the rest of each module. The new `lua5.1.dll` census retains one `Overlapping input varnodes` failure at `0x1001a78d`; its failed item was not resubmitted. The six errors are **Audiere 1 / MSS32 1 / cario 2 / d3dx9_40 1 / Lua 1**.
 
-The 35 final export bundles total **200,739,563 bytes**; the six additions account for **9,576,306 bytes**. These sizes measure evidence storage, not recovered executable bodies. Exact target/profile bindings, ordered selectors, canonical identities, every operation response and completion marker were independently rechecked for the six additions. All earlier source pins were freshly rehashed, without repeating analysis or the official parser.
+The **38 final export bundles** total **234,476,401 bytes**. These are evidence-storage sizes, not executable-body coverage. The three special additions have independently checked subject/profile bindings, canonical selectors, nonempty successes, explicit errors and immutable operation markers. Existing official `parseEvidenceBundle` receipts were reused only after their exact export hashes and counters reconciled; no parser or native producer was replayed by this checkpoint.
 
-The **35 automatic original-native censuses** now have frozen completion proofs. Three original native targets still require their special routes: the packaged launcher's native bootloader, `unins000.exe`, and the UPX-packed `uninstall.exe`. The three managed assemblies and 68 extracted PE members remain separate scopes. Finishing the automatic list does not finish global decompilation.
+The original inventory remains **38 native PE files plus three managed assemblies**. Thirty-seven original native targets now have closed provider-census attempt sets. The additional UPX PE13 target is explicitly **derived**, while its packed original remains open. The 68 embedded PE objects keep a separate uncensused scope. Closing an initial provider census does not finish global code or semantic reconstruction.
 
 ## Recovery after the host crash
 
@@ -116,27 +126,33 @@ Its **eight context occurrences represent six generator identities**, not eight 
 
 The **68 extracted PE objects are x64**, have no CLI header and remain outside the native table above. Their independent function censuses and native decompilation are future work. Static import names yield 211 candidate links, without proving runtime loading. Bundled support libraries are not automatically game logic; publisher/license provenance remains unverified.
 
-## Static frontiers outside the census
+## Supplemental SFrame CRT results and prepared work
 
-SFrame's retained CRT-table study identified **581 exact-entry candidates absent from the initial census**: ten C and 571 C++ table targets. The completed isolated ten-C V2 pilot subsequently verified **ten new local entries/texts / 1,488 original bytes / 372 instructions**, counted once in its separate local profile. Its local function count moved from 56,733 to 56,743. These supplemental entries do not modify the frozen SFrame table row, become REA Native dossiers or enlarge the historical detailed-body metric.
+[The SFrame CRT initializer report](SFRAME_CRT_INITIALIZERS.md) separates **ten C entries /1,488 bytes /372 instructions** from **fifteen C++ entries /357 bytes /106 instructions**. Their verified disjoint union contains **25 identities /1,845 bytes /478 instructions**, counted once, with zero new REA Native dossiers or changes to the frozen SFrame row. The ten-C run keeps three embedded warnings; the C++ run keeps one global-overlap warning.
 
-The ten-C pilot retains **three embedded warnings** and unforced return metadata. The printed void result at `0xbe4ea1` and byte result at `0xcd168b` do not fully express their normal EAX-consuming contracts. A separate return-metadata repair is prepared; it would revisit two already recovered entries and add zero global discoveries. The **571 C++ candidates remain unrecovered** in this checkpoint; a prepared 15-candidate pilot is not an executed result.
+Two already known C returns were projected in the combined run and aligned to `undefined4 / EAX:4` with other ABI/callee metadata unchanged. They add zero global discoveries. Their C texts nevertheless remained byte-identical and printed void/byte. The installed primary sources explain the observed `DEFAULT → DEFAULT` signature priority: undefined types skip source promotion, leaving output type unlocked. A new explicit32-bit integer/ANALYSIS model is compiled and prepared only; original source signedness is not established, and future rendering is unobserved.
 
-The source-pinned producer checked Ghidra ownership and disjoint bounded bodies; independent checks matched original bytes, entry barriers and pairwise bounds without reacquiring the entire old body map. Original/copy hashes remained identical and the read-only project was absent after process exit. Immediate metadata restoration after the rollback request was false. Private project/input paths were observed, while a later `launch.bat` option overrode the requested private `user.home`; full tool-configuration isolation is not claimed. Future path-option correction changes no completed producer result.
+Immediate restoration probes after rollback requests were false. The owned process exits, unchanged original/copy hashes and absent read-only private projects are separate observed facts. Corrected JVM home/tmp overrides were effective in combinedV2, but Ghidra settings/cache remained under AppData; full tool-preference isolation is not claimed.
 
-`unins000.exe` has a structurally qualified **10,586-byte tail**: a 16-byte opaque prefix, a 10,517-byte message block, 45 option bytes and an eight-byte locator. The message block's size/complement, CRC32 and **207 NUL-terminated strings** reconcile. This supports a future whole-file native-analysis route; no function census or pseudocode has been produced for it. Opaque fields, runtime uninstall behavior and publisher provenance remain unqualified. Message-format, Inno and resource version declarations are not game-version evidence.
+The original missing-C++ frontier now has **556 candidates**: a static529/27 split, including25 indirect-call dependencies, one cycle and rank six. `0xbca73a` is **not** an exact entry in the initial census. The prepared full556 phases and their static fragment covers add no new function, body coverage or semantic proof before actual ownership checks. The separate detailed-Native64 review has51 fixture checks and **zero executed Native dossiers**; the detailed corpus remains594.
 
-`uninstall.exe` has a statically consistent UPX header and a **1,309,962-byte compressed stream**, whose compressed Adler32 matches. The declared 3,932,862-byte uncompressed stream differs from the declared 3,805,696-byte original file size; neither is a function denominator.
+## Special original artifacts and the UPX derivative
 
-A later supplemental operation used the exact hash-pinned **UPX 5.3.0** tool from the official archive to decompress an isolated copy once. The derived x86 PE is **3,805,696 bytes**, SHA-256 `5ef772bfd3c163011967a6c5f8eacb53df2f653337594b0529e548f2296e76d1`, with five bounded sections, reconstructed imports and no physical overlay. Original and packed-copy bytes remained unchanged. Both owned UPX processes exited zero with the verified 512 MiB memory limits, two-CPU affinity and BelowNormal priority. Only the analysis tool ran; the original, packed copy and derived executable were never launched.
+Original `unins000.exe` now has **2,935 internal entries /2,935 texts /zero errors**. Its qualified10,586-byte Inno-message tail and207 strings remain data-format evidence, not extra functions or game-version labels. Original `NoLimits_Launcher_3.exe` now has **813 internal entries /813 texts /zero errors** in its native bootloader census. Its Python payloads and68 embedded PEs are not covered by those813 native entries.
 
-The legacy **UPX PE13 format uses non-exact reconstruction**. The result is not proved byte-identical to a historical unpacked original or semantically equivalent. The tool's default checks completed, while the uncompressed-stream Adler32 was not independently established. The separate derived PE still needs its own native census; no new function count follows from successful decompression.
+The separate derived uninstall PE retains SHA-256 `5ef772bfd3c163011967a6c5f8eacb53df2f653337594b0529e548f2296e76d1`, size3,805,696bytes, and the original packed-source → exact UPX5.3.0 tool → derived-output lineage. Its completed census appears only in the derived table. The original packed `uninstall.exe` is not counted as censused by the derivative. Legacy PE13 reconstruction remains nonexact: neither byte identity with a historical unpacked original nor semantic equivalence is established. The uncompressed-stream Adler32 was not independently established. No original, packed copy or derived executable was launched.
+
+## Windows controller recovery
+
+A263-character temporary output path stopped the Unins controller after its first batch had already been acquired. The Windows adapter now uses a shorter sibling temporary name for atomic publication. **39 checks pass:30 existing controller-integrity cases plus nine new temporary-path cases.** The same warm workerPID7144 and its original first-batch response/marker were retained; only the controller was replaced. That first batch was not produced again.
+
+The three final special censuses are counted from closed exports and verifications. Warm128-batch phases and mutable progress journals are not promoted to final success. The isolated Windows adapter and its tests are authored tools; raw targets, pseudocode and private evidence remain local.
 
 ## Frozen publication pins
 
-The private `coverage-checkpoint-06.local.json` supersedes checkpoint 05. Its immutable progress snapshot was frozen at **22:15:12.894251 UTC**: **34,283 bytes**, SHA-256 `fe6e7e437313807fe8bc8ef044af146e42d252c81d3352d98ed323ff04055073`. Only its **35 completed-module rows** select the census cohort. The previous module report remains byte-identical locally at SHA-256 `94fbd5219f0e2763668e635e83bca3c553a8553488dc6b95b3ad654790fb7b77`.
+The private `coverage-checkpoint-07.local.json` supersedes checkpoint06. Its selection is derived from the35 inherited automatic-original proofs and three additional closed proofs, with two original special rows and one derived row. The previous module report is preserved byte-identically at SHA-256 `f90ee72cb818fcfa2e5d0218ce391c749d42426d95062e9630b090cac9fb9b9b`; checkpoint06 itself is unchanged.
 
-All **5,922 prior source pins** were freshly rehashed, including retained Native, managed, extraction and Python evidence. The six additions have frozen operation plans and complete response/marker checks for exact subject/profile, canonical entries and ordered selectors. The official-parser receipts were reused only after their exact export hashes and counters reconciled; no provider or parser was rerun. The completed ten-C pilot and later UPX result are explicitly separate supplements, not alterations to the native census cohort. Six live parent documents and mutable controller journals are excluded from fixed proof inputs.
+All **6,497 inherited source pins** were freshly rehashed. The old public-report pin is relocated to its preserved private copy only in the new checkpoint, while the new authored report has its own pin. New special operation responses, markers, selector sets, source/profile bindings and existing official-parser receipts were verified offline. CRT supplements, prepared profiles and their source limitations remain separate from provider-census totals. Six live parent documents and mutable controller journals are excluded from fixed proof inputs.
 
 | Frozen launcher report | Document SHA-256 | Local publication manifest SHA-256 |
 |---|---|---|

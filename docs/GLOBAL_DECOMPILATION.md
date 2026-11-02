@@ -4,7 +4,7 @@ The continuous decompilation goal remains active. The instruction is to work thr
 
 ## Cross-module follow-up
 
-The [verified module checkpoint 06](GLOBAL_DECOMPILATION_MODULES.md) freezes all 35 original automatic native censuses, with **103,572 internal entries /103,566 entries with text /six explicit errors**. Its local `coverage-checkpoint-06.local.json` has SHA-256 `4ff69df16699960db214c73e795264b01f0f69a74395d6d92a3c1f5c0d8031e5`; root independently rehashed all **6,497 pinned files** after the host reboot. Original special formats, 68 embedded PE members, missing entrypoints, detailed Native/body coverage and semantic reconstruction remain separate unfinished scope. The verified ten-C supplement and reviewed UPX unpack have independent profiles and do not alter those frozen census counts. The goal continues after publication.
+The [verified module checkpoint 07](GLOBAL_DECOMPILATION_MODULES.md) freezes **37 original native artifacts plus one derived PE**, with **127,830 internal entries /127,824 with text /six retained errors**. Its local `coverage-checkpoint-07.local.json` has SHA-256 `48c2aae1004ff2b076b5e23c58cc5f128b24e81d48d323933310fe97221169ad`; root independently rehashed **7,600 pinned files**. The packed original, 68 embedded PEs, detailed Native coverage and semantic reconstruction retain separate unfinished scopes. [SFrame CRT evidence](SFRAME_CRT_INITIALIZERS.md) qualifies 25 local additions without enlarging the original Native 594 metric. Full556 and subsequent Native results remain outside this frozen selection. The goal continues after publication.
 
 ## Target and versions
 
@@ -146,6 +146,16 @@ After the reboot, **41 original PE hashes, 11 protected files, the installed WTF
 One reviewed UPX tool invocation decompressed an isolated copy to **3,805,696 bytes**, SHA-256 `5ef772bfd3c163011967a6c5f8eacb53df2f653337594b0529e548f2296e76d1`. The official tool's two owned processes ended zero under checked memory/CPU limits. The packed original and input copy remained unchanged. The derived PE has five bounded sections and no overlay; legacy PE13 reconstruction does not prove the old unpacked file byte for byte. No function census, independent uncompressed-stream checksum, semantic equivalence or target execution is claimed from this operation. Its later census must bind the packed-source/tool/derived lineage explicitly.
 
 The fifteen-C++/two-known-C-return analysis uses a separate profile. Its first combined wrapper refused a valid Windows path before engine creation; that failure is retained. A corrected path guard is tested against the actual Windows PowerShell runtime before a changed attempt. The two known C entries add zero global discoveries. Results of later experiments remain outside checkpoint 06 until their own body, byte, process and metadata checks pass.
+
+## Verified continuation checkpoint 07
+
+The three special audits add **24,258 successful texts**: original Unins2,935, original launcher bootloader813 and derived maintenance PE20,510. Original targets and the PE13 derivative retain their own identities. The first128 derived batches survive unchanged across two further controller phases; the final321-batch export and its official parser receipt are closed and verified. A warm snapshot alone is never a final publication receipt. The original packed stub still needs its own focused analysis, and the68 embedded PE members remain separate.
+
+The [SFrame CRT report](SFRAME_CRT_INITIALIZERS.md) qualifies ten C and fifteen C++ local additions once:25 identities,1,845 original bytes and478 instruction boundaries. It retains warnings, owner/body limits and false immediate rollback observations. Two known return metadata changes align EAX:4 while their rendered texts remain identical. An explicit unsigned interpretation is a separate analytical question; it does not recover original signedness or add a function. The new full556 experiment runs after this checkpoint's freeze, persists individual acquisitions immediately, and requires independent verification before any result is counted.
+
+For long Windows audit paths, use `tools/audit/rea_global_queue_windows.py` with the same arguments as the original controller. The adapter verifies the pinned original controller before loading it and changes only mutable JSON publication to a short sibling temporary name. The original public helper and worker remain byte-identical. **39 provider-free tests pass**:30 existing controller integrity/resume cases under the adapter, plus nine new serialization/path/failure cases. They reproduce the202-character parent that made the old temporary path263 characters. The same Unins worker and its acquired first-batch Evidence were preserved.
+
+Original files, installed WTF settings and the logical SQL backup match their recorded hashes. The services were not restarted for static analysis, and live database contents were not checked after reboot. Raw binaries, decompiled sources and private Evidence stay local; this publication contains authored documentation and analysis coordination tools.
 
 ## Evidence and batch limits
 
