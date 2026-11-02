@@ -31,7 +31,9 @@ See [version evidence and interpretation](docs/VERSIONS.md). The launcher, PE me
 
 **Latest follow-up (2026-11-01):** [SOAP shutdown with two active clients](docs/SOAP_SHUTDOWN_VALIDATION.md) now waits for every character save before exit. **65 checks** cover unsaved movement, a six-second SQL delay, an old-server failure control and restored characters after restart. **216 Rust + 138 Python tests pass** (one Rust ignored, 26 Lua included). Original data/images/settings and services are preserved after the PC reboot. [SOAP configuration](docs/SOAP_ADMINISTRATION.md) remains disabled by default; client/game versions remain explicit above.
 
-The latest [receiver-family investigation](docs/SFRAME_MODE_RECEIVER_FAMILY_RE.md) decompiles three additional Arena callback/helper functions and adds 22,308 modeled alias states. One old local cap is resolved; seven remain. **The actual 918630 receiver and MAIN+0x458 trigger remain unidentified.** Nine preservation checks pass.
+The latest [caller and descendant audit](docs/SFRAME_ENTRY_AND_DESCENDANTS_RE.md) examines 106 additional retained bodies and exact MAIN type-descriptor references. No computed caller or derived MAIN construction is established in those bounded sources. **The actual 918630 receiver and MAIN+0x458 trigger remain unknown.** No new decompilation or original execution; nine preservation checks pass.
+
+The preceding [receiver-family investigation](docs/SFRAME_MODE_RECEIVER_FAMILY_RE.md) decompiles three additional Arena callback/helper functions and adds 22,308 modeled alias states. One old local cap is resolved; seven remain. **The actual 918630 receiver and MAIN+0x458 trigger remain unidentified.** Nine preservation checks pass.
 
 The preceding [MAIN mode-transition audit](docs/SFRAME_MAIN_MODE_TRANSITION_AUDIT.md) revalidates the flag readers, explicit clears and the unbound 918630 receiver. **The alternate-mode trigger remains unidentified.** This audit reuses prior evidence with no new decompilation or runtime execution; nine preservation checks pass.
 
