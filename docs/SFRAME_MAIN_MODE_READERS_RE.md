@@ -110,3 +110,7 @@ Ignored local run: `client-data/audit/2026-11-02-sframe-main-mode-reader-6c4a9e2
 ## Restart point
 
 Reuse the closed snapshot, full source index and these two ledgers. Continue from an actual typed consumer of the retained primitive pointer, or another demonstrated reaching definition that could carry constructed MAIN to the unresolved receiver. Preserve the distinction between parent selected-handle fallback, child raw-handle lookup and per-message mode guards. Require a concrete MAIN-bound nonzero write and its causal entry event before reconstructing activation. Do not repeat the already bounded empty reference searches or infer activation from display labels.
+
+## Follow-up: retained-pointer consumer, 2026-11-02
+
+The [render-consumer investigation](SFRAME_MAIN_RENDER_CONSUMER_RE.md) follows the pointer retained at primitive+0x0c. KSpritePrimitive's a8d2c0→a8d770 route consumes the retained MAIN+0x118 rectangle as 16 bytes of clipping input. Its direct coordinate reads and helper write bounds are verified. Viewport enqueue/queue/virtual+8 dispatch is traced conditionally; the actual MAIN rendering context, 918630 receiver and mode activation remain unresolved. The earlier mode guards, child fallbacks and graph limits remain applicable. Data and versions stay preserved.
