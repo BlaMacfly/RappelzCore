@@ -1,17 +1,28 @@
-# SFrame detailed Native dossiers: closed f209 continuation
+# Detailed Native closed continuation
 
-Frozen at **2026-11-03T03:23:08.319729+00:00 UTC**. The 38 bulk censuses, 127,824 available texts and six original producer failures remain unchanged. No global semantic completion percentage is inferred. See [module checkpoint](GLOBAL_DECOMPILATION_MODULES.md) and [version labels](VERSIONS.md).
+Checkpoint **13**. Bulk censuses 38, available texts 127824 and original failures 6 are copied unchanged from the frozen prior. No global semantic completion percentage is inferred.
 
-| Closed qualification stage | Distinct qualified dossiers | Deduplicated original body bytes |
-| --- | ---: | ---: |
-| Preserved checkpoint 11, including 154 existing-ID static qualifications | 1,490 | 521,983 |
-| Closed f209 session, 325 new legacy qualifications | 1,815 | 583,330 |
-| Separately admitted current notation (56 existing IDs) | 1,871 | 621,019 |
+| Closed metric | Value |
+| --- | ---: |
+| qualified dossiers | 2084 |
+| initialized body bytes | 693392 |
+| acquired case views | 214 |
+| new Native producer results | 213 |
+| local source operations | 851 |
+| retained source record references | 852 |
+| notation existing IDs | 63 |
+| pending source cases | 1 |
+| warning occurrences | 11 |
+| truncated valueflow graphs | 3 |
+| finished warning occurrences | 10 |
+| finished truncated valueflow graphs | 2 |
+| pending warning occurrences | 1 |
+| pending truncated valueflow graphs | 1 |
 
-The closed session contains 382 acquired case views: 381 new Native producers and one inherited source-only view at `0x434c50`. That inherited body is finished and has 751 checked bytes, but its original projection is false and it contributes zero legacy qualifications. It qualifies only through the separately admitted existing-ID notation overlay. All 325 legacy qualifications are new Native identities. There are 381 finished views, including 56 original finished false projections, plus one acquired pending-source view at `0x44d21f` (missing ordinal 1278). Its Native was already acquired and must not be repeated. The finished bodies retain 99,036 checked bytes and 34,581 instruction starts, with 35 warning occurrences and one truncated value-flow graph. These are full-finished-scope counters, not the counters for only the 56 false cases.
+Case views and new producers are separate. Inherited source completion may qualify true or false. The final public export contains local operations; portable proofs may retain inherited identities. Source counts come from exact records and never a four-per-case formula. The reported body ranges are inclusive; CFG ends remain exclusive and are not used as body endpoints.
 
-The case history and twelve portable checkpoints retain 1,528 source references. The sealed final public export contains 1,527 local records and is 91,828,840 bytes; it excludes the inherited Native response. Record counts are read from the proofs, never inferred as four per case. Closure is a verified normal source-budget rotation. Existing official parser receipts are reused without replay.
+Notation qualifies 63 existing IDs and creates zero producers, functions or Evidence IDs. The 63 original finished false projections remain unchanged. All 63 cases enter the qualified corpus through the separate notation model; one acquisition remains source-deferred in this closed scope. Warning/truncation totals cover all acquired views; the separate finished and pending rows retain their own units. Provider limitations remain private source evidence. Bodies are deduplicated within 9589018 initialized executable bytes; they do not prove exhaustive original functions or game semantics.
 
-The selected notation overlays qualify 56 already acquired finished false identities. They add no Native producer, original function or Evidence ID and preserve all old false projections and indices. 0 finished false views remain outside the qualified metric; `0x44d21f` retains its source obligations in this freeze. V2-known13 is bounded by at most 39 cases and the separate current extended model by at most 17; preparation or eligibility alone establishes no success. The conservative legacy corpus is 1,661 dossiers / 492,745 bytes, with 154 historical static qualifications plus the actually selected current overlays tracked separately. Reported body unions are deduplicated inside 9,589,018 initialized executable original bytes and do not prove exhaustive original functions or game semantics. CRT 581 adds no formal Native body bytes.
+Only the explicitly selected closed proofs enter this freeze. Future and mutable results are excluded. Previous checkpoint/source pins, both authored reports, version labels and frozen CRT/UPX leaves are preserved. Live SQL contents were not verified. No provider, engine, official parser, target program or Git operation is run by this workflow.
 
-Checkpoint 11, its 18,833 source-pin records and both authored reports remain immutable. All future slot results, FIRST/launch receipts and mutable journals are excluded even if a later slot finishes `0x44d21f`. Any root-selected after381 preparation remains preparation only; its source-only first case and up to 1,023 new candidates are not acquired results. The selected preservation receipt covers 41 original PE hashes, 11 protected files, the WTF tree and logical backup; live SQL contents were not checked. This checkpoint authoring starts no engine, parser or target and changes no public document, Git state or game data. Raw records remain private.
+See [module checkpoint](GLOBAL_DECOMPILATION_MODULES.md).

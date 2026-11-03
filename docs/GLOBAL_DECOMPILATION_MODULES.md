@@ -1,6 +1,6 @@
 # Global decompilation: verified module checkpoint
 
-Frozen at **2026-11-03T03:23:08.319729+00:00 UTC**. The continuous goal remains active. This checkpoint separates **35 automatic original-native censuses**, **two special original-native censuses** and **one derived nonoriginal PE census**. Three managed assemblies and the extracted launcher payload keep their independent scopes. Running or prepared future analyses are excluded. No reliable overall completion percentage is available.
+Frozen at **2026-11-03T04:30:23.578626+00:00 UTC**. The continuous goal remains active. This checkpoint separates **35 automatic original-native censuses**, **two special original-native censuses** and **one derived nonoriginal PE census**. Three managed assemblies and the extracted launcher payload keep their independent scopes. Running or prepared future analyses are excluded. No reliable overall completion percentage is available.
 
 The supplied NoLimits package label is **1.3.60**. SFrame declares file/product version **9.1.0.0**, contains build lineage **Source9.5.2** and protocol literal **201507080**. The exact official Epic/patch remains unconfirmed; these labels have separate meanings. See [versions](VERSIONS.md).
 
@@ -144,9 +144,30 @@ All 556 primary results were forced to fresh per-entry files and reconciled with
 
 ## Detailed Native continuation
 
-The corrected closed corpus contains **1,871 distinct qualified Native dossiers / 621,019 deduplicated original body bytes** within **9,589,018 initialized executable file bytes**. Preserved checkpoint 11 contributes 1,490 dossiers; the closed f209 session adds 325 new legacy qualifications, then 56 separately root-admitted existing-ID notation qualifications. Its 382 case views include 381 new Native producers and one inherited source-only body at `0x434c50`: finished 751 bytes, originally false, with zero legacy contribution. It qualifies only through the separately admitted existing-ID notation overlay. The last acquired case `0x44d21f` remains source-deferred.
+Checkpoint **13**. Bulk censuses 38, available texts 127824 and original failures 6 are copied unchanged from the frozen prior. No global semantic completion percentage is inferred.
 
-The conservative legacy baseline is 1,661 / 492,745 bytes. The historical 154 static qualifications and selected current overlays explain the corrected corpus without missing producers or rewritten old projections. The closed 381 finished views retain 99,036 bytes / 34,581 instruction starts, 35 warnings and one truncated value-flow graph. Twelve portable proofs retain 1,528 references; the sealed final export has 1,527 local operations. 0 finished false views remain unqualified. See [SFrame Native dossiers](SFRAME_NATIVE_DOSSIERS.md). Future slots, FIRST/launch receipts and mutable journals remain excluded. Bulk, versions, six original failures and custom CRT scope are unchanged.
+| Closed metric | Value |
+| --- | ---: |
+| qualified dossiers | 2084 |
+| initialized body bytes | 693392 |
+| acquired case views | 214 |
+| new Native producer results | 213 |
+| local source operations | 851 |
+| retained source record references | 852 |
+| notation existing IDs | 63 |
+| pending source cases | 1 |
+| warning occurrences | 11 |
+| truncated valueflow graphs | 3 |
+| finished warning occurrences | 10 |
+| finished truncated valueflow graphs | 2 |
+| pending warning occurrences | 1 |
+| pending truncated valueflow graphs | 1 |
+
+Case views and new producers are separate. Inherited source completion may qualify true or false. The final public export contains local operations; portable proofs may retain inherited identities. Source counts come from exact records and never a four-per-case formula. The reported body ranges are inclusive; CFG ends remain exclusive and are not used as body endpoints.
+
+Notation qualifies 63 existing IDs and creates zero producers, functions or Evidence IDs. The 63 original finished false projections remain unchanged. All 63 cases enter the qualified corpus through the separate notation model; one acquisition remains source-deferred in this closed scope. Warning/truncation totals cover all acquired views; the separate finished and pending rows retain their own units. Provider limitations remain private source evidence. Bodies are deduplicated within 9589018 initialized executable bytes; they do not prove exhaustive original functions or game semantics.
+
+Only the explicitly selected closed proofs enter this freeze. Future and mutable results are excluded. Previous checkpoint/source pins, both authored reports, version labels and frozen CRT/UPX leaves are preserved. Live SQL contents were not verified. No provider, engine, official parser, target program or Git operation is run by this workflow.
 
 ## Special original artifacts and the UPX derivative
 
@@ -165,7 +186,7 @@ The three final special censuses are counted from closed exports and verificatio
 
 ## Frozen publication pins
 
-The private `coverage-checkpoint-12.local.json` supersedes checkpoint 11 without changing its bytes, its 18,833 historical source-pin records or its two preserved reports. Only the root-locked closed f209 gate/admission, selected actually verified notation overlays, selected preparation-only proofs and fresh preservation receipt enter this freeze. Existing parser proofs are reused without replay. No future slot or FIRST/launch result is admitted. The 38 bulk censuses, version labels, six failures and frozen CRT/UPX reports remain unchanged.
+Root-selected checkpoint **13** preserves the prior checkpoint and both reports byte-identically. This freeze lists 24532 exact source pins, admits only the selected closed gate/notations, and reuses existing official parser proofs without replay. Future results, live SQL verification and global semantic completion are not claimed.
 
 | Frozen launcher report | Document SHA-256 | Local publication manifest SHA-256 |
 |---|---|---|
