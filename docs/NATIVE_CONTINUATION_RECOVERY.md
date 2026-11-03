@@ -1,12 +1,12 @@
-# Native continuation recovery — historical 15a and checkpoint 16
+# Native continuation recovery — historical 15a and checkpoint 17
 
-## Historical 15a capture and closed 4409 session
+## Historical 15a capture and closed continuations
 
-[Checkpoint 16](GLOBAL_DECOMPILATION_MODULES.md) now admits **3,226 distinct qualified SFrame dossiers covering 997,863 deduplicated original body bytes**. The 15a note captured session 4409 while it was running. That same session has now closed normally, and its independently checked raw and static qualification evidence is included in checkpoint 16. Results from the following analysis slot remain excluded.
+[Checkpoint 17](GLOBAL_DECOMPILATION_MODULES.md) admits **3,399 distinct qualified SFrame dossiers covering 1,091,076 deduplicated original body bytes**. The historical 15a note captured session 4409 while it was running; that session closed normally and was admitted in checkpoint 16. The later a88a session has now also closed normally. Its 173 new Native acquisitions, one inherited source-only completion and 41 separate static qualifications are admitted in checkpoint 17. Later analysis slots remain excluded.
 
-At the 15a capture, recovery checked the same coordinator and analysis processes against their recorded creation times and worker epoch. The session continued without starting a second engine. Its source-only completion preserved the original Native identity at `0x492fee` and authenticated the 1,505-byte body. Source reads finished with a **false original raw qualification** and no new Native producer. Checkpoint 16 includes a separately checked static qualification of this identity; the original false projection remains unchanged.
+The 15a recovery checked the same coordinator and analysis processes against their recorded creation times and worker epoch, then continued without a second engine. Its source-only completion preserved the original Native identity at `0x492fee` and authenticated the 1,505-byte body. Checkpoint 16 retains its false original raw projection beside a separate static qualification. The a88a source-only completion likewise retains the inherited `0x4ab7ea` identity, its 186-byte body and false raw projection beside a separately admitted static qualification.
 
-Admission used the actual normal terminal result, owned-process closure, released analysis locks and independent source, original-byte and portable-export checks. The running-session snapshot remains historical source evidence. Fresh preservation16 checks retain the original files, protected settings, WTF tree and logical SQL backup; live database contents remain unverified. The planning prototype below remains isolated from production integration.
+Admission of a88a used the actual normal terminal result, eight owned process identities including three console helpers, released locks and independent source, original-byte and portable-export checks. The coordinator PID had a qualified reused birth; the seven other recorded births were absent. Historical running snapshots remain historical evidence. Fresh preservation17 checks retain the original files, protected settings, WTF tree and logical SQL backup; live database contents remain unverified. The planning prototype below remains isolated from production integration.
 
 ## Paginated continuation prototype
 
