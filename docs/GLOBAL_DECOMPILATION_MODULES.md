@@ -1,6 +1,6 @@
 # Global decompilation: verified module checkpoint
 
-Frozen at **2026-11-03T00:54:35.468792+00:00 UTC**. The continuous goal remains active. This checkpoint separates **35 automatic original-native censuses**, **two special original-native censuses** and **one derived nonoriginal PE census**. Three managed assemblies and the extracted launcher payload keep their independent scopes. Running or prepared future analyses are excluded. No reliable overall completion percentage is available.
+Frozen at **2026-11-03T01:55:26.220284+00:00 UTC**. The continuous goal remains active. This checkpoint separates **35 automatic original-native censuses**, **two special original-native censuses** and **one derived nonoriginal PE census**. Three managed assemblies and the extracted launcher payload keep their independent scopes. Running or prepared future analyses are excluded. No reliable overall completion percentage is available.
 
 The supplied NoLimits package label is **1.3.60**. SFrame declares file/product version **9.1.0.0**, contains build lineage **Source9.5.2** and protocol literal **201507080**. The exact official Epic/patch remains unconfirmed; these labels have separate meanings. See [versions](VERSIONS.md).
 
@@ -144,9 +144,9 @@ All 556 primary results were forced to fresh per-entry files and reconciled with
 
 ## Detailed Native continuation
 
-The historical594 index and the closed64 pilot remain unchanged. Independent recovery after Native02 error closure admits153 original qualifications plus five already-acquired IDs under a narrow alias overlay: **816 distinct qualified dossiers /347,168 deduplicated original body bytes** within **9,589,018 initialized executable file bytes**. The158 qualifications add20,954 distinct bytes beyond checkpoint08; the five-case overlay adds no producer operation, function or Evidence ID. No CRT custom-analysis bytes enter this union.
+The corrected closed corpus contains **1,289 distinct qualified Native dossiers /431,374 deduplicated original body bytes** within **9,589,018 initialized executable file bytes**. Frozen checkpoint 09 contributes 816; the newly closed 474 acquisition supplies 379 legacy qualifications plus 94 separately approved notation qualifications. Its one acquired source-deferred case remains unqualified. Both immutable static overlays (five earlier +94 current) are included in this authored metric, without rewriting the 153 or 379 legacy indices or producing new Native IDs.
 
-The original worker remains failed, its reviewed1024 scope incomplete and its final successful public export unverified. One intent lacks an acquired result. The158 acquired source texts retain117 warnings across42 texts, one truncated value-flow graph and five original partial/unqualified flags; the overlay preserves those source projections. Bulk text availability and its six original failures remain unchanged. See [Native continuation and error closure](SFRAME_NATIVE_DOSSIERS.md) for provenance, lexical guards, Node-cause unknowns, UUID/lifecycle preparation and the closed D3DX follow-up with no text success. A separate slot has been launched under the immutable next1024 plan; zero results or mutable journals from it enter this freeze, irrespective of its later status or counters.
+The live controller's conservative 1,190/390,609-byte inherited basis omits those 99 static qualifications; they are not 99 missing producers. The closed 474 source texts retain seven warnings across five texts and one truncated value-flow graph. The normal source-budget closure, 16 portable proofs, 1,893 source operations, hot continuation preserving 204 acquisitions and deferred-source accounting are documented in [SFrame Native dossiers](SFRAME_NATIVE_DOSSIERS.md). The new slot's results and mutable journals are entirely excluded, regardless of later counters. Bulk availability, original six errors and custom CRT scope remain unchanged.
 
 ## Special original artifacts and the UPX derivative
 
@@ -165,7 +165,7 @@ The three final special censuses are counted from closed exports and verificatio
 
 ## Frozen publication pins
 
-The private `coverage-checkpoint-09.local.json` supersedes checkpoint08 without changing its bytes or its9355 historical pin records. Its inherited MODULES08 pin is relocated only inside09 to the preserved byte-identical copy. The38 bulk target censuses and their original/derived distinction, CRT581 and bounded UPX report remain unchanged. New Native qualifications and the closed unsuccessful D3DX follow-up are separate scopes. Existing official-parser receipts are reused without parser or producer replay; no living result enters this freeze.
+The private `coverage-checkpoint-10.local.json` supersedes checkpoint 09 without changing its bytes or 12,363 historical source-pin records. Both checkpoint 09 authored reports are preserved byte-identically. This freeze admits only closed 474 proofs, the independently approved 94 notation overlay and root preservation/admission receipts. Existing official-parser proofs are reused without replay; no result or mutable journal from the next live slot is admitted. The 38 bulk target censuses, version labels, six original failures and frozen CRT/UPX leaves remain unchanged.
 
 | Frozen launcher report | Document SHA-256 | Local publication manifest SHA-256 |
 |---|---|---|
