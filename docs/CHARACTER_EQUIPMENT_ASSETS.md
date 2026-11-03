@@ -33,6 +33,8 @@ Two sky-gradient candidates are prepared from the original **256²** `Textures\s
 
 The client currently clears to a solid sky color rather than loading this gradient. The three inventoried sky NX3 models reference a different **4×4** material on a dome, not six cubemap faces; cloud textures have separate alpha masks. This pass does not activate a skybox or establish which original runtime path consumes the 256² gradient. Sky rendering and cloud integration remain required work.
 
+This describes the initial asset-preparation checkpoint. A subsequent [offline renderer experiment](EXPERIMENTAL_SKY_AND_CHARACTER_RENDERING.md) can display the gradient and mitigate the player head artifact, with both modes explicitly disabled by default. Its strict sky boundary check remains unsuccessful; no original-shader compatibility or production acceptance is claimed.
+
 ## Reusable `asset-pack` command
 
 `rz-extractor asset-pack` now prepares rectangular diffuse atlases with an authoritative original alpha reference:
