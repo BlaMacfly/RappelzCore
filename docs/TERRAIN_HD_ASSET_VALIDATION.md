@@ -67,3 +67,19 @@ The final locked/offline workspace runs pass **123 tests in the Core branch** an
 RappelzCore/RappelzRust **0.1.0 development**; NoLimits launcher **1.3.60**; original SFrame file/product **9.1.0.0**; embedded **Source9.5.2**, network **201507080**. The exact official Epic/patch is not established; see [versions](VERSIONS.md).
 
 Nine established SQL/WTF preservation checks and eleven executable/original-file baseline hashes are verified before publication, along with the installed WTF tree and existing service ownership. No original asset replacement, database reset or production configuration change is part of this pilot.
+
+## November 3 refinement: short-bladed grass
+
+The broader [asset modernization pass](ASSET_MODERNIZATION.md) also prepares an inventory icon and a ship-material texture; their verification is separate from the terrain checks below.
+
+The next local asset pass uses the built-in image tool on the original grass tile rather than enlarging the previous generated image. **V3** restores shorter, broader painted blades instead of the previous wiry detail. A second edit, **V4**, softens the appearance and attempts to improve wrapping; it remains an unselected visual alternative and was not tested in the client. Both native outputs are **1254×1254**, not 2048. Original images, previous variants and both prompts are retained locally under `client-data/art/terrain-hd-2026-11-03`.
+
+V3 is selected for its blade definition and closer average source color. Mean sRGB is approximately **70.42/87.60/32.64**, against original **68.94/85.36/38.01** and V2 **63.01/83.41/31.01**. These descriptive averages do not establish perceptual equivalence. Opposite-edge pixel differences remain nonzero, and visual inspection of repeated tiles and the overhead view still shows repetition. Neither variant is claimed to be mathematically seamless.
+
+The existing packer prepares V3 as **1024×1024 RGBA8 DDS, 11 mip levels, 5,592,532 bytes**, in a new mono-texture pack. The separate patch is **4,102,704 bytes**, SHA-256 `7e5e54bc65eca1bb0d41c83435962302658d1a9814a397309470805f9bd82741`. It is copied only into a new scratch client's Data directory. Reading the normal installed MPQ still returns the original 174,904-byte DDS; reading the edited scratch root returns the prepared DDS exactly.
+
+Fresh native evidence is in `client-data/validation/2026-11-03-terrain-assets-4d71a8c2`. Two concurrent original clients form the control, followed by an original/V3 pair, using the existing opt-in preview executable and four fixed views at **8440/7227**. All four processes exit **0**. The existing comparator passes **278 checks**: four identical control views, unchanged original captures across runs, four changed edited views, matching chunk identities/routes and 24 current-process memory samples per pair. This is an **offline asset/rendering validation**, with no network login or original SFrame execution.
+
+The shared terrain texture payload is **1,398,100 bytes original / 5,592,404 bytes V3** in each view, below the corresponding **24–84 MiB** baked payload. Decoded CPU source cost grows by exactly **3 MiB**. The new image does not lower memory relative to the previous 1024 HD variant; the established sharing bound remains unchanged. These payload values are not total process GPU memory or an FPS benchmark.
+
+Post-run checks preserve 14 source/installed-file hashes, the installed WTF tree and all 24 scratch source links/copies. No SQL access or service start is performed. The installed client and renderer default remain unchanged. The private local comparison page presents original/V2 against V3/V4, repeat previews and all four native original/V3 views. Only this authored documentation is published; images, packs, raw captures and the separate Claude decompilation handoff remain local. Mixed/direct transitions and connected movement validation remain open before promoting the renderer.
