@@ -1,12 +1,12 @@
-# Native continuation recovery — historical 15a and checkpoint 17
+# Native continuation recovery - historical 15a and checkpoint 18
 
-## Historical 15a capture and closed continuations
+## Historical recovery and closed continuations
 
-[Checkpoint 17](GLOBAL_DECOMPILATION_MODULES.md) admits **3,399 distinct qualified SFrame dossiers covering 1,091,076 deduplicated original body bytes**. The historical 15a note captured session 4409 while it was running; that session closed normally and was admitted in checkpoint 16. The later a88a session has now also closed normally. Its 173 new Native acquisitions, one inherited source-only completion and 41 separate static qualifications are admitted in checkpoint 17. Later analysis slots remain excluded.
+[Checkpoint 18](GLOBAL_DECOMPILATION_MODULES.md) admits **3,659 distinct qualified SFrame dossiers covering 1,193,745 deduplicated original body bytes**. The earlier 15a/4409 recovery and a88a closure remain historical evidence. Checkpoint 18 additionally admits c281 after its actual normal terminal result, eight recorded process births, released locks and independent source, original-byte and portable checks. All eight births were absent; no PID reuse was needed for this closure.
 
-The 15a recovery checked the same coordinator and analysis processes against their recorded creation times and worker epoch, then continued without a second engine. Its source-only completion preserved the original Native identity at `0x492fee` and authenticated the 1,505-byte body. Checkpoint 16 retains its false original raw projection beside a separate static qualification. The a88a source-only completion likewise retains the inherited `0x4ab7ea` identity, its 186-byte body and false raw projection beside a separately admitted static qualification.
+The inherited 0x4c2e37 identity is preserved and its 1,467-byte body now passes raw qualification. Forty new-cohort identities retain their false raw projections beside separate static qualification. The pending 0x4e6e3c body remains excluded. The failed 47003 pre-engine attempt created no worker or engine; its journal correction and the actual 47339 successful start are retained separately. Later results are excluded.
 
-Admission of a88a used the actual normal terminal result, eight owned process identities including three console helpers, released locks and independent source, original-byte and portable-export checks. The coordinator PID had a qualified reused birth; the seven other recorded births were absent. Historical running snapshots remain historical evidence. Fresh preservation17 checks retain the original files, protected settings, WTF tree and logical SQL backup; live database contents remain unverified. The planning prototype below remains isolated from production integration.
+Fresh preservation18 checks retain original files, protected settings, WTF data and the logical SQL backup; live database contents remain unverified. The planning prototype below remains isolated from production integration.
 
 ## Paginated continuation prototype
 
