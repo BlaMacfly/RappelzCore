@@ -24,6 +24,8 @@ Since our first update, development has focused on multiplayer consistency, reli
 - ✅ Camera culling and texture eviction reduced the measured terrain-texture peak from **252 to 84 MiB per client** in the tested scene.
 - ✅ Background terrain blending and bounded caching reduce foreground work. Cancellation is tested across camera changes, disconnections, teleports and map changes.
 - ✅ Added an optional HD terrain-patch packaging and shared-texture prototype. This path remains experimental; the existing terrain baker stays the default.
+- ✅ Refined an optional grass texture with shorter painted blades and a closer original palette; a fresh two-client offline comparison passes 278 checks. Repetition and mixed-terrain transitions still need work.
+- 🧪 Started faithful remaster prototypes beyond terrain: a blue potion inventory icon and weathered ship wood, with separate local packs. In-game icon/model presentation still needs validation.
 - ✅ Expanded Lua/RappelzDebug integration for character stats, party state, skills and progression events.
 
 ## 🔬 Reverse Engineering
