@@ -1,5 +1,7 @@
 # Global decompilation: scope, checkpoint and continuation
 
+**Session paused — 2026-11-03:** Decompilation is paused at the user's explicit request. No Native analysis engine is running. The last admitted result remains checkpoint 18: 3,659 detailed SFrame dossiers and 1,193,745 deduplicated body bytes. The later startup attempt acquired no new Native result. Resume only after a new user instruction; see the [saved recovery state](NATIVE_CONTINUATION_RECOVERY.md) and [development changelog](../CHANGELOG.md).
+
 The continuous decompilation goal remains active. The instruction is to work through the available client functions without requiring repeated requests to continue. This document freezes a verified publication point from **2026-11-03**; a later live phase has already continued beyond it. Completing this inventory will still require analysis, reconstruction and gameplay validation before it establishes functional compatibility.
 
 ## Cross-module follow-up
