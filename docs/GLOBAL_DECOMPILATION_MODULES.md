@@ -1,6 +1,6 @@
 # Global decompilation: verified module checkpoint
 
-Frozen at **2026-11-03T06:37:26.873456+00:00 UTC**. The continuous goal remains active. This checkpoint separates **35 automatic original-native censuses**, **two special original-native censuses** and **one derived nonoriginal PE census**. Three managed assemblies and the extracted launcher payload keep their independent scopes. Running or prepared future analyses are excluded. No reliable overall completion percentage is available.
+Frozen at **2026-11-03T08:12:59.474567+00:00 UTC**. The continuous goal remains active. This checkpoint separates **35 automatic original-native censuses**, **two special original-native censuses** and **one derived nonoriginal PE census**. Three managed assemblies and the extracted launcher payload keep their independent scopes. Running or prepared future analyses are excluded. No reliable overall completion percentage is available.
 
 The supplied NoLimits package label is **1.3.60**. SFrame declares file/product version **9.1.0.0**, contains build lineage **Source9.5.2** and protocol literal **201507080**. The exact official Epic/patch remains unconfirmed; these labels have separate meanings. See [versions](VERSIONS.md).
 
@@ -144,28 +144,28 @@ All 556 primary results were forced to fresh per-entry files and reconciled with
 
 ## Detailed Native continuation
 
-Checkpoint **15**. Bulk censuses 38, available texts 127824 and original failures 6 are copied unchanged from the frozen prior. No global semantic completion percentage is inferred.
+Checkpoint **16**. Bulk censuses 38, available texts 127824 and original failures 6 are copied unchanged from the frozen prior. No global semantic completion percentage is inferred.
 
 | Closed metric | Value |
 | --- | ---: |
-| qualified dossiers | 2688 |
-| initialized body bytes | 900691 |
-| acquired case views | 233 |
-| new Native producer results | 232 |
-| local source operations | 928 |
-| retained source record references | 929 |
-| notation existing IDs | 54 |
+| qualified dossiers | 3226 |
+| initialized body bytes | 997863 |
+| acquired case views | 539 |
+| new Native producer results | 538 |
+| local source operations | 2168 |
+| retained source record references | 2169 |
+| notation existing IDs | 100 |
 | pending source cases | 1 |
-| warning occurrences | 2 |
-| truncated valueflow graphs | 4 |
-| finished warning occurrences | 2 |
-| finished truncated valueflow graphs | 4 |
+| warning occurrences | 19 |
+| truncated valueflow graphs | 1 |
+| finished warning occurrences | 19 |
+| finished truncated valueflow graphs | 1 |
 | pending warning occurrences | 0 |
 | pending truncated valueflow graphs | 0 |
 
 Case views and new producers are separate. Inherited source completion may qualify true or false. The final public export contains local operations; portable proofs may retain inherited identities. Source counts come from exact records and never a four-per-case formula. The reported body ranges are inclusive; CFG ends remain exclusive and are not used as body endpoints.
 
-Notation qualifies 54 existing IDs and creates zero producers, functions or Evidence IDs. The 54 original finished false projections remain unchanged. 0 finished cases remain outside the qualified corpus; 1 source-deferred acquisition remains in this closed scope. Warning/truncation totals cover all acquired views; the separate finished and pending rows retain their own units. Provider limitations remain private source evidence. Bodies are deduplicated within 9589018 initialized executable bytes; they do not prove exhaustive original functions or game semantics.
+Notation qualifies 100 existing IDs and creates zero producers, functions or Evidence IDs. The 100 original finished false projections remain unchanged. 0 finished cases remain outside the qualified corpus; 1 source-deferred acquisition remains in this closed scope. Warning/truncation totals cover all acquired views; the separate finished and pending rows retain their own units. Provider limitations remain private source evidence. Bodies are deduplicated within 9589018 initialized executable bytes; they do not prove exhaustive original functions or game semantics.
 
 Only the explicitly selected closed proofs enter this freeze. Future and mutable results are excluded. Previous checkpoint/source pins, both authored reports, version labels and frozen CRT/UPX leaves are preserved. Live SQL contents were not verified. No provider, engine, official parser, target program or Git operation is run by this workflow.
 
@@ -186,7 +186,7 @@ The three final special censuses are counted from closed exports and verificatio
 
 ## Frozen publication pins
 
-Root-selected checkpoint **15** preserves the prior checkpoint and both reports byte-identically. This freeze lists 30277 exact source pins, admits only the selected closed gate/notations, and reuses existing official parser proofs without replay. Future results, live SQL verification and global semantic completion are not claimed.
+Root-selected checkpoint **16** preserves the prior checkpoint and both reports byte-identically. This freeze lists 35347 exact source pins, admits only the selected closed gate/notations, and reuses existing official parser proofs without replay. Future results, live SQL verification and global semantic completion are not claimed.
 
 | Frozen launcher report | Document SHA-256 | Local publication manifest SHA-256 |
 |---|---|---|
