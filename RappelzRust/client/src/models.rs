@@ -16,6 +16,10 @@ use rz_model::{Cob, Model};
 
 use crate::assets::Assets;
 
+#[path = "models/render_material.rs"]
+mod render_material;
+pub use render_material::parse_character_cutout_args;
+
 /// Échange Y et Z (Z-haut des fichiers → Y-haut du rendu).
 pub fn swz(p: [f32; 3]) -> Vec3 {
     vec3(p[0], p[2], p[1])
@@ -80,6 +84,8 @@ struct RigMesh {
 /// Créature animée : maillages + animations par partie (biped, cheveux…).
 pub struct Rig {
     parts: Vec<RigMesh>,
+    /// Matériau expérimental explicite, partagé avec le cache ; aucune modification des textures.
+    character_cutout: Option<Material>,
     /// Animations d'attente et de course : (principale, parties attachées).
     idle: Option<(Arc<Animation>, Vec<Arc<Animation>>)>,
     run: Option<(Arc<Animation>, Vec<Arc<Animation>>)>,
@@ -116,8 +122,14 @@ impl Rig {
         unsafe {
             get_internal_gl().quad_gl.push_model_matrix(transform);
         }
+        if let Some(material) = &self.character_cutout {
+            gl_use_material(material);
+        }
         for part in &self.parts {
             draw_mesh(&part.gpu);
+        }
+        if self.character_cutout.is_some() {
+            gl_use_default_material();
         }
         unsafe {
             get_internal_gl().quad_gl.pop_model_matrix();
@@ -150,6 +162,10 @@ pub enum RigKey {
     Entity(String),
 }
 
+fn character_cutout_applies(key: &RigKey) -> bool {
+    matches!(key, RigKey::Player { .. })
+}
+
 #[derive(Default)]
 pub struct ModelCache {
     nx3: HashMap<String, Option<Arc<Model>>>,
@@ -157,9 +173,26 @@ pub struct ModelCache {
     cob: HashMap<String, Option<Arc<Cob>>>,
     statics: HashMap<String, Option<Arc<StaticModel>>>,
     textures: HashMap<String, Option<Texture2D>>,
+    character_cutout: Option<Material>,
 }
 
 impl ModelCache {
+    /// Mode de diagnostic hors ligne, à configurer avant l'assemblage des rigs.
+    /// Les rigs déjà créés gardent leur matériau. Une erreur de compilation laisse le mode
+    /// désactivé ; le chargement par défaut ne crée jamais de ressource GPU.
+    pub fn set_character_cutout(&mut self, enabled: bool) -> anyhow::Result<()> {
+        if !enabled {
+            self.character_cutout = None;
+        } else if self.character_cutout.is_none() {
+            self.character_cutout = Some(render_material::load_character_cutout()?);
+        }
+        Ok(())
+    }
+
+    pub fn character_cutout_enabled(&self) -> bool {
+        self.character_cutout.is_some()
+    }
+
     pub fn nx3(&mut self, assets: &mut Assets, name: &str) -> Option<Arc<Model>> {
         let key = name.to_ascii_lowercase();
         self.nx3
@@ -317,7 +350,32 @@ impl ModelCache {
         }
         let idle = self.load_anim_set(assets, &idle_files);
         let run = self.load_anim_set(assets, &run_files);
-        Some(Rig { parts, idle, run, height: height.max(10.0) })
+        let character_cutout = if character_cutout_applies(key) { self.character_cutout.clone() } else { None };
+        Some(Rig { parts, character_cutout, idle, run, height: height.max(10.0) })
+    }
+}
+
+#[cfg(test)]
+mod render_configuration_tests {
+    use super::{ModelCache, RigKey, character_cutout_applies};
+
+    #[test]
+    fn cutout_experiment_does_not_replace_entity_materials() {
+        for race in [3, 4, 5] {
+            for sex in [1, 2] {
+                assert!(character_cutout_applies(&RigKey::Player { race, sex }));
+            }
+        }
+        assert!(!character_cutout_applies(&RigKey::Entity("ghost.cob".into())));
+        assert!(!character_cutout_applies(&RigKey::Entity("npc.cob".into())));
+    }
+
+    #[test]
+    fn legacy_cache_and_disabled_cutout_require_no_graphics_context() {
+        let mut cache = ModelCache::default();
+        assert!(!cache.character_cutout_enabled());
+        cache.set_character_cutout(false).unwrap();
+        assert!(!cache.character_cutout_enabled());
     }
 }
 

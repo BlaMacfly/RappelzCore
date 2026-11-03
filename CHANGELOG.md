@@ -28,6 +28,8 @@ Since our first update, development has focused on multiplayer consistency, reli
 - 🧪 Started faithful remaster prototypes beyond terrain: a blue potion inventory icon and weathered ship wood, with separate local packs. In-game icon/model presentation still needs validation.
 - 🧪 Added Asura face and warrior-armor texture candidates, original-alpha preservation and matched offline rig previews. Sky-gradient proposals remain unintegrated; the attempted sword edit produced no image.
 - ✅ Added `asset-pack` for rectangular DDS/MPQ atlas preparation, with source-mask preservation and 12 passing extractor tests including existing terrain coverage.
+- 🧪 Added demo-only sky-gradient and player alpha-cutout experiments. Sampled head/hair rendering improves without changing texture masks; ordinary rendering remains unchanged.
+- ⚠️ Sky validation remains incomplete: six clients exit successfully, but strict pixel checks find unresolved differences at the horizon boundary. Work is stopped with evidence preserved; these modes remain disabled by default.
 - ✅ Expanded Lua/RappelzDebug integration for character stats, party state, skills and progression events.
 
 ## 🔬 Reverse Engineering

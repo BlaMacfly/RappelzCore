@@ -20,6 +20,8 @@ The four images in this initial grass/icon/scenery pass use the **built-in image
 
 The subsequent [character/equipment pass](CHARACTER_EQUIPMENT_ASSETS.md) prepares a default Asura face and warrior armor, preserves the original face alpha mask, and reviews them with the client rig renderer in a fixed offline pose. The new `asset-pack` command supports rectangular atlases and original alpha references. Sky gradients remain proposals because the current client uses a solid background; the attempted sword edit was rejected by the image tool, so no remastered weapon is claimed.
 
+A follow-up adds [explicit offline rendering experiments](EXPERIMENTAL_SKY_AND_CHARACTER_RENDERING.md) for a world-oriented sky gradient and player alpha cutout. Ordinary rendering remains unchanged. The player experiment removes the sampled rear head artifact without rewriting textures. Sky sources draw in six completed clients, but the strict horizon-pixel containment check fails; acceptance remains open. Work is stopped at the user's request, with all evidence preserved.
+
 ## Integration rules and next work
 
 - Keep each original resource name and material reference. Preserve silhouettes, palette, normalized texture layout, UVs and channel meanings; review transparent masks and atlas regions separately.

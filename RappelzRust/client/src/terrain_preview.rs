@@ -114,7 +114,7 @@ impl TerrainPreview {
                     .to_str()
                     .context("UTF8 output path")?,
             );
-            self.steps.push(json!({"phase":self.phase,"cache":cache,"width":macroquad::prelude::screen_width(),"height":macroquad::prelude::screen_height(),
+            self.steps.push(json!({"phase":self.phase,"cache":cache,"sky":world.sky_snapshot(),"character_cutout_enabled":world.character_cutout_enabled(),"width":macroquad::prelude::screen_width(),"height":macroquad::prelude::screen_height(),
                 "frame_ms":macroquad::prelude::get_frame_time()*1000.,"elapsed_ms":self.started.elapsed().as_millis()}));
             std::fs::write(
                 self.out.join(format!("phase-{}.ready", self.phase)),
@@ -142,6 +142,8 @@ impl TerrainPreview {
         let success = self.failure.is_none() && self.phase == 4 && self.steps.len() == 4;
         let report = json!({"success":success,"offline":true,"network_login":false,"views":self.steps,"failure":self.failure,
             "experimental_direct_tiles":std::env::args().any(|arg|arg=="-terrain-direct-tiles"),
+            "experimental_sky_gradient":std::env::args().any(|arg|arg=="-sky-gradient"),
+            "experimental_character_cutout":std::env::args().any(|arg|arg=="-character-cutout"),
             "input_locked":true,"normal_renderer":true,"audio_disabled":true,"elapsed_ms":self.started.elapsed().as_millis()});
         std::fs::write(
             self.out.join("report.json"),

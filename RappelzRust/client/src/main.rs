@@ -16,6 +16,7 @@ mod online_validation;
 mod rzui;
 mod terrain;
 mod terrain_preview;
+mod sky;
 mod world;
 
 use std::path::PathBuf;
@@ -136,7 +137,12 @@ fn data_root() -> PathBuf {
 #[macroquad::main(window_conf)]
 async fn main() {
     rz_common::init_logging("info");
-    let preview_directory = terrain_preview::parse_args(&std::env::args().collect::<Vec<_>>())
+    let graphics_args = std::env::args().collect::<Vec<_>>();
+    let sky_mode = sky::parse_args(&graphics_args)
+        .unwrap_or_else(|e| { tracing::error!("{e:#}"); std::process::exit(2) });
+    let character_cutout = models::parse_character_cutout_args(&graphics_args)
+        .unwrap_or_else(|e| { tracing::error!("{e:#}"); std::process::exit(2) });
+    let preview_directory = terrain_preview::parse_args(&graphics_args)
         .unwrap_or_else(|e| { tracing::error!("{e:#}"); std::process::exit(2) });
     prevent_quit(); // Allow PLAYER_LOGOUT and atomic settings saves before the window closes.
     let root = data_root();
@@ -191,6 +197,10 @@ async fn main() {
                 .and_then(|p| p.split_once(',').map(|(x, y)| (x.parse().unwrap_or(8330.0), y.parse().unwrap_or(7167.0))))
                 .unwrap_or((8330.0, 7167.0));
             app.world = Some(world::WorldState::demo(a, x, y));
+            if let Some(world) = &mut app.world {
+                world.set_sky_mode(sky_mode);
+                world.set_character_cutout(character_cutout);
+            }
             app.screen = Screen::World;
         }
     }

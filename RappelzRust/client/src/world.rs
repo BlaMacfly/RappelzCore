@@ -35,6 +35,23 @@ mod addon_vitals_tests {
     use super::*;
 
     #[test]
+    fn online_world_refuses_demo_rendering_and_allocates_no_sky() {
+        let mut world = WorldState::from_login(&msg::ScLoginResult::default(), Vec2::ZERO);
+        assert!(!world.set_sky_mode(Some(crate::sky::SkyMode::Gradient)));
+        assert!(!world.set_character_cutout(true));
+        assert_eq!(world.sky_snapshot()["enabled"], false);
+        assert_eq!(world.sky_snapshot()["texture_payload_bytes"], 0);
+        assert!(world.sky.is_none());
+        world.offline = true;
+        assert!(world.set_sky_mode(Some(crate::sky::SkyMode::Gradient)));
+        assert_eq!(world.sky_snapshot()["status"], "pending");
+        assert!(world.sky.is_none(), "sky resources are lazy until drawing");
+        assert!(world.set_sky_mode(None));
+        assert_eq!(world.sky_snapshot()["status"], "disabled");
+        assert!(world.sky.is_none());
+    }
+
+    #[test]
     fn loop_routes_remain_moving_until_the_whole_path_is_consumed() {
         let route=Motion{x:0.0,y:0.0,start:0.0,speed:10.0,points:vec![MovePoint{x:10.0,y:0.0},MovePoint{x:0.0,y:0.0},MovePoint{x:10.0,y:0.0},MovePoint{x:0.0,y:0.0}]};
         assert!(route.is_moving(0.0));assert!(route.is_moving(2.0));assert!(route.is_moving(3.5));
@@ -316,6 +333,8 @@ pub struct WorldState {
     terrain: Option<Terrain>,
     terrain_validation_policy: Option<(bool, bool, bool)>,
     terrain_warp_cancel: bool,
+    sky_mode: Option<crate::sky::SkyMode>,
+    sky: Option<crate::sky::Sky>,
     models: ModelCache,
     hp: i32,
     max_hp: i32,
@@ -338,6 +357,40 @@ pub struct WorldState {
 }
 
 impl WorldState {
+    pub(crate) fn set_sky_mode(&mut self, mode: Option<crate::sky::SkyMode>) -> bool {
+        if !self.offline { return mode.is_none(); }
+        self.sky_mode = mode;
+        self.sky = None;
+        true
+    }
+
+    pub(crate) fn set_character_cutout(&mut self, enabled: bool) -> bool {
+        if !self.offline { return !enabled; }
+        match self.models.set_character_cutout(enabled) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!("experimental character material unavailable: {error:#}");
+                false
+            }
+        }
+    }
+
+    pub(crate) fn sky_snapshot(&self) -> serde_json::Value {
+        self.sky.as_ref().map(crate::sky::Sky::snapshot).unwrap_or_else(|| serde_json::json!({
+            "enabled":self.sky_mode.is_some(), "loaded":false, "used":false, "drawn":false,
+            "opaque":false, "source":null, "width":0, "height":0, "rgba_bytes":0,
+            "fallback":false, "fallback_reason":null, "error":null,
+            "status":if self.sky_mode.is_some() {"pending"} else {"disabled"},
+            "texture_payload_bytes":0, "gpu_texture_payload_bytes":0, "owned_gpu_textures":0,
+            "runtime_mip_levels":0,
+            "retained_source_pixel_bytes":0,
+        }))
+    }
+
+    pub(crate) fn character_cutout_enabled(&self) -> bool {
+        self.models.character_cutout_enabled()
+    }
+
     pub(crate) fn terrain_validation_policy(&mut self, reference: bool, pixels: bool, asynchronous: bool) {
         self.terrain_validation_policy = Some((reference, pixels, asynchronous));
         if let Some(terrain) = &mut self.terrain {
@@ -417,6 +470,8 @@ impl WorldState {
             terrain: None,
             terrain_validation_policy: None,
             terrain_warp_cancel: true,
+            sky_mode: None,
+            sky: None,
             models: ModelCache::default(),
             hp: lr.hp,
             max_hp: lr.max_hp.max(1),
@@ -966,6 +1021,10 @@ impl WorldState {
         let cam = self.camera(focus);
         clear_background(Color::from_rgba(150, 185, 220, 255));
         set_camera(&cam);
+        if let Some(mode) = self.sky_mode {
+            if self.sky.is_none() { self.sky = Some(crate::sky::Sky::new(mode, assets)); }
+            if let Some(sky) = &mut self.sky { sky.draw(&cam); }
+        }
         terrain.draw(assets, mx, my, cam.matrix());
         let mut prop_budget = 3;
         terrain.draw_props(assets, &mut self.models, mx, my, &mut prop_budget);
