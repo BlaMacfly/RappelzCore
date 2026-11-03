@@ -26,6 +26,8 @@ Since our first update, development has focused on multiplayer consistency, reli
 - ✅ Added an optional HD terrain-patch packaging and shared-texture prototype. This path remains experimental; the existing terrain baker stays the default.
 - ✅ Refined an optional grass texture with shorter painted blades and a closer original palette; a fresh two-client offline comparison passes 278 checks. Repetition and mixed-terrain transitions still need work.
 - 🧪 Started faithful remaster prototypes beyond terrain: a blue potion inventory icon and weathered ship wood, with separate local packs. In-game icon/model presentation still needs validation.
+- 🧪 Added Asura face and warrior-armor texture candidates, original-alpha preservation and matched offline rig previews. Sky-gradient proposals remain unintegrated; the attempted sword edit produced no image.
+- ✅ Added `asset-pack` for rectangular DDS/MPQ atlas preparation, with source-mask preservation and 12 passing extractor tests including existing terrain coverage.
 - ✅ Expanded Lua/RappelzDebug integration for character stats, party state, skills and progression events.
 
 ## 🔬 Reverse Engineering

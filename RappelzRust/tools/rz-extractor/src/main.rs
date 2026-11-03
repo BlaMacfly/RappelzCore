@@ -23,6 +23,7 @@ use rz_rappelz::rdb::{self, Decoder};
 use rz_rappelz::{layout, to_dbc, DataArchive};
 
 mod terrain_pack;
+mod asset_pack;
 
 #[derive(Parser)]
 #[command(name = "rz-extractor", version, about = "Conversion client Rappelz → RappelzRust (MPQ/DBC)")]
@@ -33,6 +34,18 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Prépare un atlas DDS rectangulaire, en conservant exactement le masque alpha original.
+    AssetPack {
+        #[arg(long)] image: PathBuf,
+        /// PNG original décodé ; son alpha reste l'autorité du masque.
+        #[arg(long)] original: PathBuf,
+        /// Chemin MPQ : Character, Creature, Textures, Spells, Interface ou World + nom.dds.
+        #[arg(long)] entry: String,
+        /// Nouveau dossier de sortie, jamais remplacé.
+        #[arg(long)] out: PathBuf,
+        #[arg(long)] width: u32,
+        #[arg(long)] height: u32,
+    },
     /// Prépare une texture de terrain opaque en DDS avec mipmaps et patch MPQ séparé.
     TerrainPack {
         #[arg(long)] image: PathBuf,
@@ -112,6 +125,7 @@ enum Command {
 fn main() -> Result<()> {
     rz_common::init_logging("info");
     match Cli::parse().command {
+        Command::AssetPack { image, original, entry, out, width, height } => asset_pack::run(&image, &original, &entry, &out, width, height),
         Command::TerrainPack { image, texture, out, size } => terrain_pack::run(&image, &texture, &out, size),
         Command::Progression{client,out}=>write_progression_profile(&client,&out),
         Command::CorpseSkill{client,out}=>write_corpse_profile(&client,&out),
