@@ -1,6 +1,6 @@
 # Global decompilation: verified module checkpoint
 
-Frozen at **2026-11-02T23:54:52.443658+00:00 UTC**. The continuous goal remains active. This checkpoint separates **35 automatic original-native censuses**, **two special original-native censuses** and **one derived nonoriginal PE census**. Three managed assemblies and the extracted launcher payload keep their independent scopes. Running or prepared future analyses are excluded. No reliable overall completion percentage is available.
+Frozen at **2026-11-03T00:54:35.468792+00:00 UTC**. The continuous goal remains active. This checkpoint separates **35 automatic original-native censuses**, **two special original-native censuses** and **one derived nonoriginal PE census**. Three managed assemblies and the extracted launcher payload keep their independent scopes. Running or prepared future analyses are excluded. No reliable overall completion percentage is available.
 
 The supplied NoLimits package label is **1.3.60**. SFrame declares file/product version **9.1.0.0**, contains build lineage **Source9.5.2** and protocol literal **201507080**. The exact official Epic/patch remains unconfirmed; these labels have separate meanings. See [versions](VERSIONS.md).
 
@@ -78,6 +78,8 @@ Post-restart hashes confirm all **41 original PE files**, **11 protected files**
 
 A fresh checkpoint08 root preservation pass again confirmed all41 original PEs,11 protected files, the entire installed WTF tree and the logical backup unchanged. It did not start services or verify live SQL contents. The module-progress input was copied into an immutable snapshot; its35 original rows remain unchanged, with CRT and Native supplements separate.
 
+The root-selected checkpoint09 preservation receipt again confirms41 original PEs,11 protected files, the entire installed WTF tree and the logical backup unchanged. It neither starts services nor verifies live SQL.
+
 ## Bounded configuration study
 
 [The RappelzConfig study](RAPPELZ_CONFIG_RECONSTRUCTION.md) links **77 retained-text binding candidates**, ten authenticated projections and five original-byte windows. It corroborates independent signed width/height fallbacks to 1024/768, the integer-read default of -1 and the profile-write API call. Full object ABI, save/reset transactions, renderer consumption and runtime compatibility remain unresolved. The key spelling difference is not an established user-visible defect. This later authored summary adds no Native dossier or complete function and does not change the frozen 35-module selection.
@@ -142,11 +144,9 @@ All 556 primary results were forced to fresh per-entry files and reconciled with
 
 ## Detailed Native continuation
 
-The root-selected, closed pilot captured **64 dossiers**, of which **64 qualify for the new Native index**. The old 594 index stays immutable; the new index is separate. Together they contain **658 distinct dossiers**.
+The historical594 index and the closed64 pilot remain unchanged. Independent recovery after Native02 error closure admits153 original qualifications plus five already-acquired IDs under a narrow alias overlay: **816 distinct qualified dossiers /347,168 deduplicated original body bytes** within **9,589,018 initialized executable file bytes**. The158 qualifications add20,954 distinct bytes beyond checkpoint08; the five-case overlay adds no producer operation, function or Evidence ID. No CRT custom-analysis bytes enter this union.
 
-The deduplicated original body union is **326,214  / 9,589,018 initialized executable bytes**. New ranges add **1,835 distinct bytes** beyond the old 324,379-byte union; overlap is deduplicated. These are byte-qualified reported bodies, not exhaustive original function/semantic recovery.
-
-The partial-body/assembly counter is **0**; all64 reported assembly listings are exhaustive for their reported bodies. Byte-qualified body ranges, exhaustive instruction listings and full original-function semantics remain separate claims. The new reports retain **110 warning occurrences** and **0 newly truncated value-flow graphs**. These warning occurrences are not a count of distinct defects or functions. Existing official parser receipts were rehashed, not replayed. Root verification authenticates256 operations, including192 dependent byte/mapping operations; process PIDs2456/28012/25956 were observed dead. Root verification SHA-256: `782d43f469c0d8833c43b80de210787f3b991251ba76e6d036f1b5adec91c10b`.
+The original worker remains failed, its reviewed1024 scope incomplete and its final successful public export unverified. One intent lacks an acquired result. The158 acquired source texts retain117 warnings across42 texts, one truncated value-flow graph and five original partial/unqualified flags; the overlay preserves those source projections. Bulk text availability and its six original failures remain unchanged. See [Native continuation and error closure](SFRAME_NATIVE_DOSSIERS.md) for provenance, lexical guards, Node-cause unknowns, UUID/lifecycle preparation and the closed D3DX follow-up with no text success. A separate slot has been launched under the immutable next1024 plan; zero results or mutable journals from it enter this freeze, irrespective of its later status or counters.
 
 ## Special original artifacts and the UPX derivative
 
@@ -165,9 +165,7 @@ The three final special censuses are counted from closed exports and verificatio
 
 ## Frozen publication pins
 
-The private `coverage-checkpoint-08.local.json` supersedes checkpoint07. The 38 bulk target censuses and their original/derived distinction are inherited unchanged. Completed CRT results, typed returns and the bounded original packed-stub audit have separate scopes; the detailed Native continuation is admitted only from the root-selected terminal receipt.
-
-All **7,600 inherited source pins** are freshly rehashed. Both checkpoint07 public reports were preserved byte-identically before replacement (MODULES SHA-256 `548a619bb67c09e94a74718b122543921f125d7f14491a200d9286dca6134d6b`; CRT SHA-256 `e6b0ae29c89f7adb7ef0050a462446e5e4d7bfaac9661e883f345df7747cb818`). Their pins are relocated to private copies only in checkpoint08; the old checkpoint and frozen sources stay unchanged. Three new/current authored reports have independent pins. Six mutable parent documents and live controller journals remain excluded. No producer or official parser was repeated by this checkpoint.
+The private `coverage-checkpoint-09.local.json` supersedes checkpoint08 without changing its bytes or its9355 historical pin records. Its inherited MODULES08 pin is relocated only inside09 to the preserved byte-identical copy. The38 bulk target censuses and their original/derived distinction, CRT581 and bounded UPX report remain unchanged. New Native qualifications and the closed unsuccessful D3DX follow-up are separate scopes. Existing official-parser receipts are reused without parser or producer replay; no living result enters this freeze.
 
 | Frozen launcher report | Document SHA-256 | Local publication manifest SHA-256 |
 |---|---|---|
