@@ -1,5 +1,13 @@
 # Native continuation recovery - historical 15a and checkpoint 18
 
+## Resumption review — November 4, 2026
+
+The user has requested resumption. The startup adapter and its 20 fixture cases were reviewed; all 20 pass again. Actual preparation stops at a replaced Node executable in the frozen runtime pins, before a new engine starts. A retained Node copy has the exact historical hash, but lives at another path. The old path and old plan have not been rewritten. A separate bounded source-recovery route with that exact copy was prepared; its fresh engine-absence check refused launch when an unrelated application-owned Ghidra process was observed. No new provider request, Native acquisition, or source-support Evidence was made by these preparations.
+
+After the unrelated engine closed, a second independent source-recovery attempt actually ran, using the exact historical Node copy at its retained path. CPU2, Ghidra1536M, Node4096, BelowNormal priority and the reviewed 30-minute startup limit were preserved. The first `read_bytes` request for the inherited 570-byte body failed with `provider_timeout` at **1,800,000 ms**; no source completion or new Native acquisition was received. The worker and its owned engine exited; this is an error closure, not a normal checkpoint. Java thread snapshots observed scalar operand/relocation analysis and later Microsoft RTTI analysis during startup. They locate sampled activity but do not prove a sole bottleneck or an engine fix. The old warm-runtime path migration and startup issue remain unresolved; there was no automatic retry.
+
+Useful static work continued on the existing `0x4e6e3c` dossier: [PNG row compaction](SFRAME_PNG_ROW_RE.md). It explains the two exact REP instruction-notation differences and the Adam7 packing behavior, with 4,158 passing model comparisons. This independent review preserves the false raw projection and does not close the three source obligations or change checkpoint 18.
+
 ## User-requested pause — 2026-11-03
 
 Decompilation is paused, with no Native engine running. Checkpoint 18 and its 39,507 pinned sources remain the verified baseline: **3,659 dossiers / 1,193,745 deduplicated original body bytes**. The existing `0x4e6e3c` Native at ordinal 3066 still has three pending source obligations for its 570-byte body; its identity, original response and false projection remain preserved.
