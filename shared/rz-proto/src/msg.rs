@@ -710,6 +710,10 @@ pub enum EnterKind {
     Npc { creature: CreatureInfo, npc_id: u32 },
     /// Monstre : 73 octets ; `monster_id` = id de Monster.
     Monster { creature: CreatureInfo, is_tamed: bool, monster_id: u32 },
+    /// Objet au sol : 70 octets [O] (docs/re/ground_item_protocol.md). `code` = code d'objet en
+    /// clair (encodé en `EncodedId`), 0 = rupees ; `drop_time` en centièmes de seconde (horloge
+    /// du jeu) ; `owners` / `parties` = rangs ayant droit au ramassage (0 partout = libre).
+    Item { code: u32, count: i64, drop_time: u32, owners: [u32; 3], parties: [i32; 3] },
     /// Autre type : octets bruts après le bloc commun.
     Other { obj_type: u8, data: Vec<u8> },
 }
@@ -733,12 +737,14 @@ impl Message for ScEnter {
             EnterKind::Player(_) => obj_type::PLAYER,
             EnterKind::Npc { .. } => obj_type::NPC,
             EnterKind::Monster { .. } => obj_type::MONSTER,
+            EnterKind::Item { .. } => obj_type::ITEM,
             EnterKind::Other { obj_type, .. } => *obj_type,
         };
         // L'octet `type` est imposé par le client : 0 joueur, 1 créature, 2 objet statique.
         let enter_type = match &self.kind {
             EnterKind::Player(_) => enter_type::PLAYER,
             EnterKind::Npc { .. } | EnterKind::Monster { .. } => enter_type::CREATURE,
+            EnterKind::Item { .. } => enter_type::STATIC,
             EnterKind::Other { .. } => self.enter_type,
         };
         w.u8(enter_type).u32(self.handle).f32(self.x).f32(self.y).f32(self.z).u8(self.layer).u8(obj_type);
@@ -765,6 +771,15 @@ impl Message for ScEnter {
             EnterKind::Monster { creature, is_tamed, monster_id } => {
                 creature.write(w);
                 w.bytes(&crate::entity_id::encode(*monster_id)).bool(*is_tamed);
+            }
+            EnterKind::Item { code, count, drop_time, owners, parties } => {
+                w.bytes(&crate::entity_id::encode(*code)).i64(*count).u32(*drop_time);
+                owners.iter().for_each(|o| {
+                    w.u32(*o);
+                });
+                parties.iter().for_each(|p| {
+                    w.i32(*p);
+                });
             }
             EnterKind::Other { data, .. } => {
                 w.bytes(data);
@@ -806,6 +821,13 @@ impl Message for ScEnter {
                 let monster_id = crate::entity_id::decode(r.bytes(8)?.try_into().unwrap());
                 EnterKind::Monster { creature, is_tamed: r.bool()?, monster_id }
             }
+            obj_type::ITEM => EnterKind::Item {
+                code: crate::entity_id::decode(r.bytes(8)?.try_into().unwrap()),
+                count: r.i64()?,
+                drop_time: r.u32()?,
+                owners: [r.u32()?, r.u32()?, r.u32()?],
+                parties: [r.i32()?, r.i32()?, r.i32()?],
+            },
             other => EnterKind::Other { obj_type: other, data: r.rest().to_vec() },
         };
         Ok(Self { enter_type, handle, x, y, z, layer, kind })
@@ -1136,7 +1158,28 @@ impl<const I: u16> Message for Empty<I> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
+    #[test]
+    fn ground_item_enter_is_70_bytes_with_observed_offsets() {
+        let e = ScEnter {
+            enter_type: enter_type::STATIC,
+            handle: 0x4000_0001,
+            x: 10.0,
+            y: 20.0,
+            z: 0.0,
+            layer: 0,
+            kind: EnterKind::Item { code: 602201, count: 3, drop_time: 1234, owners: [7, 0, 0], parties: [0; 3] },
+        };
+        let b = e.to_packet().to_bytes();
+        assert_eq!(b.len(), 70);
+        assert_eq!(b[7], 2, "type statique");
+        assert_eq!(b[0x19], obj_type::ITEM);
+        assert_eq!(crate::entity_id::decode(b[0x1a..0x22].try_into().unwrap()), 602201);
+        assert_eq!(&b[0x22..0x2a], &3i64.to_le_bytes());
+        assert_eq!(&b[0x2a..0x2e], &1234u32.to_le_bytes());
+        assert_eq!(&b[0x2e..0x32], &7u32.to_le_bytes());
+        assert_eq!(ScEnter::from_packet(&e.to_packet()).unwrap(), e);
+    }    use super::*;
 
     fn size_of<M: Message>(m: &M) -> usize {
         m.to_packet().to_bytes().len()

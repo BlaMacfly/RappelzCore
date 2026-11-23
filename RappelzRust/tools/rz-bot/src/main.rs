@@ -57,6 +57,12 @@ struct Cli {
     /// Accepte la première demande d'échange reçue et valide.
     #[arg(long)]
     trade_accept: bool,
+    /// Ramasse les objets au sol visibles (TS_CS_TAKE_ITEM).
+    #[arg(long)]
+    loot: bool,
+    /// Jette au sol le premier objet du sac (TS_CS_DROP_ITEM).
+    #[arg(long)]
+    drop: bool,
 }
 
 async fn expect(r: &mut PacketReader, wanted: u16) -> Result<rz_proto::RawPacket> {
@@ -312,8 +318,31 @@ async fn main() -> Result<()> {
                     }
                     players.push(pl.name)
                 }
+                (h, EnterKind::Item { code, count, owners, .. }) => {
+                    tracing::info!("[sol] objet {h} : code {code} ×{count} (ayant droit {})", owners[0]);
+                    if cli.loot {
+                        w.send(&game::CsTakeItem { taker_handle: lr.handle, item_handle: h }).await?;
+                    }
+                }
                 (_, _) => {}
             },
+            gid::TS_SC_TAKE_ITEM_RESULT => {
+                let r = game::ScTakeItemResult::from_packet(&p)?;
+                tracing::info!("[sol] ramassage : objet {} par {}", r.0, r.1);
+            }
+            gid::TS_SC_ITEM_DROP_INFO => {
+                let r = game::ScItemDropInfo::from_packet(&p)?;
+                tracing::info!("[sol] butin : monstre {} → objet {}", r.0, r.1);
+            }
+            gid::TS_SC_DROP_RESULT => {
+                let r = game::ScDropResult::from_packet(&p)?;
+                tracing::info!("[sol] dépôt de {} : {}", r.item_handle, r.is_success);
+            }
+            id::TS_SC_RESULT => {
+                let r = msg::ScResult::from_packet(&p)?;
+                tracing::info!("[résultat] requête {} → {} (valeur {})", r.request, r.result, r.value);
+            }
+            id::TS_SC_LEAVE => tracing::info!("[monde] départ de {}", msg::ScLeave::from_packet(&p)?.handle),
             gid::TS_TRADE => {
                 use game::trade_mode as tm;
                 let t = game::Trade::from_packet(&p)?;
@@ -385,6 +414,9 @@ async fn main() -> Result<()> {
                     if it.wear_position == game::WEAR_NONE {
                         bag.push(it.handle);
                     }
+                }
+                if let (true, Some(&h)) = (cli.drop, bag.first()) {
+                    w.send(&game::CsDropItem { item_handle: h, count: 1 }).await?;
                 }
                 if let (Some(pos), Some(&h)) = (cli.equip, bag.first()) {
                     w.send(&game::CsPutOnItem {

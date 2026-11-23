@@ -8,6 +8,7 @@
 //! | NpcResource.dbc    | `creature_template` (entry + [`NPC_ENTRY_OFFSET`]), `creature` (positions) |
 //! | Quest.dbc          | `quest_template`                                    |
 //! | WorldLocation.dbc  | `game_tele`                                         |
+//! | DropGroup.dbc      | `reference_loot_template` (Entry = |id|, GroupId 1)  |
 //!
 //! Les colonnes sans équivalent restent à leur valeur par défaut AzerothCore ; le
 //! worldserver relit les détails propres à Rappelz directement dans les DBC.
@@ -37,6 +38,9 @@ struct Cli {
     /// Applique aussi le SQL dans la base (format AzerothCore « hôte;port;user;mdp;base »).
     #[arg(long)]
     apply: Option<String>,
+    /// Ne produire que ces tables (item, monster, npc, quest, tele, loot), séparées par des virgules.
+    #[arg(long, value_delimiter = ',')]
+    only: Vec<String>,
 }
 
 fn esc(s: &str) -> String {
@@ -328,6 +332,36 @@ fn import_quests(sql: &mut String, quests: &NamedDbc, strings: &StringTable) -> 
     ins.finish()
 }
 
+/// DropGroup.dbc → `reference_loot_template`. Les groupes ont des ids négatifs : `Entry` = |id|.
+/// Chaque ligne du groupe tire **un** élément selon `drop_percentage_NN` (somme ≈ 1) : c'est la
+/// sémantique des groupes AzerothCore (`GroupId` 1, `Chance` en %). Un élément négatif est un
+/// sous-groupe : `Item` = `Reference` = |id| (convention AzerothCore des références).
+fn import_drop_groups(sql: &mut String, groups: &NamedDbc) -> usize {
+    let _ = writeln!(sql, "\n-- DropGroup.dbc → reference_loot_template\nDELETE FROM `reference_loot_template`;");
+    let mut ins = Inserts::new(
+        sql,
+        "reference_loot_template",
+        "`Entry`,`Item`,`Reference`,`Chance`,`QuestRequired`,`LootMode`,`GroupId`,`MinCount`,`MaxCount`,`Comment`",
+    );
+    let mut seen = std::collections::HashSet::new();
+    for r in groups.rows() {
+        let entry = r.id().unsigned_abs();
+        for k in 0..10 {
+            let v = r.int(&format!("drop_item_id_{k:02}"));
+            let chance = r.float(&format!("drop_percentage_{k:02}")) * 100.0;
+            if v == 0 || chance <= 0.0 {
+                continue;
+            }
+            let (item, reference) = if v < 0 { (v.unsigned_abs(), v.unsigned_abs() as i64) } else { (v as u32, 0) };
+            if !seen.insert((entry, item)) {
+                continue;
+            }
+            ins.push(format!("{entry},{item},{reference},{chance},0,1,1,1,1,'Rappelz DropGroup {}'", r.id()));
+        }
+    }
+    ins.finish()
+}
+
 fn import_locations(sql: &mut String, locations: &NamedDbc, strings: &StringTable) -> usize {
     let _ = writeln!(sql, "\n-- WorldLocation.dbc → game_tele\nDELETE FROM `game_tele` WHERE `map` = {RAPPELZ_MAP};");
     let mut ins = Inserts::new(sql, "game_tele", "`id`,`position_x`,`position_y`,`position_z`,`orientation`,`map`,`name`");
@@ -355,16 +389,31 @@ async fn main() -> Result<()> {
          -- Schéma : acore_world d'AzerothCore, non modifié.\n\
          SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;\n",
     );
-    let n = import_items(&mut sql, &NamedDbc::open(&dbc, "item")?, &strings);
-    tracing::info!("item_template : {n}");
-    let n = import_monsters(&mut sql, &NamedDbc::open(&dbc, "monster")?, &strings);
-    tracing::info!("creature_template (monstres) : {n}");
-    let (n, s) = import_npcs(&mut sql, &NamedDbc::open(&dbc, "npcresource")?, &strings);
-    tracing::info!("creature_template (PNJ) : {n}, creature : {s}");
-    let n = import_quests(&mut sql, &NamedDbc::open(&dbc, "quest")?, &strings);
-    tracing::info!("quest_template : {n}");
-    let n = import_locations(&mut sql, &NamedDbc::open(&dbc, "worldlocation")?, &strings);
-    tracing::info!("game_tele : {n}");
+    let want = |part: &str| cli.only.is_empty() || cli.only.iter().any(|o| o == part);
+    if want("item") {
+        let n = import_items(&mut sql, &NamedDbc::open(&dbc, "item")?, &strings);
+        tracing::info!("item_template : {n}");
+    }
+    if want("monster") {
+        let n = import_monsters(&mut sql, &NamedDbc::open(&dbc, "monster")?, &strings);
+        tracing::info!("creature_template (monstres) : {n}");
+    }
+    if want("npc") {
+        let (n, s) = import_npcs(&mut sql, &NamedDbc::open(&dbc, "npcresource")?, &strings);
+        tracing::info!("creature_template (PNJ) : {n}, creature : {s}");
+    }
+    if want("quest") {
+        let n = import_quests(&mut sql, &NamedDbc::open(&dbc, "quest")?, &strings);
+        tracing::info!("quest_template : {n}");
+    }
+    if want("tele") {
+        let n = import_locations(&mut sql, &NamedDbc::open(&dbc, "worldlocation")?, &strings);
+        tracing::info!("game_tele : {n}");
+    }
+    if want("loot") {
+        let n = import_drop_groups(&mut sql, &NamedDbc::open(&dbc, "dropgroup")?);
+        tracing::info!("reference_loot_template : {n}");
+    }
     sql.push_str("SET FOREIGN_KEY_CHECKS = 1;\n");
 
     if let Some(parent) = cli.out.parent() {

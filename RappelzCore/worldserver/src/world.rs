@@ -165,6 +165,10 @@ pub struct World {
     pub(crate) casts:HashMap<u32,crate::casting::PendingCast>,
     /// Échanges entre joueurs en cours (TS_TRADE).
     pub(crate) trades: crate::trade::Trades,
+    /// Objets au sol (butin, objets jetés).
+    pub(crate) ground: crate::ground::Ground,
+    /// Tables de butin AzerothCore (creature/reference_loot_template).
+    pub(crate) loot: crate::loot::LootStore,
     pub(crate) cast_cooldowns:HashMap<(u32,u32),u64>,
     pub(crate) parties: crate::party::Parties,
     pub(crate) party_clients: HashSet<u32>,
@@ -231,7 +235,7 @@ impl World {
             next_monster_handle: MONSTER_HANDLE_BASE,
             visibility_distance,
             max_online: 0,
-            last_regen: 0, trades: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            last_regen: 0, trades: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         for &(_, id, x, y, z, respawn) in &data.monster_spawns {
             if let Some(info) = data.monsters.get(&id) {
@@ -356,6 +360,9 @@ impl World {
             if let Some(movement) = Self::move_packet(handle, p.layer, &p.motion, now) { packets.push(movement); }
             return packets;
         }
+        if let Some(p) = self.ground_enter(handle) {
+            return vec![p];
+        }
         if let Some(n) = self.npcs.get(&handle) {
             let kind = EnterKind::Npc { creature: n.creature.clone(), npc_id: n.npc_id };
             return vec![ScEnter { enter_type: 0, handle, x: n.x, y: n.y, z: n.z, layer: 0, kind }.to_packet()];
@@ -447,6 +454,11 @@ impl World {
                 for n in self.npcs.values() {
                     if (n.x - x).powi(2) + (n.y - y).powi(2) <= range2 {
                         now_visible.insert(n.handle);
+                    }
+                }
+                for g in self.ground.items.values() {
+                    if (g.x - x).powi(2) + (g.y - y).powi(2) <= range2 {
+                        now_visible.insert(g.handle);
                     }
                 }
                 for m in self.monsters.values() {
@@ -608,6 +620,7 @@ impl World {
         self.tick_restorations(self.cast_clock());
         self.tick_player_attacks(now);
         self.tick_monsters(now);
+        self.tick_ground(now);
         if now.saturating_sub(self.last_regen) >= REGEN_INTERVAL {
             self.last_regen = now;
             self.tick_regen(now);
@@ -681,6 +694,7 @@ impl World {
         m.target = None;
         m.motion.settle(now);
         let info = m.info.clone();
+        let corpse_at = m.motion.position(now);
         for p in self.players.values_mut() {
             if p.attack_target == Some(mh) {
                 p.attack_target = None;
@@ -694,6 +708,7 @@ impl World {
         if let Some(p) = self.players.get(&killer) {
             let _ = p.events.send(WorldEvent::Reward { exp: info.exp.max(1), jp: info.jp, gold, monster: info.name.clone(), monster_id: info.id });
         }
+        self.drop_monster_loot(mh, info.id, corpse_at, killer);
     }
 
     fn tick_monsters(&mut self, now: u32) {
@@ -832,7 +847,7 @@ mod tests {
             parties:Default::default(),party_clients:HashSet::new(),party_sent:HashMap::new(),
             started: Instant::now(), players: HashMap::new(), npcs: HashMap::new(), monsters: HashMap::new(),
             next_handle: 3, next_monster_handle: MONSTER_HANDLE_BASE, visibility_distance: 540.0,
-            max_online: 0, last_regen: 0, trades: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            max_online: 0, last_regen: 0, trades: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         let mut receivers = Vec::new();
         for handle in [1, 2] {
@@ -1026,16 +1041,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsupported_ground_drop_keeps_inventory_and_never_attempts_a_database_mutation() {
+    async fn ground_drop_of_unknown_item_is_refused_and_failed_sql_keeps_inventory_and_ground_empty() {
         let (mut session,mut rx)=isolated_session(None);
+        // Objet inconnu : TS_SC_DROP_RESULT(échec), aucun accès SQL.
+        session.handle_gameplay(game::CsDropItem {item_handle:123,count:1}.to_packet()).await.unwrap();
+        let result=game::ScDropResult::from_packet(&rx.try_recv().unwrap()).unwrap();
+        assert_eq!((result.item_handle,result.is_success),(123,false));assert!(rx.try_recv().is_err());
+        // Échec SQL : l'erreur remonte, le sac est intact et rien n'est posé au sol.
+        session.ctx.chars.close().await;
         let item_handle=session.in_game.as_ref().unwrap().items[0].handle();
-        for (handle,count) in [(item_handle,1),(item_handle,0),(item_handle,u32::MAX),(123,1)] {
-            session.handle_gameplay(game::CsDropItem {item_handle:handle,count}.to_packet()).await.unwrap();
+        for count in [1,0,u32::MAX] {
+            assert!(session.handle_gameplay(game::CsDropItem {item_handle,count}.to_packet()).await.is_err());
             let items=&session.in_game.as_ref().unwrap().items;
             assert_eq!(items.len(),1);assert_eq!((items[0].guid,items[0].entry,items[0].count,items[0].slot),(99,500,7,28));
-            let notice=msg::ScChat::from_packet(&rx.try_recv().unwrap()).unwrap();
-            assert!(notice.message.contains("L'objet reste dans le sac"));assert!(rx.try_recv().is_err());
+            assert!(session.ctx.world.lock().unwrap().ground.items.is_empty());assert!(rx.try_recv().is_err());
         }
+    }
+
+    #[test]
+    fn loot_lands_near_the_corpse_owned_by_the_killer_then_expires() {
+        let (mut world, mut receivers) = test_world();
+        world.loot.creature.insert(42, vec![crate::loot::LootRow {item:602201,reference:0,chance:100.0,group:0,min:2,max:2}]);
+        world.drop_monster_loot(0x2000_0001, 42, (0.0, 0.0), 1);
+        assert_eq!(world.ground.items.len(), 1);
+        let g = world.ground.items.values().next().unwrap().clone();
+        assert_eq!((g.code, g.count, g.owner), (602201, 2, 1));
+        assert!(g.handle > crate::ground::GROUND_HANDLE_BASE);
+        assert!(!g.can_take(2, g.dropped_at) && g.can_take(1, g.dropped_at));
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        world.tick_ground(g.dropped_at + crate::ground::LIFETIME);
+        assert!(world.ground.items.is_empty());
     }
 
     fn install_job_fixture(session:&mut crate::session::Session) {

@@ -93,6 +93,23 @@ pub mod world {
             .collect())
     }
 
+    /// Lignes d'une table de butin AzerothCore (`creature_loot_template` ou
+    /// `reference_loot_template`) : (Entry, Item, Reference, Chance, GroupId, MinCount, MaxCount).
+    pub async fn loot_rows(db: &MySqlPool, table: &str) -> Result<Vec<(u32, u32, i32, f32, u8, u8, u8)>> {
+        anyhow::ensure!(matches!(table, "creature_loot_template" | "reference_loot_template"), "table de butin inconnue");
+        let rows = sqlx::query(&format!(
+            "SELECT Entry, Item, Reference, Chance, GroupId, MinCount, MaxCount FROM {table} WHERE LootMode & 1"
+        ))
+        .fetch_all(db)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                (r.get("Entry"), r.get("Item"), r.get("Reference"), r.get("Chance"), r.get("GroupId"), r.get("MinCount"), r.get("MaxCount"))
+            })
+            .collect())
+    }
+
     pub async fn max_creature_guid(db: &MySqlPool) -> Result<u32> {
         let g: Option<u32> = sqlx::query_scalar("SELECT MAX(guid) FROM creature").fetch_one(db).await?;
         Ok(g.unwrap_or(0))

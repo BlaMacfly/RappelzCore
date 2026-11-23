@@ -615,7 +615,7 @@ Hits de TS_SC_SKILL (FIRE), taille de chaque entrée selon l'octet `type` en tê
 2 → 45, 10 → 10, 20/21 → 13, 22 → 25, 23 → 23, 30 → 19, 40/41 → 36, 42 → 17. Entrée DAMAGE [D] :
 `u8 type, u32 target, i32 target_hp, u8 damage_type, i32 damage, i32 flag, u16 elemental[7]`.
 
-**Quêtes (600–605, dialogues `start_quest` / `end_quest`)** : voir [quest_protocol.md](quest_protocol.md). **Entrepôt (211/212) et échange (280)** : voir [storage_trade_protocol.md](storage_trade_protocol.md).
+**Quêtes (600–605, dialogues `start_quest` / `end_quest`)** : voir [quest_protocol.md](quest_protocol.md). **Entrepôt (211/212) et échange (280)** : voir [storage_trade_protocol.md](storage_trade_protocol.md). **Objets au sol, butin et ramassage** : voir [ground_item_protocol.md](ground_item_protocol.md).
 
 ### 9.4 Comportements notables [O]
 - **TS_SC_DIALOG** : menus lus seulement pour `type` 0, 3, 10 ; menu découpé sur `'\t'`

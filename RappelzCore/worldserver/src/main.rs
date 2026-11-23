@@ -9,6 +9,8 @@ mod soap;
 mod shutdown;
 mod data;
 mod gameplay;
+mod ground;
+mod loot;
 mod job_progression;
 mod party;
 mod quests;
@@ -146,7 +148,13 @@ async fn main() -> Result<()> {
         player_limit: conf.int("PlayerLimit", 1000usize),
         motd: conf.string("Motd", "Bienvenue sur RappelzCore."),
     };
-    let world = world::World::new(&data, conf.float("Visibility.Distance", 540.0));
+    let mut world = world::World::new(&data, conf.float("Visibility.Distance", 540.0));
+    world.loot = loot::LootStore::load(&world_db).await?;
+    tracing::info!(
+        ">> butin : {} monstres (creature_loot_template), {} groupes (reference_loot_template)",
+        world.loot.creature.len(),
+        world.loot.reference.len()
+    );
     let (save_all, _) = broadcast::channel(4);
     let (shutdown, _) = watch::channel(false);
     let ctx = Arc::new(Ctx {

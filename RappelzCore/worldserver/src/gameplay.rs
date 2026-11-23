@@ -72,6 +72,7 @@ pub fn handles(id: u16) -> bool {
             | gid::TS_CS_END_QUEST
             | gid::TS_CS_STORAGE
             | gid::TS_TRADE
+            | gid::TS_CS_TAKE_ITEM
     )
 }
 
@@ -239,6 +240,7 @@ impl Session {
                 | gid::TS_CS_BUY_ITEM
                 | gid::TS_CS_SELL_ITEM
                 | gid::TS_CS_STORAGE
+                | gid::TS_CS_TAKE_ITEM
         );
         if touches_bag && self.ctx.world.lock().unwrap().trade_busy(handle) {
             self.ctx.world.lock().unwrap().notify(handle, "Action impossible pendant un échange.");
@@ -255,11 +257,8 @@ impl Session {
                 let req = game::CsPutOffItem::from_packet(&p)?;
                 self.put_off(handle, req.position).await?;
             }
-            gid::TS_CS_DROP_ITEM => {
-                let _request = game::CsDropItem::from_packet(&p)?;
-                // Ground loot does not exist yet: a drop must never behave like erase.
-                self.ctx.world.lock().unwrap().notify(handle,"Le dépôt au sol n'est pas disponible. L'objet reste dans le sac.");
-            }
+            gid::TS_CS_DROP_ITEM => self.drop_item(game::CsDropItem::from_packet(&p)?).await?,
+            gid::TS_CS_TAKE_ITEM => self.take_item(game::CsTakeItem::from_packet(&p)?).await?,
             gid::TS_CS_ERASE_ITEM => {
                 for it in game::CsEraseItem::from_packet(&p)?.items {
                     let in_bag = self.in_game.as_ref().is_some_and(|g| g.items.iter().any(|i| i.handle() == it.0 && i.in_bag()));
