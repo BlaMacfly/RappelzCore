@@ -279,7 +279,7 @@ mort dans ce client ; la fin de quête passe par TS_CS_DIALOG `end_quest(…)` [
 - Pas de vérification de taille observée dans les handlers 600/601 (la taille paquet est contrôlée en amont
   par le parseur générique, non revérifié ici).
 - `#@status_N=…@#` utilise l'index N sans −1 alors que `#@status:N@#` utilise N−1 : rapporté tel que lu.
-- Offset 0xf9 vs schéma (show_target_type) : à confirmer sur db_quest.rdb.
+- Offset 0xf9 vs schéma (show_target_type) : **vérifié sur les données** (2026-11-23). Dans les enregistrements du fichier, l'octet 0xf9 vaut toujours 55 et l'octet 0xfa vaut 1 exactement pour les 42 quêtes dont `show_target_id` ≠ 0 (955 autres : 0). Le schéma (`show_target_type` en 0xfa) décrit donc bien le fichier ; FUN_0070a400 lit 0xf9 dans la structure **en mémoire** (`MOVSX ECX, byte ptr [EDX+0xf9]`, ev_b5455956081460dafd1e84b5666e98d00b3843077806f4aa14073cca49650694). Le chargeur de QuestResource qui passe de l'un à l'autre n'a pas été suivi ; schéma inchangé.
 - Le dialogue de quête (fenêtre `quest_dialog`) et l'usage de SMSG_NPC_DIALOG+0x1b/+0x1f par l'IHM n'ont pas été
   suivis au-delà du parseur.
 

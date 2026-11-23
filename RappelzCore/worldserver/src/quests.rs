@@ -198,7 +198,7 @@ struct Inventory<'a> {
 
 impl Holder for Inventory<'_> {
     fn item_count(&self, item: u32) -> u32 {
-        self.items.iter().filter(|i| i.entry == item && !i.worn()).map(|i| i.count).sum()
+        self.items.iter().filter(|i| i.entry == item && i.in_bag()).map(|i| i.count).sum()
     }
     fn job_level(&self) -> u16 {
         self.job_level
@@ -485,7 +485,7 @@ impl Session {
         if let Some(r) = usize::try_from(reward_index).ok().and_then(|i| q.optional_rewards.get(i)).filter(|r| r.code > 0) {
             rewards.push((r.code as u32, r.quantity.max(1) as u32));
         }
-        let free = (crate::gameplay::BAG_CAPACITY as usize).saturating_sub(g.items.iter().filter(|i| !i.worn()).count());
+        let free = (crate::gameplay::BAG_CAPACITY as usize).saturating_sub(g.items.iter().filter(|i| i.in_bag()).count());
         if free < rewards.len() {
             self.ctx.world.lock().unwrap().notify(handle, "Le sac est plein : libérez de la place pour rendre la quête.");
             return Ok(());
@@ -534,7 +534,7 @@ impl Session {
         let Some(g) = &mut self.in_game else { return Ok(()) };
         let owner = g.character.guid;
         let mut updates = Vec::new();
-        for it in g.items.iter_mut().filter(|i| i.entry == item && !i.worn()) {
+        for it in g.items.iter_mut().filter(|i| i.entry == item && i.in_bag()) {
             if count == 0 {
                 break;
             }

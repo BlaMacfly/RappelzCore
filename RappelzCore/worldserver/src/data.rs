@@ -21,6 +21,9 @@ pub struct JobInfo {
     pub stat_id: i32,
 }
 
+/// `UNIT_NPC_FLAG_BANKER` d'AzerothCore, réutilisé pour les gardiens d'entrepôt Rappelz.
+pub const NPC_FLAG_BANKER: u32 = 0x0002_0000;
+
 #[derive(Clone, Debug)]
 pub struct NpcSpawn {
     pub guid: u32,
@@ -34,6 +37,8 @@ pub struct NpcSpawn {
     pub race: u8,
     pub hp: i32,
     pub mp: i32,
+    /// `creature_template.npcflag` (AzerothCore) : [`NPC_FLAG_BANKER`] = entrepôt.
+    pub npcflag: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -129,7 +134,7 @@ impl GameData {
 
         let npc_res = NamedDbc::open(&dbc_dir, "npcresource").ok();
         let rows = sqlx::query(
-            "SELECT c.guid, c.id1, c.position_x, c.position_y, c.position_z, c.orientation, t.name, t.minlevel \
+            "SELECT c.guid, c.id1, c.position_x, c.position_y, c.position_z, c.orientation, t.name, t.minlevel, t.npcflag \
              FROM creature c JOIN creature_template t ON t.entry = c.id1 WHERE c.id1 >= ? AND c.map = 0",
         )
         .bind(NPC_ENTRY_OFFSET)
@@ -154,6 +159,7 @@ impl GameData {
                     race: res.map(|r| r.int("race_id") as u8).unwrap_or(0),
                     hp: res.map(|r| r.int("hp")).unwrap_or(100).max(1),
                     mp: res.map(|r| r.int("mp")).unwrap_or(0),
+                    npcflag: r.get("npcflag"),
                 }
             })
             .collect();
@@ -244,6 +250,11 @@ impl GameData {
             }
         };
         Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns, quests })
+    }
+
+    /// Le PNJ (`NpcResource.id`) tient-il un entrepôt ?
+    pub fn is_banker(&self, npc_id: u32) -> bool {
+        self.npcs.iter().any(|n| n.npc_id == npc_id && n.npcflag & NPC_FLAG_BANKER != 0)
     }
 
     pub fn find_teleport(&self, name: &str) -> Option<&Teleport> {

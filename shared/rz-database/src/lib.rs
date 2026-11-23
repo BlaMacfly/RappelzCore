@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod characters;
 pub mod quests;
+pub mod trade;
 pub mod srp6;
 
 use anyhow::{Context, Result};

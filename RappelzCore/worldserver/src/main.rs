@@ -12,6 +12,8 @@ mod gameplay;
 mod job_progression;
 mod party;
 mod quests;
+mod storage;
+mod trade;
 mod session;
 mod skills;
 mod casting;

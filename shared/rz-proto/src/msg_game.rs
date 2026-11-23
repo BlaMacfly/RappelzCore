@@ -49,6 +49,9 @@ pub mod id {
     pub const TS_SC_ADDED_SKILL_LIST: u16 = 404;
     pub const TS_SC_QUEST_LIST: u16 = 600;
     pub const TS_SC_QUEST_STATUS: u16 = 601;
+    pub const TS_SC_OPEN_STORAGE: u16 = 211;
+    pub const TS_CS_STORAGE: u16 = 212;
+    pub const TS_TRADE: u16 = 280;
     pub const TS_CS_DROP_QUEST: u16 = 603;
     pub const TS_CS_QUEST_INFO: u16 = 604;
     pub const TS_CS_END_QUEST: u16 = 605;
@@ -78,6 +81,8 @@ pub mod id {
 pub const WEAR_SLOTS: usize = 28;
 /// Position d'objet « non porté » (dans le sac).
 pub const WEAR_NONE: i16 = -1;
+/// `wear_position` d'un objet de l'entrepôt dans TS_SC_INVENTORY [O] (FUN_006cd320).
+pub const WEAR_STORAGE: i16 = -2;
 
 fn write_i32s(w: &mut Writer, v: &[i32]) {
     for x in v {
@@ -1067,6 +1072,89 @@ impl Message for ScQuestList {
     }
 }
 
+// ───────────────────────────── Entrepôt / échange ─────────────────────────────
+// docs/re/storage_trade_protocol.md
+
+/// TS_SC_OPEN_STORAGE (211), 11 octets [O] : `+7 u32` (conservé par le client, sens inconnu ;
+/// le serveur y met le handle du PNJ [D]). Réponse au trigger `open_storage()`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScOpenStorage(pub u32);
+
+impl Message for ScOpenStorage {
+    const ID: u16 = id::TS_SC_OPEN_STORAGE;
+    fn write(&self, w: &mut Writer) {
+        w.u32(self.0);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self(r.u32()?))
+    }
+}
+
+/// Modes de TS_CS_STORAGE [O].
+pub mod storage_mode {
+    pub const DEPOSIT_ITEM: u8 = 0;
+    pub const WITHDRAW_ITEM: u8 = 1;
+    pub const DEPOSIT_GOLD: u8 = 2;
+    pub const WITHDRAW_GOLD: u8 = 3;
+    pub const CLOSE: u8 = 4;
+}
+
+/// TS_CS_STORAGE (212), 20 octets [O] : `+7 u32 item_handle`, `+0xb u8 mode`, `+0xc i64 count`
+/// (montant pour l'or ; le handle est alors un résidu à ignorer).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CsStorage {
+    pub item_handle: u32,
+    pub mode: u8,
+    pub count: i64,
+}
+
+impl Message for CsStorage {
+    const ID: u16 = id::TS_CS_STORAGE;
+    fn write(&self, w: &mut Writer) {
+        w.u32(self.item_handle).u8(self.mode).i64(self.count);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { item_handle: r.u32()?, mode: r.u8()?, count: r.i64()? })
+    }
+}
+
+/// Modes de TS_TRADE [O] (même codage dans les deux sens).
+pub mod trade_mode {
+    pub const REQUEST: u8 = 0;
+    pub const ACCEPT: u8 = 1;
+    pub const BEGIN: u8 = 2;
+    pub const CANCEL: u8 = 3;
+    pub const REJECT: u8 = 4;
+    pub const ADD_ITEM: u8 = 5;
+    pub const ADD_GOLD: u8 = 6;
+    pub const FREEZE: u8 = 7;
+    pub const CONFIRM: u8 = 8;
+    pub const PROCESS: u8 = 9;
+    pub const REMOVE_ITEM: u8 = 10;
+    pub const ITEM_COUNT: u8 = 11;
+}
+
+/// TS_TRADE (280), 343 octets dans les deux sens [O] : `+7 u32 handle` (C→S : partenaire ;
+/// S→C : joueur auteur de l'action), `+0xb u8 mode`, `+0xc TS_ITEM_INFO` (rempli pour les modes
+/// 5, 6, 10, 11 ; l'or du mode 6 est dans `item.count`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Trade {
+    pub handle: u32,
+    pub mode: u8,
+    pub item: ItemInfo,
+}
+
+impl Message for Trade {
+    const ID: u16 = id::TS_TRADE;
+    fn write(&self, w: &mut Writer) {
+        w.u32(self.handle).u8(self.mode);
+        self.item.write(w);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { handle: r.u32()?, mode: r.u8()?, item: ItemInfo::read(r)? })
+    }
+}
+
 /// Valeurs de `QuestInfo::progress` observées dans le client (docs/re/quest_protocol.md) :
 /// 1 = en cours (objectifs et minuterie affichés), 2 = objectifs remplis, à rendre.
 pub mod quest_progress {
@@ -1565,6 +1653,23 @@ mod tests {
         assert_eq!(&bytes[7..11], &0x0102_0304i32.to_le_bytes());
         assert_eq!(&bytes[0xb..0xf], &5i32.to_le_bytes());
         assert_eq!(bytes[0x23], 2);
+    }
+
+    #[test]
+    fn storage_and_trade_match_observed_layouts() {
+        assert_eq!(size_of(&ScOpenStorage(1)), 11);
+        assert_eq!(size_of(&CsStorage { item_handle: 1, mode: storage_mode::CLOSE, count: 0 }), 20);
+        assert_eq!(size_of(&Trade::default()), 343);
+        let t = Trade { handle: 9, mode: trade_mode::ADD_GOLD, item: ItemInfo { count: 1234, ..Default::default() } };
+        roundtrip(&t);
+        let bytes = t.to_packet().to_bytes();
+        assert_eq!(&bytes[7..11], &9u32.to_le_bytes());
+        assert_eq!(bytes[0xb], trade_mode::ADD_GOLD);
+        // Or du mode 6 : item+0x10 = count, soit l'offset paquet 0xc + 0x10.
+        assert_eq!(&bytes[0x1c..0x24], &1234i64.to_le_bytes());
+        let s = CsStorage { item_handle: 0x6000_0001, mode: storage_mode::WITHDRAW_ITEM, count: 3 }.to_packet().to_bytes();
+        assert_eq!(s[0xb], 1);
+        assert_eq!(&s[0xc..0x14], &3i64.to_le_bytes());
     }
 
     #[test]

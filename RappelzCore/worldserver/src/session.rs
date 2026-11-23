@@ -37,6 +37,8 @@ pub struct Session {
     pub dialog_npc: Option<u32>,
     /// None until the native client opts into the learning-catalog extension.
     pub skill_catalog:Option<rz_proto::skills::ScSkillCatalog>,
+    /// PNJ dont l'entrepôt est ouvert (TS_SC_OPEN_STORAGE envoyé).
+    pub storage_npc: Option<u32>,
 }
 
 pub async fn run(ctx: Arc<Ctx>, addr: SocketAddr, mut reader: PacketReader, mut writer: PacketWriter) -> Result<()> {
@@ -50,7 +52,7 @@ pub async fn run(ctx: Arc<Ctx>, addr: SocketAddr, mut reader: PacketReader, mut 
         let _ = writer.shutdown().await;
     });
 
-    let mut session = Session { ctx: ctx.clone(), addr, tx, account: None, gm_level: 0, in_game: None, events_rx: None, dialog_npc: None,skill_catalog:None };
+    let mut session = Session { ctx: ctx.clone(), addr, tx, account: None, gm_level: 0, in_game: None, events_rx: None, dialog_npc: None,skill_catalog:None,storage_npc:None };
     let mut save_timer = tokio::time::interval(ctx.settings.save_interval);
     save_timer.tick().await;
     let mut save_all = ctx.save_all.subscribe();

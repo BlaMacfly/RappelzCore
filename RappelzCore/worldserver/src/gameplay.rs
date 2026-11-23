@@ -15,6 +15,9 @@ use crate::world::WorldEvent;
 /// Les handles d'objets d'inventaire sont dérivés du guid d'`item_instance`.
 pub const ITEM_HANDLE_BASE: u32 = 0x6000_0000;
 pub const BAG_CAPACITY: u8 = 120;
+/// Entrepôt : `character_inventory.slot` 150..249 (plage propre à RappelzCore) [D].
+pub const STORAGE_SLOT_BASE: u8 = 150;
+pub const STORAGE_CAPACITY: u8 = 100;
 
 #[derive(Clone, Debug)]
 pub struct InvItem {
@@ -32,6 +35,16 @@ impl InvItem {
 
     pub fn worn(&self) -> bool {
         self.slot < BAG_SLOT_BASE
+    }
+
+    /// Rangé dans l'entrepôt.
+    pub fn stored(&self) -> bool {
+        self.slot >= STORAGE_SLOT_BASE
+    }
+
+    /// Dans le sac (ni porté, ni à l'entrepôt).
+    pub fn in_bag(&self) -> bool {
+        !self.worn() && !self.stored()
     }
 }
 
@@ -57,6 +70,8 @@ pub fn handles(id: u16) -> bool {
             | gid::TS_CS_DROP_QUEST
             | gid::TS_CS_QUEST_INFO
             | gid::TS_CS_END_QUEST
+            | gid::TS_CS_STORAGE
+            | gid::TS_TRADE
     )
 }
 
@@ -100,7 +115,7 @@ pub(crate) fn reward_candidate(mut c: characters::Character, exp: i64, jp: i64, 
 }
 
 impl Session {
-    fn item_info(&self, it: &InvItem) -> game::ItemInfo {
+    pub(crate) fn item_info(&self, it: &InvItem) -> game::ItemInfo {
         let endurance = self.ctx.data.items.get(&it.entry).map(|i| i.endurance).unwrap_or(0);
         game::ItemInfo {
             handle: it.handle(),
@@ -109,8 +124,20 @@ impl Session {
             count: it.count as i64,
             endurance,
             level: 1,
-            wear_position: if it.worn() { it.slot as i16 } else { game::WEAR_NONE },
-            index: if it.worn() { 0 } else { (it.slot - BAG_SLOT_BASE) as i32 },
+            wear_position: if it.worn() {
+                it.slot as i16
+            } else if it.stored() {
+                game::WEAR_STORAGE
+            } else {
+                game::WEAR_NONE
+            },
+            index: if it.worn() {
+                0
+            } else if it.stored() {
+                (it.slot - STORAGE_SLOT_BASE) as i32
+            } else {
+                (it.slot - BAG_SLOT_BASE) as i32
+            },
             ..Default::default()
         }
     }
@@ -134,7 +161,8 @@ impl Session {
     /// Paquets envoyés après TS_SC_LOGIN_RESULT (séquence observée, §9).
     pub fn send_initial_state(&self) {
         let Some(g) = &self.in_game else { return };
-        let items: Vec<game::ItemInfo> = g.items.iter().map(|i| self.item_info(i)).collect();
+        // Les objets de l'entrepôt ne sont envoyés qu'à son ouverture (paquet 207 dédié).
+        let items: Vec<game::ItemInfo> = g.items.iter().filter(|i| !i.stored()).map(|i| self.item_info(i)).collect();
         for chunk in items.chunks(150) {
             self.send(&game::ScInventory { items: chunk.to_vec() });
         }
@@ -186,7 +214,7 @@ impl Session {
         Ok(Some(it))
     }
 
-    fn set_money(&mut self, money: i64) {
+    pub(crate) fn set_money(&mut self, money: i64) {
         if let Some(g) = &mut self.in_game {
             g.character.money = money.clamp(0, u32::MAX as i64) as u32;
             let gold = g.character.money as i64;
@@ -201,7 +229,23 @@ impl Session {
 
     pub async fn handle_gameplay(&mut self, p: RawPacket) -> Result<()> {
         let Some(handle) = self.in_game.as_ref().map(|g| g.handle) else { return Ok(()) };
+        // Pendant un échange, le sac et les rupees sont figés (l'échange revérifie tout en SQL).
+        let touches_bag = matches!(
+            p.id,
+            gid::TS_CS_PUTON_ITEM
+                | gid::TS_CS_PUTOFF_ITEM
+                | gid::TS_CS_DROP_ITEM
+                | gid::TS_CS_ERASE_ITEM
+                | gid::TS_CS_BUY_ITEM
+                | gid::TS_CS_SELL_ITEM
+                | gid::TS_CS_STORAGE
+        );
+        if touches_bag && self.ctx.world.lock().unwrap().trade_busy(handle) {
+            self.ctx.world.lock().unwrap().notify(handle, "Action impossible pendant un échange.");
+            return Ok(());
+        }
         match p.id {
+            gid::TS_TRADE => self.handle_trade(game::Trade::from_packet(&p)?).await?,
             gid::TS_CS_LEARN_SKILL=>self.learn_skill(game::CsLearnSkill::from_packet(&p)?).await?,
             gid::TS_CS_PUTON_ITEM => {
                 let req = game::CsPutOnItem::from_packet(&p)?;
@@ -218,16 +262,24 @@ impl Session {
             }
             gid::TS_CS_ERASE_ITEM => {
                 for it in game::CsEraseItem::from_packet(&p)?.items {
-                    self.remove_item(it.0).await?;
+                    let in_bag = self.in_game.as_ref().is_some_and(|g| g.items.iter().any(|i| i.handle() == it.0 && i.in_bag()));
+                    if in_bag {
+                        self.remove_item(it.0).await?;
+                    }
                 }
             }
             gid::TS_CS_CONTACT => self.contact(game::CsContact::from_packet(&p)?.0),
             gid::TS_CS_DIALOG => {
                 let trigger = game::CsDialog::from_packet(&p)?.trigger;
-                if !self.quest_dialog(&trigger).await? {
+                if trigger.starts_with(crate::storage::OPEN_TRIGGER) {
+                    if let Some(npc) = self.dialog_npc {
+                        self.open_storage(npc);
+                    }
+                } else if !self.quest_dialog(&trigger).await? {
                     self.dialog_choice(&trigger);
                 }
             }
+            gid::TS_CS_STORAGE => self.handle_storage(game::CsStorage::from_packet(&p)?).await?,
             gid::TS_CS_DROP_QUEST => self.drop_quest(game::CsDropQuest::from_packet(&p)?.0).await?,
             // Demande de détail (fenêtre ouverte localement par le client ; aucune réponse lue).
             gid::TS_CS_QUEST_INFO => {}
@@ -281,7 +333,7 @@ impl Session {
         }
         let ctx = self.ctx.clone();
         let Some(g) = &mut self.in_game else { return Ok(()) };
-        let Some(idx) = g.items.iter().position(|i| i.handle() == item_handle && !i.worn()) else { return Ok(()) };
+        let Some(idx) = g.items.iter().position(|i| i.handle() == item_handle && i.in_bag()) else { return Ok(()) };
         let owner = g.character.guid;
         let bag_slot = g.items[idx].slot;
         // L'objet déjà porté à cet emplacement prend la place libérée dans le sac.
@@ -328,6 +380,9 @@ impl Session {
         self.dialog_npc = Some(npc_handle);
         let has_shop = self.ctx.data.vendors.read().unwrap().contains_key(&(NPC_ENTRY_OFFSET + npc_id));
         let mut menu = self.quest_menu(npc_id);
+        if self.ctx.data.is_banker(npc_id) {
+            menu.push(("Entrepôt".to_string(), crate::storage::OPEN_TRIGGER.to_string()));
+        }
         if has_shop {
             menu.push(("Commerce".to_string(), "market".to_string()));
         }
@@ -386,7 +441,7 @@ impl Session {
             self.dialog_npc=None;
             return Ok(());
         }
-        let worn = self.in_game.as_ref().is_some_and(|g| g.items.iter().any(|i| i.handle() == item_handle && i.worn()));
+        let worn = !self.in_game.as_ref().is_some_and(|g| g.items.iter().any(|i| i.handle() == item_handle && i.in_bag()));
         if worn {
             return Ok(());
         }
@@ -435,6 +490,7 @@ impl Session {
                 }
                 self.quest_kill(monster_id).await?;
             }
+            WorldEvent::TradeApplied { lost, gained, gold_delta } => self.apply_trade(lost, gained, gold_delta).await?,
             WorldEvent::Died => {
                 let (x, y) = ctx.settings.start_position(self.in_game.as_ref().unwrap().character.race as i32);
                 let mut w = ctx.world.lock().unwrap();

@@ -48,6 +48,15 @@ struct Cli {
     /// Avec --talk : ouvre cette quête chez le PNJ, l'accepte ou la rend (comme la fenêtre de récompense).
     #[arg(long)]
     quest: Option<i32>,
+    /// Avec --talk : ouvre l'entrepôt du PNJ, y dépose le premier objet du sac et 100 rupees.
+    #[arg(long)]
+    storage: bool,
+    /// Propose un échange au joueur nommé (premier objet du sac + 50 rupees), jusqu'à la validation.
+    #[arg(long)]
+    trade_with: Option<String>,
+    /// Accepte la première demande d'échange reçue et valide.
+    #[arg(long)]
+    trade_accept: bool,
 }
 
 async fn expect(r: &mut PacketReader, wanted: u16) -> Result<rz_proto::RawPacket> {
@@ -246,6 +255,9 @@ async fn main() -> Result<()> {
     let mut nearest_npc: Option<(u32, f32)> = None;
     // Avec --quest : PNJ à portée encore à essayer.
     let mut npc_queue: std::collections::VecDeque<u32> = Default::default();
+    // Échange : partenaire, verrous et confirmations vus.
+    let (mut trade_partner, mut requested) = (None::<u32>, false);
+    let (mut frozen, mut confirmed, mut processed) = (std::collections::HashSet::<u32>::new(), std::collections::HashSet::<u32>::new(), false);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(cli.stay);
     while let Ok(Ok(Some(p))) = tokio::time::timeout_at(deadline, r.recv()).await {
         match p.id {
@@ -286,22 +298,81 @@ async fn main() -> Result<()> {
                     })
                     .await?;
                 }
-                e.kind
+                (e.handle, e.kind)
             } {
-                EnterKind::Npc { .. } => npcs += 1,
-                EnterKind::Monster { monster_id, .. } => {
+                (_, EnterKind::Npc { .. }) => npcs += 1,
+                (_, EnterKind::Monster { monster_id, .. }) => {
                     tracing::info!("[monde] monstre visible (id brut {monster_id})")
                 }
-                EnterKind::Player(pl) => players.push(pl.name),
-                _ => {}
+                (enter_handle, EnterKind::Player(pl)) => {
+                    if !requested && cli.trade_with.as_deref() == Some(pl.name.as_str()) {
+                        requested = true;
+                        tracing::info!("[échange] demande à {}", pl.name);
+                        w.send(&game::Trade { handle: enter_handle, mode: game::trade_mode::REQUEST, ..Default::default() }).await?;
+                    }
+                    players.push(pl.name)
+                }
+                (_, _) => {}
             },
+            gid::TS_TRADE => {
+                use game::trade_mode as tm;
+                let t = game::Trade::from_packet(&p)?;
+                tracing::info!("[échange] reçu mode {} de {} (objet {} ×{})", t.mode, t.handle, t.item.code, t.item.count);
+                match t.mode {
+                    tm::REQUEST if cli.trade_accept && trade_partner.is_none() => {
+                        trade_partner = Some(t.handle);
+                        w.send(&game::Trade { handle: t.handle, mode: tm::ACCEPT, ..Default::default() }).await?;
+                    }
+                    tm::BEGIN => {
+                        trade_partner = Some(t.handle);
+                        if cli.trade_with.is_some() {
+                            if let Some(&h) = bag.first() {
+                                let item = game::ItemInfo { handle: h, count: 1, ..Default::default() };
+                                w.send(&game::Trade { handle: t.handle, mode: tm::ADD_ITEM, item }).await?;
+                            }
+                            let item = game::ItemInfo { count: 50, ..Default::default() };
+                            w.send(&game::Trade { handle: t.handle, mode: tm::ADD_GOLD, item }).await?;
+                        }
+                        w.send(&game::Trade { handle: t.handle, mode: tm::FREEZE, ..Default::default() }).await?;
+                    }
+                    tm::FREEZE => {
+                        frozen.insert(t.handle);
+                        if frozen.len() == 2 {
+                            w.send(&game::Trade { handle: trade_partner.unwrap_or(0), mode: tm::CONFIRM, ..Default::default() }).await?;
+                        }
+                    }
+                    tm::CONFIRM => {
+                        confirmed.insert(t.handle);
+                        if confirmed.len() == 2 && !processed {
+                            processed = true;
+                            w.send(&game::Trade { handle: trade_partner.unwrap_or(0), mode: tm::PROCESS, ..Default::default() }).await?;
+                        }
+                    }
+                    tm::PROCESS => tracing::info!("[échange] terminé"),
+                    _ => {}
+                }
+            }
+            gid::TS_SC_OPEN_STORAGE => {
+                tracing::info!("[entrepôt] ouvert ({})", game::ScOpenStorage::from_packet(&p)?.0);
+                if let Some(&h) = bag.first() {
+                    w.send(&game::CsStorage { item_handle: h, mode: game::storage_mode::DEPOSIT_ITEM, count: 0 }).await?;
+                }
+                w.send(&game::CsStorage { item_handle: 0, mode: game::storage_mode::DEPOSIT_GOLD, count: 100 }).await?;
+                w.send(&game::CsStorage { item_handle: 0, mode: game::storage_mode::CLOSE, count: 0 }).await?;
+            }
+            id::TS_SC_PROPERTY => {
+                let pr = msg::ScProperty::from_packet(&p)?;
+                if pr.name == "storage_gold" {
+                    tracing::info!("[entrepôt] rupees stockées : {}", pr.value);
+                }
+            }
             id::TS_SC_MOVE => moves += 1,
             id::TS_SC_CHAT_LOCAL => chats.push(msg::ScChatLocal::from_packet(&p)?.message),
             id::TS_SC_CHAT => {
                 let c = msg::ScChat::from_packet(&p)?;
                 chats.push(format!("{} : {}", c.sender, c.message));
             }
-            id::TS_SC_STAT_INFO | id::TS_SC_PROPERTY | id::TS_TIMESYNC => {}
+            id::TS_SC_STAT_INFO | id::TS_TIMESYNC => {}
             gid::TS_SC_INVENTORY => {
                 for it in game::ScInventory::from_packet(&p)?.items {
                     tracing::info!(
@@ -311,7 +382,7 @@ async fn main() -> Result<()> {
                         it.count,
                         it.wear_position
                     );
-                    if it.wear_position < 0 {
+                    if it.wear_position == game::WEAR_NONE {
                         bag.push(it.handle);
                     }
                 }
@@ -378,7 +449,10 @@ async fn main() -> Result<()> {
                         None
                     }
                 });
-                if let Some(trigger) = quest_step {
+                if cli.storage && d.menu.iter().any(|(_, t)| t.starts_with("open_storage()")) {
+                    tracing::info!("[entrepôt] choix « open_storage() »");
+                    w.send(&game::CsDialog { trigger: "open_storage()".into() }).await?;
+                } else if let Some(trigger) = quest_step {
                     tracing::info!("[quête] choix « {trigger} »");
                     w.send(&game::CsDialog { trigger }).await?;
                 } else if let (Some(_), Some(next)) = (cli.quest, npc_queue.pop_front()) {

@@ -85,6 +85,8 @@ pub enum WorldEvent {
     Reward { exp: i64, jp: i64, gold: i64, monster: String, monster_id: u32 },
     /// Le joueur est mort.
     Died,
+    /// Échange exécuté : objets perdus (guid, restant), objets reçus, variation de rupees.
+    TradeApplied { lost: Vec<(u32, u32)>, gained: Vec<rz_database::trade::Received>, gold_delta: i64 },
 }
 
 pub struct PlayerEntity {
@@ -161,6 +163,8 @@ impl MonsterEntity {
 
 pub struct World {
     pub(crate) casts:HashMap<u32,crate::casting::PendingCast>,
+    /// Échanges entre joueurs en cours (TS_TRADE).
+    pub(crate) trades: crate::trade::Trades,
     pub(crate) cast_cooldowns:HashMap<(u32,u32),u64>,
     pub(crate) parties: crate::party::Parties,
     pub(crate) party_clients: HashSet<u32>,
@@ -227,7 +231,7 @@ impl World {
             next_monster_handle: MONSTER_HANDLE_BASE,
             visibility_distance,
             max_online: 0,
-            last_regen: 0, casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            last_regen: 0, trades: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         for &(_, id, x, y, z, respawn) in &data.monster_spawns {
             if let Some(info) = data.monsters.get(&id) {
@@ -285,6 +289,7 @@ impl World {
     /// Retire un joueur et prévient ceux qui le voyaient.
     pub fn remove_player(&mut self, handle: u32) -> Option<PlayerEntity> {
         self.cancel_restoration(handle);
+        self.cancel_trade(handle);
         let p = self.players.remove(&handle)?;
         self.parties.disconnected(handle);
         self.party_clients.remove(&handle);self.party_sent.remove(&handle);
@@ -827,7 +832,7 @@ mod tests {
             parties:Default::default(),party_clients:HashSet::new(),party_sent:HashMap::new(),
             started: Instant::now(), players: HashMap::new(), npcs: HashMap::new(), monsters: HashMap::new(),
             next_handle: 3, next_monster_handle: MONSTER_HANDLE_BASE, visibility_distance: 540.0,
-            max_online: 0, last_regen: 0, casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            max_online: 0, last_regen: 0, trades: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         let mut receivers = Vec::new();
         for handle in [1, 2] {
@@ -1015,7 +1020,7 @@ mod tests {
             character_guid:AtomicU32::new(1),item_guid:AtomicU32::new(99),creature_guid:AtomicU32::new(0)});
         let item=InvItem {guid:99,entry:500,count:7,slot:28};
         let character=rz_database::characters::Character {guid:1,account:1,level:1,health:100,power1:50,..Default::default()};
-        let session=Session {ctx,addr:"127.0.0.1:1".parse().unwrap(),tx,account:None,gm_level:0,events_rx:None,dialog_npc:None,skill_catalog:None,
+        let session=Session {ctx,addr:"127.0.0.1:1".parse().unwrap(),tx,account:None,gm_level:0,events_rx:None,dialog_npc:None,skill_catalog:None,storage_npc:None,
             in_game:Some(InGame {handle:1,character,items:vec![item],quests:Default::default()})};
         (session,receivers.remove(0))
     }
