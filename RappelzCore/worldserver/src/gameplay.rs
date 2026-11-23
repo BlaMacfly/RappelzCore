@@ -54,6 +54,9 @@ pub fn handles(id: u16) -> bool {
             | gid::TS_CS_TARGETING
             | gid::TS_CS_QUERY
             | gid::TS_CS_GAME_TIME
+            | gid::TS_CS_DROP_QUEST
+            | gid::TS_CS_QUEST_INFO
+            | gid::TS_CS_END_QUEST
     )
 }
 
@@ -78,7 +81,7 @@ pub fn exp_to_next(level: u8) -> i64 {
 
 /// Build the complete award without publishing or changing live/session state.
 /// XP, JP, money and level-up vitals must commit in the same character save.
-fn reward_candidate(mut c: characters::Character, exp: i64, jp: i64, gold: i64) -> (characters::Character, bool) {
+pub(crate) fn reward_candidate(mut c: characters::Character, exp: i64, jp: i64, gold: i64) -> (characters::Character, bool) {
     let mut total = i64::from(c.xp).saturating_add(exp.max(0));
     let mut leveled = false;
     while c.level < 255 && total >= exp_to_next(c.level) {
@@ -138,7 +141,7 @@ impl Session {
         self.send(&game::ScWearInfo { handle: g.handle, wear_info: Self::wear_array(&g.items), ..Default::default() });
         self.send(&game::ScGoldUpdate { gold: g.character.money as i64, chaos: 0 });
         self.send_learned_skills();
-        self.send(&game::ScQuestList::default());
+        self.send_quest_list();
         let c = &g.character;
         self.send(&game::ScExpUpdate { handle: g.handle, exp: c.xp as i64, jp: c.extra_i64("jp", 0) });
         self.send(&game::ScHpMp {
@@ -168,6 +171,7 @@ impl Session {
         g.items.push(it.clone());
         let info = self.item_info(&it);
         self.send(&game::ScInventory { items: vec![info] });
+        self.refresh_quests().await?;
         Ok(true)
     }
 
@@ -178,6 +182,7 @@ impl Session {
         let it = g.items.remove(pos);
         characters::delete_item(&ctx.chars, g.character.guid, it.guid).await?;
         self.send(&game::Handle::<{ gid::TS_SC_DESTROY_ITEM }>(handle));
+        self.refresh_quests().await?;
         Ok(Some(it))
     }
 
@@ -219,8 +224,15 @@ impl Session {
             gid::TS_CS_CONTACT => self.contact(game::CsContact::from_packet(&p)?.0),
             gid::TS_CS_DIALOG => {
                 let trigger = game::CsDialog::from_packet(&p)?.trigger;
-                self.dialog_choice(&trigger);
+                if !self.quest_dialog(&trigger).await? {
+                    self.dialog_choice(&trigger);
+                }
             }
+            gid::TS_CS_DROP_QUEST => self.drop_quest(game::CsDropQuest::from_packet(&p)?.0).await?,
+            // Demande de détail (fenêtre ouverte localement par le client ; aucune réponse lue).
+            gid::TS_CS_QUEST_INFO => {}
+            // Aucun chemin d'envoi établi dans le client (docs/re/quest_protocol.md) : ignoré.
+            gid::TS_CS_END_QUEST => {}
             gid::TS_CS_BUY_ITEM => {
                 let req = game::CsBuyItem::from_packet(&p)?;
                 self.buy(req.item_code as u32, req.count as u32).await?;
@@ -304,7 +316,7 @@ impl Session {
         Ok(())
     }
 
-    fn npc_at(&self, npc_handle: u32) -> Option<(u32, String)> {
+    pub(crate) fn npc_at(&self, npc_handle: u32) -> Option<(u32, String)> {
         let viewer=self.in_game.as_ref()?.handle;
         let w = self.ctx.world.lock().unwrap();
         w.visible_npc(viewer,npc_handle)
@@ -315,7 +327,7 @@ impl Session {
         let Some((npc_id, name)) = self.npc_at(npc_handle) else { return };
         self.dialog_npc = Some(npc_handle);
         let has_shop = self.ctx.data.vendors.read().unwrap().contains_key(&(NPC_ENTRY_OFFSET + npc_id));
-        let mut menu = Vec::new();
+        let mut menu = self.quest_menu(npc_id);
         if has_shop {
             menu.push(("Commerce".to_string(), "market".to_string()));
         }
@@ -392,7 +404,7 @@ impl Session {
         let Some(g) = &self.in_game else { return Ok(()) };
         let handle = g.handle;
         match ev {
-            WorldEvent::Reward { exp, jp, gold, monster } => {
+            WorldEvent::Reward { exp, jp, gold, monster, monster_id } => {
                 let Some(snapshot) = self.character_snapshot() else {
                     self.detach_world_without_save();
                     anyhow::bail!("reward lost world ownership; closing without a stale save");
@@ -413,12 +425,15 @@ impl Session {
                 if gold > 0 {
                     self.send(&game::ScGoldUpdate { gold: money as i64, chaos: 0 });
                 }
-                let mut w = ctx.world.lock().unwrap();
-                w.notify(handle, &format!("{monster} vaincu : +{exp} EXP, +{jp} JP, +{gold} rupees."));
-                if leveled {
-                    w.set_player_level(handle, level, jlv);
-                    w.notify(handle, &format!("Niveau {level} atteint !"));
+                {
+                    let mut w = ctx.world.lock().unwrap();
+                    w.notify(handle, &format!("{monster} vaincu : +{exp} EXP, +{jp} JP, +{gold} rupees."));
+                    if leveled {
+                        w.set_player_level(handle, level, jlv);
+                        w.notify(handle, &format!("Niveau {level} atteint !"));
+                    }
                 }
+                self.quest_kill(monster_id).await?;
             }
             WorldEvent::Died => {
                 let (x, y) = ctx.settings.start_position(self.in_game.as_ref().unwrap().character.race as i32);

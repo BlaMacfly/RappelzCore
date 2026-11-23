@@ -211,6 +211,13 @@ pub async fn insert(db: &MySqlPool, c: &Character) -> Result<()> {
 /// Sauvegarde périodique / à la déconnexion (équivalent de `Player::SaveToDB`).
 pub async fn save(db: &MySqlPool, c: &Character) -> Result<()> {
     let mut tx = db.begin().await?;
+    save_in(&mut tx, c).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Même écriture que [`save`], dans une transaction fournie (récompense + état de quête atomiques).
+pub async fn save_in(tx: &mut sqlx::Transaction<'_, sqlx::MySql>, c: &Character) -> Result<()> {
     sqlx::query(
         "UPDATE characters SET level = ?, xp = ?, money = ?, position_x = ?, position_y = ?, position_z = ?, \
          map = ?, orientation = ?, zone = ?, health = ?, power1 = ?, online = ?, totaltime = ?, \
@@ -231,15 +238,14 @@ pub async fn save(db: &MySqlPool, c: &Character) -> Result<()> {
     .bind(c.totaltime)
     .bind(c.class)
     .bind(c.guid)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
     sqlx::query("REPLACE INTO character_settings (guid, source, data) VALUES (?, ?, ?)")
         .bind(c.guid)
         .bind(SETTINGS_SOURCE)
         .bind(encode_extra(&c.extra))
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
-    tx.commit().await?;
     Ok(())
 }
 

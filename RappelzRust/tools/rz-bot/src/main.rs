@@ -45,6 +45,9 @@ struct Cli {
     /// Parle au PNJ le plus proche et ouvre sa boutique.
     #[arg(long)]
     talk: bool,
+    /// Avec --talk : ouvre cette quête chez le PNJ, l'accepte ou la rend (comme la fenêtre de récompense).
+    #[arg(long)]
+    quest: Option<i32>,
 }
 
 async fn expect(r: &mut PacketReader, wanted: u16) -> Result<rz_proto::RawPacket> {
@@ -241,6 +244,8 @@ async fn main() -> Result<()> {
     let (mut npcs, mut players, mut moves, mut chats) = (0, Vec::new(), 0, Vec::new());
     let (mut bag, mut attacked, mut hits, mut talked) = (Vec::<u32>::new(), false, 0, false);
     let mut nearest_npc: Option<(u32, f32)> = None;
+    // Avec --quest : PNJ à portée encore à essayer.
+    let mut npc_queue: std::collections::VecDeque<u32> = Default::default();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(cli.stay);
     while let Ok(Ok(Some(p))) = tokio::time::timeout_at(deadline, r.recv()).await {
         match p.id {
@@ -251,6 +256,9 @@ async fn main() -> Result<()> {
                     && nearest_npc.is_none_or(|(_, nd)| d < nd)
                 {
                     nearest_npc = Some((e.handle, d));
+                }
+                if cli.talk && cli.quest.is_some() && talked && matches!(e.kind, EnterKind::Npc { .. }) && d < 200.0 {
+                    npc_queue.push_back(e.handle);
                 }
                 if cli.talk && !talked && matches!(e.kind, EnterKind::Npc { .. }) && d < 200.0 {
                     talked = true;
@@ -360,7 +368,22 @@ async fn main() -> Result<()> {
             gid::TS_SC_DIALOG => {
                 let d = game::ScDialog::from_packet(&p)?;
                 tracing::info!("[pnj] {} : « {} » menu {:?}", d.title, d.text, d.menu);
-                if d.menu.iter().any(|(_, t)| t == "market") {
+                let quest_step = d.menu.iter().find_map(|(label, t)| {
+                    if cli.quest.is_some_and(|c| *t == format!("quest_show|{c}") || *t == game::QuestTrigger::start(c)) {
+                        Some(t.clone())
+                    } else if label == "REWARD" && cli.quest.is_some_and(|c| *t == c.to_string()) {
+                        // La fenêtre de récompense du client formate elle-même ce trigger.
+                        Some(format!("end_quest( {t}, -1 )"))
+                    } else {
+                        None
+                    }
+                });
+                if let Some(trigger) = quest_step {
+                    tracing::info!("[quête] choix « {trigger} »");
+                    w.send(&game::CsDialog { trigger }).await?;
+                } else if let (Some(_), Some(next)) = (cli.quest, npc_queue.pop_front()) {
+                    w.send(&game::Handle::<{ gid::TS_CS_CONTACT }>(next)).await?;
+                } else if d.menu.iter().any(|(_, t)| t == "market") {
                     w.send(&game::CsDialog {
                         trigger: "market".into(),
                     })
@@ -384,6 +407,19 @@ async fn main() -> Result<()> {
                     })
                     .await?;
                 }
+            }
+            gid::TS_SC_QUEST_LIST => {
+                let l = game::ScQuestList::from_packet(&p)?;
+                for q in &l.active {
+                    tracing::info!("[quête] liste : {} statut {:?} progression {}", q.code, q.status, q.progress);
+                }
+                if l.active.is_empty() {
+                    tracing::info!("[quête] liste vide");
+                }
+            }
+            gid::TS_SC_QUEST_STATUS => {
+                let s = game::ScQuestStatus::from_packet(&p)?;
+                tracing::info!("[quête] mise à jour : {} statut {:?} progression {}", s.code, s.status, s.progress);
             }
             other => tracing::debug!("[monde] paquet {other}"),
         }

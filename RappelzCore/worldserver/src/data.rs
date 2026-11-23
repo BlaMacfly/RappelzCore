@@ -58,6 +58,8 @@ pub struct GameData {
     pub vendors: std::sync::RwLock<HashMap<u32, Vec<u32>>>,
     /// Monstres placés (`creature`, entry < NPC_ENTRY_OFFSET) : (guid, id, x, y, z, respawn).
     pub monster_spawns: Vec<(u32, u32, f32, f32, f32, u32)>,
+    /// Quêtes (Quest.dbc) et liens PNJ ↔ quête (QuestLink.dbc).
+    pub quests: rz_rappelz::quests::QuestBook,
 }
 
 /// Statistiques d'un monstre (Monster.dbc).
@@ -231,7 +233,17 @@ impl GameData {
             Ok(book)=>{tracing::info!(">> progression : {:?} statistiques/niveaux/invocations",book.counts());Some(book)},
             Err(error)=>{tracing::warn!("Progression du métier indisponible : {error}");None},
         };
-        Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns })
+        let quests = match rz_rappelz::quests::QuestBook::open(&dbc_dir) {
+            Ok(book) => {
+                tracing::info!(">> {} quêtes, {} liens PNJ (Quest.dbc, QuestLink.dbc)", book.quests.len(), book.links.len());
+                book
+            }
+            Err(error) => {
+                tracing::warn!("Quêtes indisponibles : {error}");
+                Default::default()
+            }
+        };
+        Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns, quests })
     }
 
     pub fn find_teleport(&self, name: &str) -> Option<&Teleport> {

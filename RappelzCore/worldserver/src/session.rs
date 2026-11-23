@@ -21,6 +21,7 @@ pub struct InGame {
     pub handle: u32,
     pub character: Character,
     pub items: Vec<crate::gameplay::InvItem>,
+    pub quests: crate::quests::QuestLog,
 }
 
 pub struct Session {
@@ -356,6 +357,10 @@ impl Session {
         let s = &ctx.settings;
         let layer = c.extra_i64("layer", 0) as u8;
         let items = self.load_items(c.guid).await?;
+        let quests = crate::quests::QuestLog {
+            active: rz_database::quests::active(&ctx.chars, c.guid).await?,
+            rewarded: rz_database::quests::rewarded(&ctx.chars, c.guid).await?.into_iter().collect(),
+        };
         let wear = Self::wear_array(&items);
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let (max_hp, max_mp) = (crate::gameplay::max_hp_for(c.level), crate::gameplay::max_mp_for(c.level));
@@ -439,7 +444,7 @@ impl Session {
         if !s.motd.is_empty() {
             ctx.world.lock().unwrap().notify(handle, &s.motd);
         }
-        self.in_game = Some(InGame { handle, character: c, items });
+        self.in_game = Some(InGame { handle, character: c, items, quests });
         self.events_rx = Some(events_rx);
         self.send_initial_state();
         Ok(())

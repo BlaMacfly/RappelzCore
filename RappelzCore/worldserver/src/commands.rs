@@ -32,6 +32,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "level", level: 2, help: ".level <n> — change le niveau" },
     Command { name: "money", level: 2, help: ".money <n> — ajoute des rupees" },
     Command { name: "additem", level: 2, help: ".additem <id> [nombre] — ajoute un objet (Item.dbc)" },
+    Command { name: "quest", level: 2, help: ".quest add <id> | remove <id> — ajoute/retire une quête sans conditions (comme AzerothCore)" },
     Command { name: "spawn", level: 2, help: ".spawn <id_monstre> [respawn_s] — place un monstre ici (table creature)" },
     Command { name: "vendor", level: 3, help: ".vendor add <id_objet> — ajoute l'objet au PNJ ciblé le plus proche (npc_vendor)" },
 ];
@@ -145,6 +146,17 @@ pub async fn handle(session: &mut Session, line: &str) -> Result<()> {
                 }
             }
             _ => reply("Usage : .additem <id> [nombre] (id d'Item.dbc)"),
+        },
+        "quest" => match (args.first().copied(), args.get(1).and_then(|a| a.parse::<i32>().ok())) {
+            (Some("add"), Some(code)) => match session.gm_add_quest(code).await? {
+                Ok(()) => reply(&format!("Quête {code} ajoutée.")),
+                Err(why) => reply(&format!("Quête {code} : {why}")),
+            },
+            (Some("remove"), Some(code)) => {
+                session.drop_quest(code).await?;
+                reply(&format!("Quête {code} retirée."));
+            }
+            _ => reply("Usage : .quest add <id> | .quest remove <id> (id de Quest.dbc)"),
         },
         "spawn" => match args.first().and_then(|a| a.parse::<u32>().ok()).and_then(|id| ctx.data.monsters.get(&id).cloned()) {
             Some(info) => {

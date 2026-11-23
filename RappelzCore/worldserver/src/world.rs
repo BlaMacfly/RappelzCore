@@ -82,7 +82,7 @@ impl Motion {
 #[derive(Debug)]
 pub enum WorldEvent {
     /// Monstre tué : récompenses.
-    Reward { exp: i64, jp: i64, gold: i64, monster: String },
+    Reward { exp: i64, jp: i64, gold: i64, monster: String, monster_id: u32 },
     /// Le joueur est mort.
     Died,
 }
@@ -687,7 +687,7 @@ impl World {
             0
         };
         if let Some(p) = self.players.get(&killer) {
-            let _ = p.events.send(WorldEvent::Reward { exp: info.exp.max(1), jp: info.jp, gold, monster: info.name.clone() });
+            let _ = p.events.send(WorldEvent::Reward { exp: info.exp.max(1), jp: info.jp, gold, monster: info.name.clone(), monster_id: info.id });
         }
     }
 
@@ -1007,7 +1007,7 @@ mod tests {
         let pool=rz_database::sqlx::mysql::MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(20))
             .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused").unwrap();
         let data=GameData {progression:None,restoration:None,skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
-            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![]};
+            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default()};
         let settings=Settings {realm_id:1,network_key:vec![],characters_per_realm:1,start_level:1,start_money:0,start_positions:[(0.0,0.0);3],
             region_size:180,cell_size:6,move_speed:120,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
         let ctx=Arc::new(Ctx {login:pool.clone(),chars:pool.clone(),world_db:pool,data,world:Mutex::new(world),settings,
@@ -1016,7 +1016,7 @@ mod tests {
         let item=InvItem {guid:99,entry:500,count:7,slot:28};
         let character=rz_database::characters::Character {guid:1,account:1,level:1,health:100,power1:50,..Default::default()};
         let session=Session {ctx,addr:"127.0.0.1:1".parse().unwrap(),tx,account:None,gm_level:0,events_rx:None,dialog_npc:None,skill_catalog:None,
-            in_game:Some(InGame {handle:1,character,items:vec![item]})};
+            in_game:Some(InGame {handle:1,character,items:vec![item],quests:Default::default()})};
         (session,receivers.remove(0))
     }
 
@@ -1149,7 +1149,7 @@ mod tests {
     async fn stale_queued_reward_cannot_overwrite_a_reauthenticated_character() {
         let (mut session,mut rx)=isolated_session(None);session.ctx.chars.close().await;
         {let mut w=session.ctx.world.lock().unwrap();let mut player=w.remove_player(1).unwrap();player.handle=3;w.add_player(player);}
-        let result=session.handle_world_event(WorldEvent::Reward{exp:5,jp:3,gold:10,monster:"Fixture".into()}).await;
+        let result=session.handle_world_event(WorldEvent::Reward{exp:5,jp:3,gold:10,monster:"Fixture".into(),monster_id:0}).await;
         assert!(result.unwrap_err().to_string().contains("reward lost world ownership"));assert!(session.in_game.is_none());
         assert_eq!(session.ctx.world.lock().unwrap().players[&3].guid,1);assert!(rx.try_recv().is_err());session.leave_world().await.unwrap();
     }
@@ -1175,7 +1175,7 @@ mod tests {
     async fn failed_reward_commit_publishes_no_gain_and_cannot_save_an_old_snapshot_at_disconnect() {
         let (mut session,mut rx)=isolated_session(None);
         session.ctx.chars.close().await;
-        let result=session.handle_world_event(WorldEvent::Reward {exp:500,jp:3,gold:20,monster:"Fixture".into()}).await;
+        let result=session.handle_world_event(WorldEvent::Reward {exp:500,jp:3,gold:20,monster:"Fixture".into(),monster_id:0}).await;
         assert!(result.is_err());assert!(session.in_game.is_none());assert!(session.events_rx.is_none());
         assert!(!session.ctx.world.lock().unwrap().players.contains_key(&1));
         let packets:Vec<_>=std::iter::from_fn(||rx.try_recv().ok()).collect();

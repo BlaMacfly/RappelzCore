@@ -49,6 +49,9 @@ pub mod id {
     pub const TS_SC_ADDED_SKILL_LIST: u16 = 404;
     pub const TS_SC_QUEST_LIST: u16 = 600;
     pub const TS_SC_QUEST_STATUS: u16 = 601;
+    pub const TS_CS_DROP_QUEST: u16 = 603;
+    pub const TS_CS_QUEST_INFO: u16 = 604;
+    pub const TS_CS_END_QUEST: u16 = 605;
     // Combat
     pub const TS_CS_ATTACK_REQUEST: u16 = 100;
     pub const TS_SC_ATTACK_EVENT: u16 = 101;
@@ -1064,6 +1067,112 @@ impl Message for ScQuestList {
     }
 }
 
+/// Valeurs de `QuestInfo::progress` observées dans le client (docs/re/quest_protocol.md) :
+/// 1 = en cours (objectifs et minuterie affichés), 2 = objectifs remplis, à rendre.
+pub mod quest_progress {
+    pub const IN_PROGRESS: u8 = 1;
+    pub const FINISHED: u8 = 2;
+}
+
+/// TS_SC_QUEST_STATUS (601), 36 octets [O] (FUN_00a29780 → FUN_00708b50) : `+7 i32 code`,
+/// `+0xb i32 status[6]`, `+0x23 u8 progress`. Met à jour une quête déjà listée par 600.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ScQuestStatus {
+    pub code: i32,
+    pub status: [i32; 6],
+    pub progress: u8,
+}
+
+impl Message for ScQuestStatus {
+    const ID: u16 = id::TS_SC_QUEST_STATUS;
+    fn write(&self, w: &mut Writer) {
+        w.i32(self.code);
+        write_i32s(w, &self.status);
+        w.u8(self.progress);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { code: r.i32()?, status: read_i32s(r)?, progress: r.u8()? })
+    }
+}
+
+/// TS_CS_DROP_QUEST (603), 11 octets [O] : `+7 i32 code` (abandon confirmé par le joueur).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CsDropQuest(pub i32);
+
+impl Message for CsDropQuest {
+    const ID: u16 = id::TS_CS_DROP_QUEST;
+    fn write(&self, w: &mut Writer) {
+        w.i32(self.0);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self(r.i32()?))
+    }
+}
+
+/// TS_CS_QUEST_INFO (604), 11 octets [O] : `+7 i32 code` (fenêtre de détail ; aucune réponse lue).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CsQuestInfo(pub i32);
+
+impl Message for CsQuestInfo {
+    const ID: u16 = id::TS_CS_QUEST_INFO;
+    fn write(&self, w: &mut Writer) {
+        w.i32(self.0);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self(r.i32()?))
+    }
+}
+
+/// TS_CS_END_QUEST (605), 12 octets [O taille] : `+7 i32 code`, `+0xb u8` (sens inconnu).
+/// Aucun chemin d'appel établi dans le client : le rendu passe par TS_CS_DIALOG `end_quest(c, i)`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CsEndQuest {
+    pub code: i32,
+    pub flag: u8,
+}
+
+impl Message for CsEndQuest {
+    const ID: u16 = id::TS_CS_END_QUEST;
+    fn write(&self, w: &mut Writer) {
+        w.i32(self.code).u8(self.flag);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { code: r.i32()?, flag: r.u8()? })
+    }
+}
+
+/// Triggers de dialogue de quête renvoyés par le client dans TS_CS_DIALOG.
+/// `end_quest( <code>, <index> )` est formaté par le client lui-même (index de récompense
+/// optionnelle 0..5, -1 sans choix) [O] ; `start_quest( <code> )` suit la même forme [D].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum QuestTrigger {
+    Start(i32),
+    End { code: i32, reward_index: i32 },
+}
+
+impl QuestTrigger {
+    pub fn parse(trigger: &str) -> Option<Self> {
+        let t = trigger.trim();
+        let (name, rest) = t.split_once('(')?;
+        let args: Vec<i32> = rest
+            .trim_end()
+            .strip_suffix(')')?
+            .split(',')
+            .map(|a| a.trim().parse().ok())
+            .collect::<Option<_>>()?;
+        match (name.trim(), args.as_slice()) {
+            ("start_quest", [code]) => Some(Self::Start(*code)),
+            ("end_quest", [code]) => Some(Self::End { code: *code, reward_index: -1 }),
+            ("end_quest", [code, index]) => Some(Self::End { code: *code, reward_index: *index }),
+            _ => None,
+        }
+    }
+
+    pub fn start(code: i32) -> String {
+        format!("start_quest( {code} )")
+    }
+}
+
 // ───────────────────────────── Combat ─────────────────────────────
 
 /// TS_CS_ATTACK_REQUEST (100), 15 octets [O] (ctor FUN_00969de0, envoi FUN_0096b6c0) :
@@ -1438,6 +1547,33 @@ mod tests {
 
     fn roundtrip<M: Message + PartialEq + std::fmt::Debug>(m: &M) {
         assert_eq!(&M::from_packet(&m.to_packet()).unwrap(), m);
+    }
+
+    #[test]
+    fn quest_messages_match_observed_layouts() {
+        assert_eq!(size_of(&ScQuestStatus::default()), 36);
+        assert_eq!(size_of(&CsDropQuest(1)), 11);
+        assert_eq!(size_of(&CsQuestInfo(1)), 11);
+        assert_eq!(size_of(&CsEndQuest { code: 1, flag: 0 }), 12);
+        let list = ScQuestList { active: vec![QuestInfo::default(); 2], pending: vec![(1, 2)] };
+        assert_eq!(size_of(&list), 11 + 2 * 61 + 8);
+        roundtrip(&ScQuestStatus { code: 1034, status: [2, 1, 0, 0, 0, 0], progress: quest_progress::IN_PROGRESS });
+        roundtrip(&list);
+        roundtrip(&CsEndQuest { code: 7, flag: 1 });
+        // 601 : code en +7, status[6] en +0xb, progress en +0x23.
+        let bytes = ScQuestStatus { code: 0x0102_0304, status: [5, 0, 0, 0, 0, 0], progress: 2 }.to_packet().to_bytes();
+        assert_eq!(&bytes[7..11], &0x0102_0304i32.to_le_bytes());
+        assert_eq!(&bytes[0xb..0xf], &5i32.to_le_bytes());
+        assert_eq!(bytes[0x23], 2);
+    }
+
+    #[test]
+    fn quest_triggers() {
+        assert_eq!(QuestTrigger::parse("end_quest( 1034, -1 )"), Some(QuestTrigger::End { code: 1034, reward_index: -1 }));
+        assert_eq!(QuestTrigger::parse("end_quest(1019,2)"), Some(QuestTrigger::End { code: 1019, reward_index: 2 }));
+        assert_eq!(QuestTrigger::parse(&QuestTrigger::start(1007)), Some(QuestTrigger::Start(1007)));
+        assert_eq!(QuestTrigger::parse("market"), None);
+        assert_eq!(QuestTrigger::parse("start_quest( x )"), None);
     }
 
     #[test]
