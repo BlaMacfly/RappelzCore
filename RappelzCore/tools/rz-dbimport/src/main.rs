@@ -1,4 +1,4 @@
-//! rz-dbimport : remplit `acore_world` (schéma AzerothCore, inchangé) à partir des DBC
+//! rz-dbimport : remplit `rcore_world` (schéma AzerothCore, inchangé) à partir des DBC
 //! extraits du client RappelzRust (`rz-extractor dbc`).
 //!
 //! | DBC Rappelz        | Tables AzerothCore                                  |
@@ -27,7 +27,7 @@ pub const RAPPELZ_MAP: u32 = 0;
 const ROWS_PER_INSERT: usize = 500;
 
 #[derive(Parser)]
-#[command(name = "rz-dbimport", version, about = "DBC RappelzRust → acore_world")]
+#[command(name = "rz-dbimport", version, about = "DBC RappelzRust → rcore_world")]
 struct Cli {
     /// Dossier contenant `dbc/` (DataDir du worldserver).
     #[arg(long, default_value = ".")]
@@ -386,7 +386,7 @@ async fn main() -> Result<()> {
 
     let mut sql = String::from(
         "-- Généré par rz-dbimport (RappelzCore) à partir des DBC du client RappelzRust.\n\
-         -- Schéma : acore_world d'AzerothCore, non modifié.\n\
+         -- Schéma : rcore_world d'AzerothCore, non modifié.\n\
          SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS = 0;\n",
     );
     let want = |part: &str| cli.only.is_empty() || cli.only.iter().any(|o| o == part);

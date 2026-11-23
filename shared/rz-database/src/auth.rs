@@ -1,4 +1,4 @@
-//! Requêtes LoginDatabase (`acore_auth`) : comptes, accès GM, bannissements, royaumes.
+//! Requêtes LoginDatabase (`rcore_auth`) : comptes, accès GM, bannissements, royaumes.
 
 use anyhow::Result;
 use sqlx::{MySqlPool, Row};

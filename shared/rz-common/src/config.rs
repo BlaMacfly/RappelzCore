@@ -3,7 +3,7 @@
 //! ```text
 //! [authserver]
 //! # commentaire
-//! LoginDatabaseInfo = "127.0.0.1;3306;acore;acore;acore_auth"
+//! LoginDatabaseInfo = "127.0.0.1;3306;rcore;rcore;rcore_auth"
 //! RealmServerPort   = 4500
 //! ```
 //!
@@ -165,13 +165,13 @@ mod tests {
     #[test]
     fn parse_conf() {
         let c = Config::parse(
-            "[authserver]\n# c\nLoginDatabaseInfo = \"127.0.0.1;3306;acore;acore;acore_auth\"\nRealmServerPort = 4500\nLogLevel=2\n",
+            "[authserver]\n# c\nLoginDatabaseInfo = \"127.0.0.1;3306;rcore;rcore;rcore_auth\"\nRealmServerPort = 4500\nLogLevel=2\n",
         );
         assert_eq!(c.int("RealmServerPort", 0u16), 4500);
         assert_eq!(c.int("LogLevel", 0u8), 2);
         let db = DatabaseInfo::parse(&c.string("LoginDatabaseInfo", "")).unwrap();
-        assert_eq!(db.database, "acore_auth");
-        assert_eq!(db.url(), "mysql://acore:acore@127.0.0.1:3306/acore_auth");
+        assert_eq!(db.database, "rcore_auth");
+        assert_eq!(db.url(), "mysql://rcore:rcore@127.0.0.1:3306/rcore_auth");
     }
 
     #[test]

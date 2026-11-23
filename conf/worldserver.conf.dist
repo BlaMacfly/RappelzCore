@@ -6,18 +6,18 @@
 [worldserver]
 
 ###################################################################################################
-# BASES DE DONNÉES (schémas AzerothCore : acore_auth, acore_world, acore_characters)
+# BASES DE DONNÉES (schémas AzerothCore : rcore_auth, rcore_world, rcore_characters)
 
-LoginDatabaseInfo     = "127.0.0.1;3306;acore;acore;acore_auth"
-WorldDatabaseInfo     = "127.0.0.1;3306;acore;acore;acore_world"
-CharacterDatabaseInfo = "127.0.0.1;3306;acore;acore;acore_characters"
+LoginDatabaseInfo     = "127.0.0.1;3306;rcore;rcore;rcore_auth"
+WorldDatabaseInfo     = "127.0.0.1;3306;rcore;rcore;rcore_world"
+CharacterDatabaseInfo = "127.0.0.1;3306;rcore;rcore;rcore_characters"
 WorldDatabase.WorkerThreads = 4
 
 ###################################################################################################
 # SERVEUR
 #
 #    RealmID
-#        Description: Id du royaume dans acore_auth.realmlist (le port du royaume doit
+#        Description: Id du royaume dans rcore_auth.realmlist (le port du royaume doit
 #                     correspondre à WorldServerPort).
 #    DataDir
 #        Description: Dossier contenant dbc/ (produit par « rz-extractor dbc »).

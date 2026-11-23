@@ -1,6 +1,6 @@
 [package]
 name = "rz-database"
-description = "Accès MySQL aux bases acore_auth / acore_characters / acore_world (schéma AzerothCore)"
+description = "Accès MySQL aux bases rcore_auth / rcore_characters / rcore_world (schéma AzerothCore)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

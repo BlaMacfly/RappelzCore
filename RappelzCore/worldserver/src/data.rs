@@ -1,5 +1,5 @@
 //! Données statiques chargées au démarrage, comme le `ObjectMgr` + `DBCStores` d'AzerothCore :
-//! DBC du `DataDir` (Job, NpcResource, Monster…) et tables d'`acore_world`
+//! DBC du `DataDir` (Job, NpcResource, Monster…) et tables d'`rcore_world`
 //! (`creature` + `creature_template` pour les PNJ placés, `game_tele`).
 
 use std::collections::HashMap;
@@ -140,7 +140,7 @@ impl GameData {
         .bind(NPC_ENTRY_OFFSET)
         .fetch_all(world)
         .await
-        .context("lecture de acore_world.creature")?;
+        .context("lecture de rcore_world.creature")?;
         let npcs: Vec<NpcSpawn> = rows
             .into_iter()
             .map(|r| {
@@ -163,7 +163,7 @@ impl GameData {
                 }
             })
             .collect();
-        tracing::info!(">> {} PNJ placés (acore_world.creature)", npcs.len());
+        tracing::info!(">> {} PNJ placés (rcore_world.creature)", npcs.len());
 
         let teleports = sqlx::query("SELECT name, position_x, position_y, position_z FROM game_tele WHERE map = 0")
             .fetch_all(world)
@@ -230,7 +230,7 @@ impl GameData {
         }
         tracing::info!(">> {} PNJ marchands (npc_vendor)", vendors.len());
         let monster_spawns = rz_database::world::monster_spawns(world, NPC_ENTRY_OFFSET).await?;
-        tracing::info!(">> {} monstres placés (acore_world.creature)", monster_spawns.len());
+        tracing::info!(">> {} monstres placés (rcore_world.creature)", monster_spawns.len());
 
         let restoration=match rz_rappelz::restoration::RestorationBook::open(&dbc_dir) {
             Ok(book)=>Some(book),Err(error)=>{tracing::warn!("{error}: restoration casting unavailable");None}

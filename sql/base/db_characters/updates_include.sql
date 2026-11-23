@@ -1,6 +1,6 @@
 -- MySQL dump 10.13  Distrib 8.4.3, for Win64 (x86_64)
 --
--- Host: localhost    Database: acore_characters
+-- Host: localhost    Database: rcore_characters
 -- ------------------------------------------------------
 -- Server version	8.4.3
 

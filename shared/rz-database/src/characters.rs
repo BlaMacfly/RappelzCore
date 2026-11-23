@@ -1,4 +1,4 @@
-//! Requêtes CharacterDatabase (`acore_characters`).
+//! Requêtes CharacterDatabase (`rcore_characters`).
 //!
 //! Correspondance Rappelz → colonnes AzerothCore de `characters` :
 //! race → `race`, sexe → `gender`, classe de base → `class`, niveau → `level`,

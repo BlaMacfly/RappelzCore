@@ -124,8 +124,8 @@ Les [groupes de joueurs](docs/PARTY_VALIDATION.md) ajoutent invitations avec acc
 vérifiés après dégâts réels et changement de couche. L’[apprentissage des compétences](docs/SKILL_LEARNING_VALIDATION.md) ajoute la fenêtre K, les coûts/prérequis réels, les niveaux et JP sauvegardés et les événements Lua, avec 40 contrôles à deux clients. Le [profil archivé de 3212](docs/SKILL_CORPSE_VALIDATION.md) exige maintenant un cadavre de monstre ciblé, consommé une seule fois, avec 48 contrôles. Le [rendu du sol](docs/TERRAIN_RENDERING_VALIDATION.md) conserve sa netteté avec un pic observé des textures réduit de 252 à 84 Mio par client ; 12 captures du sol sont identiques lors de la comparaison réelle à deux clients. Le [cache du terrain](docs/TERRAIN_STREAMING_VALIDATION.md) réutilise aussi les pixels lors des rotations rapides, avec un plafond de 128 Mio en mémoire vive par client et 48 contrôles natifs. Le [mélange des zones nouvelles](docs/TERRAIN_COLD_VALIDATION.md) se fait désormais dans un fil de calcul annulable, avec 50 contrôles à deux clients et des images identiques. L’[annulation et la reconnexion](docs/TERRAIN_CANCELLATION_VALIDATION.md) vérifient maintenant les calculs réellement interrompus lors des rotations, retours au lobby et fermetures TCP, avec arrêt des fils de calcul et données préservées. Les [téléportations et changements de carte](docs/TERRAIN_WARP_VALIDATION.md) annulent désormais le travail dès la réception du saut, avec dix interruptions réelles et des captures du sol identiques sur trois cartes. Les [interruptions réseau](docs/TERRAIN_NETWORK_VALIDATION.md) vérifient aussi deux pauses TCP de huit secondes, les calculs interrompus et la reconnexion réelle des deux clients, avec images identiques et données préservées. L’[arrêt brutal puis le redémarrage du serveur](docs/TERRAIN_RESTART_VALIDATION.md) passent 37 contrôles à deux clients sur une copie isolée, avec récupération des comptes et sol identique après retour. Les [déplacements et le combat pendant la coupure](docs/GAMEPLAY_RESTART_VALIDATION.md) ajoutent 45 contrôles : retour au point sauvegardé, anciennes actions abandonnées et récompense conservée une seule fois. La détection des trajets en boucle est corrigée. La [sauvegarde interrompue](docs/SAVE_ROLLBACK_VALIDATION.md) ajoute 48 contrôles : deux transactions partiellement écrites sont entièrement annulées après arrêt brutal, puis une nouvelle récompense reste conservée après sauvegarde normale et retour. Les [récompenses sont désormais sauvegardées avant leur annonce](docs/REWARD_DURABILITY_VALIDATION.md) : 49 contrôles natifs conservent 5 EXP et 3 JP après un arrêt brutal, sans sauvegarde manuelle après le combat. L’ancien serveur échoue au même contrôle. La [monnaie et la montée de niveau après arrêt brutal](docs/MONEY_LEVEL_RESTART_VALIDATION.md) passent 57 contrôles : +14 rupees, niveau 2→3, EXP restante et PV/PM conservés avec synchronisation du témoin. Le [redémarrage réel de la base après arrêt brutal](docs/DATABASE_RESTART_VALIDATION.md) ajoute 51 contrôles : gain déjà validé conservé, seconde attribution interrompue entièrement annulée et deux clients reconnectés au même serveur de jeu. Les personnages/connexions fantômes après échec de sauvegarde sont corrigés. La [perte de confirmation après validation SQL réussie](docs/COMMIT_CONFIRMATION_VALIDATION.md) ajoute 47 contrôles à deux clients : aucun gain prématuré, niveau 3 et monnaie 1013 retrouvés à la reconnexion sans écrasement ni duplication ; le témoin sauvegarde normalement. Les [spectateurs arrivant pendant une compétence](docs/LATE_CAST_VALIDATION.md) reçoivent désormais son temps restant, puis son annulation ou son effet : 27 contrôles réels vérifient la visibilité et la confidentialité des gains/recharges. Les [tables de progression retrouvées et le niveau de métier](docs/JOB_PROGRESSION_VALIDATION.md) ajoutent BasicStat/Exp/SummonExp sans perte 64 bits, une nouvelle décompilation du message 410 et l'achat des niveaux de métier dans K. Les 36 contrôles natifs vérifient coûts JP, sauvegarde, confidentialité et retour en jeu ; EXP et PV/PM existants sont préservés. L'espace combiné passe 188 tests Rust et 118 tests Python ; chaque branche conserve son périmètre serveur/client compilable.
 La [feuille de route du jeu](docs/GAMEPLAY_ROADMAP.md) recense les systèmes encore incomplets.
 
-- **RappelzCore** utilise **exactement le schéma SQL d'AzerothCore** (`acore_auth`, `acore_characters`,
-  `acore_world`, importé du dépôt officiel, commit `3179ea3` du 25/10/2026), son format de configuration
+- **RappelzCore** utilise **exactement le schéma SQL d'AzerothCore** (`rcore_auth`, `rcore_characters`,
+  `rcore_world`, importé du dépôt officiel, commit `3179ea3` du 25/10/2026), son format de configuration
   (`authserver.conf`, `worldserver.conf`, variables `AC_*`), son hachage SRP6 des mots de passe et sa
   console. Un compte créé par AzerothCore fonctionne ici, et inversement.
 - **RappelzRust** range ses ressources **comme un client World of Warcraft 3.3.5** : archives **MPQ**
@@ -162,7 +162,7 @@ shared/
 RappelzCore/
   authserver/                 → authserver.exe
   worldserver/                → worldserver.exe (lobby, monde, visibilité, chat, commandes GM, console)
-  tools/rz-dbimport/          DBC → tables acore_world
+  tools/rz-dbimport/          DBC → tables rcore_world
 RappelzRust/
   client/                     → RappelzRust.exe (macroquad)
   tools/rz-extractor/         client Rappelz → installation RappelzRust (MPQ/DBC) ; extraction DBC serveur
@@ -208,8 +208,8 @@ target/release/rz-extractor dbc --data client-data/RappelzRust/Data --out <DataD
 
 ```bash
 mariadb -uroot -p < sql/create/create_mysql.sql
-tools/sql/import_all.sh 127.0.0.1 3306 acore acore
-target/release/rz-dbimport --data-dir <DataDir> --apply "127.0.0.1;3306;acore;acore;acore_world"
+tools/sql/import_all.sh 127.0.0.1 3306 rcore rcore
+target/release/rz-dbimport --data-dir <DataDir> --apply "127.0.0.1;3306;rcore;rcore;rcore_world"
 ```
 
 `rz-dbimport` remplit `item_template` (34 682), `creature_template` (+ `creature_template_model`),

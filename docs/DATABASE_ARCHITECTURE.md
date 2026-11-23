@@ -8,9 +8,9 @@ Follow-up: [LIVE_SERVER_VALIDATION.md](LIVE_SERVER_VALIDATION.md) supersedes the
 
 | Logical role | Default physical name | Configuration | Current responsibilities |
 |---|---|---|---|
-| auth | `acore_auth` | `LoginDatabaseInfo` | Accounts, password verifiers, bans, GM access, realm list/counts, one-time auth-to-world key, realm status and uptime. |
-| characters | `acore_characters` | `CharacterDatabaseInfo` | Character identity/position/stats, Rappelz extras in settings, inventory and equipped items. |
-| world | `acore_world` | `WorldDatabaseInfo` | Imported item/creature/quest/location templates, NPC shops, NPC/monster placements. |
+| auth | `rcore_auth` | `LoginDatabaseInfo` | Accounts, password verifiers, bans, GM access, realm list/counts, one-time auth-to-world key, realm status and uptime. |
+| characters | `rcore_characters` | `CharacterDatabaseInfo` | Character identity/position/stats, Rappelz extras in settings, inventory and equipped items. |
+| world | `rcore_world` | `WorldDatabaseInfo` | Imported item/creature/quest/location templates, NPC shops, NPC/monster placements. |
 
 The three names remain configurable; the logical separation is already present. `shared/rz-database` uses `sqlx` MySQL pools. The auth service needs the login database; the world service opens all three. Configuration follows `host;port;user;password;database`, with `AC_*` environment overrides. See `shared/rz-common/src/config.rs` and the distributed configuration files. Connection credentials are deliberately omitted here.
 

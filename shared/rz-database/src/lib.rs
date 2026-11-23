@@ -1,5 +1,5 @@
-//! Accès aux trois bases d'AzerothCore : `acore_auth` (LoginDatabase),
-//! `acore_characters` (CharacterDatabase) et `acore_world` (WorldDatabase).
+//! Accès aux trois bases d'AzerothCore : `rcore_auth` (LoginDatabase),
+//! `rcore_characters` (CharacterDatabase) et `rcore_world` (WorldDatabase).
 //!
 //! Les requêtes n'utilisent que des tables et colonnes du schéma AzerothCore
 //! (voir `sql/base/`) ; les données propres à Rappelz sans équivalent WoW vont dans
@@ -34,7 +34,7 @@ pub async fn connect(info: &str, name: &str, max_connections: u32) -> Result<MyS
 }
 
 pub mod world {
-    //! Requêtes WorldDatabase (`acore_world`) utilisées en jeu.
+    //! Requêtes WorldDatabase (`rcore_world`) utilisées en jeu.
     use anyhow::Result;
     use sqlx::{MySqlPool, Row};
 

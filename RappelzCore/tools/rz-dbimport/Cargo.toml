@@ -1,6 +1,6 @@
 [package]
 name = "rz-dbimport"
-description = "Remplit acore_world (schéma AzerothCore) à partir des DBC RappelzRust"
+description = "Remplit rcore_world (schéma AzerothCore) à partir des DBC RappelzRust"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -10,11 +10,11 @@
 # PARAMÈTRES DE CONNEXION
 #
 #    LoginDatabaseInfo
-#        Description: Base de données des comptes (schéma acore_auth d'AzerothCore).
+#        Description: Base de données des comptes (schéma rcore_auth d'AzerothCore).
 #        Format:      "hôte;port;utilisateur;mot_de_passe;base"
-#        Défaut:      "127.0.0.1;3306;acore;acore;acore_auth"
+#        Défaut:      "127.0.0.1;3306;rcore;rcore;rcore_auth"
 
-LoginDatabaseInfo = "127.0.0.1;3306;acore;acore;acore_auth"
+LoginDatabaseInfo = "127.0.0.1;3306;rcore;rcore;rcore_auth"
 
 #    LoginDatabase.WorkerThreads
 #        Description: Nombre maximal de connexions MySQL simultanées.

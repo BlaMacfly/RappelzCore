@@ -1,6 +1,6 @@
 [package]
 name = "rappelzcore-worldserver"
-description = "RappelzCore worldserver : serveur de jeu Rappelz sur les bases acore_characters / acore_world"
+description = "RappelzCore worldserver : serveur de jeu Rappelz sur les bases rcore_characters / rcore_world"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

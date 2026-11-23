@@ -55,7 +55,7 @@ Client -> world: LOGIN(62)
 World  -> client: LOGIN_RESULT(64), state/visibility updates, time sync
 ```
 
-Authentication checks stored salted verifiers after decrypting the supplied password. This is not a WoW SRP proof exchange. The world service validates and clears the auth-to-world key through `acore_auth`; see [DATABASE_ARCHITECTURE.md](DATABASE_ARCHITECTURE.md).
+Authentication checks stored salted verifiers after decrypting the supplied password. This is not a WoW SRP proof exchange. The world service validates and clears the auth-to-world key through `rcore_auth`; see [DATABASE_ARCHITECTURE.md](DATABASE_ARCHITECTURE.md).
 
 Selected implemented total packet sizes, backed by `msg::tests::observed_sizes` and the prior constructor investigation:
 

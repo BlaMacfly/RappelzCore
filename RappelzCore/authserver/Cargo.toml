@@ -1,6 +1,6 @@
 [package]
 name = "rappelzcore-authserver"
-description = "RappelzCore authserver : authentification Rappelz sur la base acore_auth d'AzerothCore"
+description = "RappelzCore authserver : authentification Rappelz sur la base rcore_auth d'AzerothCore"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

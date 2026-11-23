@@ -121,8 +121,8 @@ verify separation, hidden-interaction denial and saved character re-entry with t
 verified through actual damage and layer separation. [Skill learning](docs/SKILL_LEARNING_VALIDATION.md) adds the native K window, real learning costs/prerequisites, durable private levels/JP and Lua diagnostics, verified with 40 two-client checks. [Archived skill3212](docs/SKILL_CORPSE_VALIDATION.md) now requires a selected monster corpse, consumed once under competing casts, with 48 native checks. [Ground rendering](docs/TERRAIN_RENDERING_VALIDATION.md) preserves detail while reducing the observed terrain texture peak from 252 to 84 MiB per client; 12 ground captures match exactly across the real two-client comparison. [Warm terrain streaming](docs/TERRAIN_STREAMING_VALIDATION.md) now reuses exact pixels during rapid camera turns, with a 128 MiB CPU-cache cap per client and 48 native checks. [Cold terrain blending](docs/TERRAIN_COLD_VALIDATION.md) now runs in one cancellable background worker, with 50 two-client checks and identical images. [Cancellation/reconnection](docs/TERRAIN_CANCELLATION_VALIDATION.md) now verifies actual partial blends during turns, lobby exit and TCP closure, with joined workers and preserved data. [Warp/map changes](docs/TERRAIN_WARP_VALIDATION.md) cancel pending work immediately on the accepted WARP, with ten real partial interruptions and exact ground captures across three maps. [Stalled/reset connections](docs/TERRAIN_NETWORK_VALIDATION.md) now verify real eight-second TCP holds, six partial view cancellations, two reset interruptions and fresh-handle reauthentication without changing ground pixels or existing data. [Forced server restart](docs/TERRAIN_RESTART_VALIDATION.md) now passes 37 two-client checks on isolated cloned data, including reused handles, exact recovered ground and realm-scoped startup recovery. [Movement/combat during restart](docs/GAMEPLAY_RESTART_VALIDATION.md) adds 45 checks: real active actions at kill, durable checkpoint recovery, no stale replay and a single saved reward; looped-route movement detection is corrected. [Interrupted-save recovery](docs/SAVE_ROLLBACK_VALIDATION.md) adds 48 checks with two real partially written transactions: process death rolls both back, then a fresh private reward survives normal save and re-entry. [Reward durability](docs/REWARD_DURABILITY_VALIDATION.md) now commits rewards before notifying the client; 49 native checks retain 5 EXP/3 JP after a real server crash with no later manual save. An old-server control rejects premature notifications. [Positive currency/level-up restart checks](docs/MONEY_LEVEL_RESTART_VALIDATION.md) add 57 native checks: +14 rupees, level 2→3, correct EXP rollover and saved 140/70 vitals survive process death and three entries with peer synchronization. [Actual database crash recovery](docs/DATABASE_RESTART_VALIDATION.md) adds 51 native checks: a committed award survives, a pending second award rolls back without announcement, and both clients reconnect to the same world process. Failed-save ghost/socket cleanup is corrected. [Lost successful-COMMIT confirmation](docs/COMMIT_CONFIRMATION_VALIDATION.md) adds 47 two-client checks: the real SQL OK is discarded, no premature gain is announced, and reentry finds level 3/money 1013 without stale overwrite or duplication; the witness saves normally. [Late skill observers](docs/LATE_CAST_VALIDATION.md) now receive the remaining cast after ENTER, then the matching cancel/effect; 27 real two-client checks preserve private rewards/cooldowns and reject old phase replay. [Recovered progression and job leveling](docs/JOB_PROGRESSION_VALIDATION.md) adds lossless BasicStat/Exp/SummonExp archive readers, fresh SFrame request-410 evidence and current-job purchases from the K window. Thirty-six native checks verify exact JP costs, saved JLV, private state and reentry; historical EXP/vitals stay intact. The combined development workspace passes 188 Rust and 118 Python tests;
 each branch keeps its own buildable server/client scope. See the [gameplay roadmap](docs/GAMEPLAY_ROADMAP.md) for remaining systems.
 
-- **RappelzCore** uses **exactly the AzerothCore SQL schema** (`acore_auth`, `acore_characters`,
-  `acore_world`, imported from the official repository, commit `3179ea3` of 2026-10-25). It also
+- **RappelzCore** uses **exactly the AzerothCore SQL schema** (`rcore_auth`, `rcore_characters`,
+  `rcore_world`, imported from the official repository, commit `3179ea3` of 2026-10-25). It also
   reuses AzerothCore's configuration format (`authserver.conf`, `worldserver.conf`, `AC_*`
   variables), its SRP6 password hashing and its console. An account created by AzerothCore works
   here, and the other way round.
@@ -161,7 +161,7 @@ shared/
 RappelzCore/
   authserver/                 → authserver.exe
   worldserver/                → worldserver.exe (lobby, world, visibility, chat, GM commands, console)
-  tools/rz-dbimport/          DBC → acore_world tables
+  tools/rz-dbimport/          DBC → rcore_world tables
 RappelzRust/
   client/                     → RappelzRust.exe (macroquad)
   tools/rz-extractor/         Rappelz client → RappelzRust install (MPQ/DBC); server DBC extraction
@@ -207,8 +207,8 @@ target/release/rz-extractor dbc --data client-data/RappelzRust/Data --out <DataD
 
 ```bash
 mariadb -uroot -p < sql/create/create_mysql.sql
-tools/sql/import_all.sh 127.0.0.1 3306 acore acore
-target/release/rz-dbimport --data-dir <DataDir> --apply "127.0.0.1;3306;acore;acore;acore_world"
+tools/sql/import_all.sh 127.0.0.1 3306 rcore rcore
+target/release/rz-dbimport --data-dir <DataDir> --apply "127.0.0.1;3306;rcore;rcore;rcore_world"
 ```
 
 From the DBC files, `rz-dbimport` fills:

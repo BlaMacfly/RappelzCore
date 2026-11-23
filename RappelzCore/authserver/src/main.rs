@@ -1,6 +1,6 @@
 //! RappelzCore authserver.
 //!
-//! Rôle identique à l'authserver d'AzerothCore : vérifier le compte (`acore_auth.account`,
+//! Rôle identique à l'authserver d'AzerothCore : vérifier le compte (`rcore_auth.account`,
 //! vérificateur SRP6), appliquer les bannissements, publier la liste des royaumes
 //! (`realmlist`) et remettre au client une clé de session que le worldserver vérifie
 //! (`account.session_key`). Seul le protocole change : celui du client Rappelz.
@@ -57,7 +57,7 @@ async fn main() -> Result<()> {
     rz_proto::packet::set_codepage(&conf.string("Rappelz.Codepage", "windows-1252"));
 
     let db = rz_database::connect(
-        &conf.string("LoginDatabaseInfo", "127.0.0.1;3306;acore;acore;acore_auth"),
+        &conf.string("LoginDatabaseInfo", "127.0.0.1;3306;rcore;rcore;rcore_auth"),
         "Login",
         conf.int("LoginDatabase.WorkerThreads", 4u32),
     )

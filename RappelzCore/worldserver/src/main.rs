@@ -1,7 +1,7 @@
 //! RappelzCore worldserver.
 //!
 //! Démarrage calqué sur AzerothCore : lecture de `worldserver.conf`, connexion aux bases
-//! Login/World/Character, chargement des DBC (`DataDir/dbc`) et des tables `acore_world`,
+//! Login/World/Character, chargement des DBC (`DataDir/dbc`) et des tables `rcore_world`,
 //! puis écoute des joueurs sur `WorldServerPort`, console `worldserver>` sur l'entrée standard.
 
 mod commands;
@@ -112,10 +112,10 @@ async fn main() -> Result<()> {
     rz_proto::packet::set_codepage(&conf.string("Rappelz.Codepage", "windows-1252"));
 
     let workers = conf.int("WorldDatabase.WorkerThreads", 4u32);
-    let login = rz_database::connect(&conf.string("LoginDatabaseInfo", "127.0.0.1;3306;acore;acore;acore_auth"), "Login", workers).await?;
-    let world_db = rz_database::connect(&conf.string("WorldDatabaseInfo", "127.0.0.1;3306;acore;acore;acore_world"), "World", workers).await?;
+    let login = rz_database::connect(&conf.string("LoginDatabaseInfo", "127.0.0.1;3306;rcore;rcore;rcore_auth"), "Login", workers).await?;
+    let world_db = rz_database::connect(&conf.string("WorldDatabaseInfo", "127.0.0.1;3306;rcore;rcore;rcore_world"), "World", workers).await?;
     let chars = rz_database::connect(
-        &conf.string("CharacterDatabaseInfo", "127.0.0.1;3306;acore;acore;acore_characters"),
+        &conf.string("CharacterDatabaseInfo", "127.0.0.1;3306;rcore;rcore;rcore_characters"),
         "Character",
         workers,
     )
