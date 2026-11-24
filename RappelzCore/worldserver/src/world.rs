@@ -716,6 +716,7 @@ impl World {
             .to_packet();
             self.broadcast_around(ph, &event, true);
             self.broadcast_around(mh, &Self::hpmp_packet(mh, m_hp, m_max, m_mp, m_mp, -damage), false);
+            self.wake(mh);
             if m_hp == 0 {
                 self.kill_monster(mh, ph, now);
             }
@@ -783,8 +784,9 @@ impl World {
                 }
                 continue;
             }
+            let control = self.control(mh);
             if d > m.info.attack_range {
-                if now >= m.next_chase {
+                if now >= m.next_chase && !control.no_move {
                     // Un ralentissement ne fige pas complètement : le client exige une vitesse non nulle.
                     let run_speed = self.stat(mh, Stat::MoveSpeed, m.info.run_speed as i32).max(1) as f32;
                     let m = self.monsters.get_mut(&mh).unwrap();
@@ -799,7 +801,7 @@ impl World {
                 }
                 continue;
             }
-            if now < m.next_attack {
+            if now < m.next_attack || control.no_action {
                 continue;
             }
             let (base_attack, m_hp, m_mp) = (m.info.attack, m.hp, m.info.mp);
@@ -1155,7 +1157,7 @@ mod tests {
 
     fn spell_quote(kind: rz_rappelz::spells::SpellKind, cast: u32) -> rz_rappelz::spells::SpellQuote {
         rz_rappelz::spells::SpellQuote { id: 2001, level: 1, kind, mp: 5, cast, cooldown: 1000, group: 77,
-            range: Some(192.0), ratio: 1.0, flat: 0.0, hp_ratio: 0.0, state: None }
+            range: Some(192.0), ratio: 1.0, flat: 0.0, hp_ratio: 0.0, state: None, area: None, hits: 1, self_only: false, stage: 401 }
     }
 
     #[test]
@@ -1333,6 +1335,119 @@ mod tests {
         world.apply_state(1, 1, &long, quick, 0);
         world.remove_player(1);
         assert!(world.state_packets(1).is_empty());
+    }
+
+    #[test]
+    fn area_spell_hits_near_monsters_several_times_and_respects_its_limit() {
+        use rz_rappelz::spells::{Area, SpellKind, StateQuote};
+        use rz_rappelz::states::StateDef;
+        let (mut world, mut receivers) = test_world();
+        let first = test_monster(&mut world);
+        // Quatre autres monstres : deux dans la zone, un mort, un trop loin.
+        let place = |world: &mut World, x: f32, hp: i32| {
+            let m = test_monster(world);
+            let e = world.monsters.get_mut(&m).unwrap();
+            e.motion = Motion::at(x, 0.0);
+            e.info.hp = hp;
+            e.hp = hp;
+            m
+        };
+        let near = place(&mut world, 30.0, 1000);
+        let far_in = place(&mut world, 60.0, 1000);
+        let dead = place(&mut world, 20.0, 1000);
+        let out = place(&mut world, 75.0, 1000);
+        let now = world.now();
+        world.kill_monster(dead, 9, now);
+        world.update_visibility();
+        let guid = world.players[&1].guid;
+        let mut q = spell_quote(SpellKind::Physical, 0);
+        (q.area, q.hits) = (Some(Area { radius: 60.0, max_targets: 3 }), 2);
+        q.state = Some(StateQuote { id: 9, level: 1, duration: 500, chance: 100.0 });
+        let def = StateDef::fixture(9, true, Some((Stat::Defence, -0.5)), None);
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        world.begin_spell(1, guid, first, q, crate::spells::Action::State(def.clone()), vec![]).unwrap();
+        assert!(!world.monsters[&first].alive());
+        assert!(world.monsters[&near].hp < 1000 && world.monsters[&far_in].hp < 1000);
+        assert_eq!(world.monsters[&out].hp, 1000);
+        // Deux coups : PV finaux annoncés décroissants, dernier = PV réels.
+        let fire = std::iter::from_fn(|| receivers[0].try_recv().ok()).filter(|p| p.id == game::ScSkill::ID)
+            .map(|p| game::ScSkill::from_packet(&p).unwrap()).last().unwrap();
+        assert_eq!(fire.payload.len(), 9 + 6 * 32);
+        let impact = |n: usize| {
+            let b = &fire.payload[9 + n * 32..];
+            (u32::from_le_bytes(b[1..5].try_into().unwrap()), i32::from_le_bytes(b[5..9].try_into().unwrap()))
+        };
+        let of = |h: u32| (0..6).map(impact).filter(|i| i.0 == h).map(|i| i.1).collect::<Vec<_>>();
+        assert_eq!(of(near).len(), 2);
+        assert!(of(near)[0] > of(near)[1] && of(near)[1] == world.monsters[&near].hp);
+        assert_eq!(of(far_in)[1], world.monsters[&far_in].hp);
+        // Les survivants portent l'état et visent le lanceur ; le mort n'en porte pas.
+        assert_eq!([first, near, far_in, out].map(|m| world.state_packets(m).len()), [0, 1, 1, 0]);
+        assert_eq!([near, far_in, out].map(|m| world.monsters[&m].target), [Some(1), Some(1), None]);
+        // Limite de cibles : la cible principale est toujours touchée.
+        world.cast_cooldowns.clear();
+        q.area = Some(Area { radius: 60.0, max_targets: 1 });
+        let before = (world.monsters[&near].hp, world.monsters[&far_in].hp);
+        world.begin_spell(1, guid, far_in, q, crate::spells::Action::State(def), vec![]).unwrap();
+        assert!(world.monsters[&far_in].hp < before.1 && world.monsters[&near].hp == before.0);
+    }
+
+    #[test]
+    fn controlled_monsters_neither_move_nor_attack_and_sleepers_wake() {
+        use rz_rappelz::spells::StateQuote;
+        use rz_rappelz::states::{Control, StateDef};
+        let (mut world, mut receivers) = test_world();
+        let monster = test_monster(&mut world);
+        world.monsters.get_mut(&monster).unwrap().info.hp = 1000;
+        world.monsters.get_mut(&monster).unwrap().hp = 1000;
+        world.players.get_mut(&1).unwrap().motion = Motion::at(200.0, 0.0);
+        world.update_visibility();
+        let quote = |id| StateQuote { id, level: 1, duration: 10_000, chance: 100.0 };
+        let mut root = StateDef::fixture(6007, true, None, None);
+        root.control = Control { no_move: true, no_action: false, wakes: false };
+        let mut sleep = StateDef::fixture(6005, true, None, None);
+        sleep.control = Control { no_move: true, no_action: true, wakes: true };
+        // Poursuite en cours, puis immobilisation : arrêt sur place annoncé, plus de poursuite.
+        world.monsters.get_mut(&monster).unwrap().target = Some(1);
+        world.tick_monsters(world.now() + 1);
+        assert!(!world.monsters[&monster].motion.points.is_empty());
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        world.apply_state(monster, 1, &quote(6007), root, 0);
+        assert!(world.monsters[&monster].motion.points.is_empty());
+        assert!(std::iter::from_fn(|| receivers[0].try_recv().ok()).any(|p| p.id == msg::ScMove::ID));
+        world.monsters.get_mut(&monster).unwrap().next_chase = 0;
+        world.tick_monsters(world.now() + 200);
+        assert!(world.monsters[&monster].motion.points.is_empty());
+        // Immobilisé mais à portée : il attaque ; endormi : non.
+        world.players.get_mut(&1).unwrap().motion = Motion::at(15.0, 0.0);
+        let hp = world.players[&1].hp;
+        world.tick_monsters(world.now() + 300);
+        let hit = world.players[&1].hp;
+        assert!(hit < hp);
+        world.apply_state(monster, 1, &quote(6005), sleep, 0);
+        world.tick_monsters(world.now() + 5000);
+        assert_eq!(world.players[&1].hp, hit);
+        // Un coup reçu réveille, sans lever l'immobilisation.
+        assert_eq!(world.state_packets(monster).len(), 2);
+        world.players.get_mut(&1).unwrap().attack_target = Some(monster);
+        world.tick_player_attacks(world.now() + 5001);
+        assert_eq!(world.control(monster), Control { no_move: true, no_action: false, wakes: false });
+        world.tick_monsters(world.now() + 10_000);
+        assert!(world.players[&1].hp < hit);
+    }
+
+    #[test]
+    fn self_only_spell_refuses_another_target() {
+        use rz_rappelz::spells::SpellKind;
+        let (mut world, _receivers) = test_world();
+        world.update_visibility();
+        let guid = world.players[&1].guid;
+        let mut q = spell_quote(SpellKind::Heal, 0);
+        (q.self_only, q.range, q.flat) = (true, Some(0.0), 10.0);
+        assert!(world.begin_spell(1, guid, 2, q, crate::spells::Action::Effect, vec![]).is_err());
+        let hp = world.players[&1].hp;
+        world.begin_spell(1, guid, 1, q, crate::spells::Action::Effect, vec![]).unwrap();
+        assert!(world.players[&1].hp > hp);
     }
 
     #[test]

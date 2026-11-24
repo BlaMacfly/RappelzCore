@@ -1,4 +1,5 @@
-//! Compétences actives à cible unique (docs/re/skill_protocol.md) : dégâts, soins, invocation.
+//! Compétences actives (docs/re/skill_protocol.md) : dégâts (cible unique, zone, coups multiples),
+//! soins, états, invocation.
 //!
 //! Déroulement : contrôles → CASTING si la compétence a une incantation → FIRE, qui applique le
 //! coût et l'effet et démarre la recharge. Un mouvement, une annulation ou une condition perdue
@@ -11,7 +12,8 @@ use rz_database::pets::Pet;
 use rz_proto::msg::{self, Message};
 use rz_proto::msg_game::{self as game, id as gid, skill_hit, skill_type};
 use rz_proto::{RawPacket, Writer};
-use rz_rappelz::spells::{SpellKind, SpellQuote};
+use rz_rappelz::spells::{Area, SpellKind, SpellQuote};
+use rz_rappelz::spells::StateQuote;
 use rz_rappelz::states::{Stat, StateDef};
 
 use crate::session::Session;
@@ -49,6 +51,14 @@ fn casting_payload(duration: u32) -> Vec<u8> {
     let mut w = Writer::new();
     w.u32(duration).u16(0).zeros(3);
     w.finish(0).body
+}
+
+/// Queue FIRE : par vagues (premier coup sur chaque cible, deuxième coup…), ordre attendu par les
+/// coups d'arme continus ; le dernier impact de chaque cible porte ses PV finaux.
+fn fire_hits(hits: &[Vec<game::SkillDamageHit>], q: &SpellQuote) -> Vec<u8> {
+    let waves = (0..usize::from(q.hits)).flat_map(|k| hits.iter().filter_map(move |h| h.get(k).cloned()));
+    let (target_count, fire_count) = q.fire_counts(hits.len());
+    game::ScSkill::fire_payload(false, 0.0, target_count, fire_count, &waves.collect::<Vec<_>>())
 }
 
 /// Impact RESULT (10 octets) : succès, genre 10 = état ajouté [O].
@@ -104,9 +114,31 @@ impl World {
                 None => return false,
             },
         };
+        if q.self_only {
+            return target == caster;
+        }
         let (x, y) = p.motion.position(now);
         let range = q.range.unwrap_or(MELEE_RANGE) + RANGE_SLACK;
         self.can_see(caster, target, now) && ((x - position.0).powi(2) + (y - position.1).powi(2)).sqrt() <= range
+    }
+
+    /// Monstres visibles dans la zone, la cible principale d'abord puis du plus proche au plus
+    /// lointain.
+    fn area_targets(&self, caster: u32, target: u32, area: Area) -> Vec<u32> {
+        let now = self.now();
+        let Some((x, y)) = self.monsters.get(&target).map(|m| m.motion.position(now)) else { return Vec::new() };
+        let mut found: Vec<(f32, u32)> = self
+            .monsters
+            .iter()
+            .filter(|(h, m)| m.alive() && self.can_see(caster, **h, now))
+            .map(|(h, m)| {
+                let p = m.motion.position(now);
+                (if *h == target { -1.0 } else { ((p.0 - x).powi(2) + (p.1 - y).powi(2)).sqrt() }, *h)
+            })
+            .filter(|(d, _)| *d <= area.radius)
+            .collect();
+        found.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        found.into_iter().take(usize::from(area.max_targets)).map(|(_, h)| h).collect()
     }
 
     pub(crate) fn begin_spell(
@@ -215,39 +247,60 @@ impl World {
         }
         let power = self.power_of(handle, q.kind != SpellKind::Physical);
         let level_now = self.now();
-        let mut killed = None;
-        // État à poser, après FIRE (le client attend 505 ensuite).
-        let mut posed = None;
-        // Vitaux finaux de la cible, pour ceux qui la voient sans voir le lanceur.
-        let mut vitals = None;
+        let mut killed = Vec::new();
+        // États à poser, après FIRE (le client attend 505 ensuite).
+        let mut posed = Vec::new();
+        // Vitaux finaux des cibles, pour ceux qui les voient sans voir le lanceur.
+        let mut vitals = Vec::new();
+        let state = match (&c.action, q.state) {
+            (Action::State(def), Some(s)) => Some((s, def.clone())),
+            _ => None,
+        };
+        let lands = |s: &Option<(StateQuote, StateDef)>| s.as_ref().is_some_and(|(s, _)| rand::random::<f32>() * 100.0 < s.chance);
         let payload = match q.kind {
             SpellKind::Physical | SpellKind::Magical => {
                 let physical = q.kind == SpellKind::Physical;
                 let nominal = q.nominal(power, 0);
-                let mods = self.mods(c.target);
-                let m = self.monsters.get_mut(&c.target).unwrap();
-                let defence = if physical {
-                    mods.apply(Stat::Defence, m.info.defence)
-                } else {
-                    mods.apply(Stat::MagicDefence, m.info.magic_defence)
+                let targets = match q.area {
+                    // Les compteurs de FIRE tiennent sur un octet.
+                    Some(area) => {
+                        let most = area.max_targets.min(255 / q.hits.max(1));
+                        self.area_targets(handle, c.target, Area { max_targets: most, ..area })
+                    }
+                    None => vec![c.target],
                 };
-                let damage = crate::world::roll_damage(nominal, defence);
-                m.hp = (m.hp - damage).max(0);
-                if m.target.is_none() {
-                    m.target = Some(handle);
+                let mut hits = vec![Vec::new(); targets.len()];
+                for (n, &target) in targets.iter().enumerate() {
+                    let mods = self.mods(target);
+                    let m = self.monsters.get_mut(&target).unwrap();
+                    let defence = if physical {
+                        mods.apply(Stat::Defence, m.info.defence)
+                    } else {
+                        mods.apply(Stat::MagicDefence, m.info.magic_defence)
+                    };
+                    let mut total = 0;
+                    // Chaque coup porte : les PV annoncés décroissent d'un impact à l'autre.
+                    for _ in 0..q.hits {
+                        let damage = crate::world::roll_damage(nominal, defence);
+                        m.hp = (m.hp - damage).max(0);
+                        total += damage;
+                        hits[n].push(game::SkillDamageHit {
+                            hit_type: if physical { skill_hit::DAMAGE } else { skill_hit::MAGIC_DAMAGE },
+                            target,
+                            target_hp: m.hp,
+                            damage,
+                            ..Default::default()
+                        });
+                    }
+                    m.target.get_or_insert(handle);
+                    vitals.push((target, World::hpmp_packet(target, m.hp, m.info.hp, m.info.mp, m.info.mp, -total)));
+                    if m.hp == 0 {
+                        killed.push(target);
+                    } else if lands(&state) {
+                        posed.push(target);
+                    }
                 }
-                if m.hp == 0 {
-                    killed = Some(c.target);
-                }
-                vitals = Some(World::hpmp_packet(c.target, m.hp, m.info.hp, m.info.mp, m.info.mp, -damage));
-                let hit = game::SkillDamageHit {
-                    hit_type: if physical { skill_hit::DAMAGE } else { skill_hit::MAGIC_DAMAGE },
-                    target: c.target,
-                    target_hp: m.hp,
-                    damage,
-                    ..Default::default()
-                };
-                game::ScSkill::fire_payload(false, 0.0, 1, 1, &[hit])
+                fire_hits(&hits, &q)
             }
             SpellKind::Heal => {
                 let t = self.players.get_mut(&c.target).unwrap();
@@ -255,35 +308,42 @@ impl World {
                 t.hp = t.hp.saturating_add(q.nominal(power, t.max_hp)).min(t.max_hp);
                 t.enter.creature.hp = t.hp;
                 let amount = t.hp - before;
-                vitals = Some(World::hpmp_packet(c.target, t.hp, t.max_hp, t.mp, t.max_mp, amount));
-                heal_payload(c.target, t.hp, amount)
+                vitals.push((c.target, World::hpmp_packet(c.target, t.hp, t.max_hp, t.mp, t.max_mp, amount)));
+                let payload = heal_payload(c.target, t.hp, amount);
+                if lands(&state) {
+                    posed.push(c.target);
+                }
+                payload
             }
             SpellKind::Curse | SpellKind::Bless => {
-                let hit = match q.state {
-                    Some(s) => rand::random::<f32>() * 100.0 < s.chance,
-                    None => false,
-                };
-                if let (true, Action::State(def), Some(s)) = (hit, &c.action, q.state) {
-                    posed = Some((s, def.clone()));
+                if lands(&state) {
+                    posed.push(c.target);
                 }
                 if let Some(m) = self.monsters.get_mut(&c.target) {
                     m.target.get_or_insert(handle);
                 }
-                state_payload(c.target, posed.is_some())
+                state_payload(c.target, !posed.is_empty())
             }
             SpellKind::Summon | SpellKind::Unsummon => game::ScSkill::fire_payload(false, 0.0, 0, 1, &[]),
         };
         if let Some(packet) = self.spell_event(handle, &c, skill_type::FIRE, q.mp, payload) {
             self.broadcast_around(handle, &packet, true);
         }
-        if let Some((s, def)) = posed {
+        if matches!(q.kind, SpellKind::Physical | SpellKind::Magical) {
+            for (target, _) in &vitals {
+                self.wake(*target);
+            }
+        }
+        if let Some((s, def)) = state {
             let physical = def.periodic.is_some_and(|p| p.pulse == rz_rappelz::states::Pulse::PhysicalDamage);
             let power = self.power_of(handle, !physical);
-            self.apply_state(c.target, handle, &s, def, power);
+            for target in posed {
+                self.apply_state(target, handle, &s, def.clone(), power);
+            }
         }
-        if let Some(packet) = vitals {
+        for (target, packet) in vitals {
             for viewer in self.players.keys().copied().collect::<Vec<_>>() {
-                if viewer != handle && !self.can_see(viewer, handle, level_now) && self.can_see(viewer, c.target, level_now) {
+                if viewer != handle && !self.can_see(viewer, handle, level_now) && self.can_see(viewer, target, level_now) {
                     self.send_to(viewer, packet.clone());
                 }
             }
@@ -307,7 +367,7 @@ impl World {
         if !skills.is_empty() {
             self.send_to(handle, game::ScSkillList { target: handle, modification_type: 0, skills }.to_packet());
         }
-        if let Some(m) = killed {
+        for m in killed {
             self.kill_monster(m, handle, level_now);
         }
     }
@@ -357,11 +417,10 @@ impl Session {
                     Action::Unsummon { card: pet.card }
                 }
             }
-            SpellKind::Curse | SpellKind::Bless => {
-                let def = q.state.and_then(|s| self.ctx.data.states.get(s.id)).ok_or("État non pris en charge.")?;
-                Action::State(def.clone())
-            }
-            _ => Action::Effect,
+            _ => match q.state {
+                Some(s) => Action::State(self.ctx.data.states.get(s.id).ok_or("État non pris en charge.")?.clone()),
+                None => Action::Effect,
+            },
         };
         let known = self.known_spells();
         self.ctx.world.lock().unwrap().begin_spell(g.handle, g.character.guid, req.target, q, action, known)

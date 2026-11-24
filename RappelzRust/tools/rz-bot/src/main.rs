@@ -379,7 +379,15 @@ async fn main() -> Result<()> {
                     ("CASTING", _) => tracing::info!("[compétence] {} CASTING {} cs", s.skill_id, int(0)),
                     ("FIRE", Some(game::skill_hit::RESULT)) => tracing::info!("[compétence] {} FIRE état posé : {}, PM {}", s.skill_id, s.payload.get(14) == Some(&1), s.caster_mp),
                     ("FIRE", Some(20)) => tracing::info!("[compétence] {} FIRE soin {} (PV {}), PM {}", s.skill_id, int(18), int(14), s.caster_mp),
-                    ("FIRE", Some(_)) => tracing::info!("[compétence] {} FIRE {} dégâts (PV cible {}), PM {}", s.skill_id, int(19), int(14), s.caster_mp),
+                    ("FIRE", Some(_)) => {
+                        // Un impact de 32 octets par coup et par cible.
+                        let n = u16::from_le_bytes([s.payload[7], s.payload[8]]);
+                        tracing::info!("[compétence] {} FIRE {n} impacts, {} cibles × {} coups, PM {}", s.skill_id, s.payload[5], s.payload[6], s.caster_mp);
+                        for k in 0..usize::from(n) {
+                            let o = 9 + 32 * k;
+                            tracing::info!("[compétence]   → {} : {} dégâts (PV {})", int(o + 1), int(o + 10), int(o + 5));
+                        }
+                    }
                     _ => tracing::info!("[compétence] {} {phase}, PM {}", s.skill_id, s.caster_mp),
                 }
                 if cli.interrupt && phase == "CASTING" {

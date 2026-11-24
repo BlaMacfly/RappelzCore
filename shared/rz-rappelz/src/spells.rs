@@ -1,6 +1,7 @@
-//! Compétences actives à cible unique dont le client donne la formule (docs/re/skill_protocol.md
-//! §8) : dégâts physiques 30001, dégâts magiques 231, soins 501. Tout ce qui demande une règle
-//! non établie (zone, état, coût particulier, bascule, compétence liée…) est refusé.
+//! Compétences actives dont le client donne la formule (docs/re/skill_protocol.md §8) : dégâts à
+//! cible unique (30001, 231), à coups multiples (30009, 30016, 232), de zone (30011, 261) et de
+//! zone à coups multiples (30012, 263), soins 501, états 301. Tout ce qui demande une règle non
+//! établie (coût particulier, bascule, compétence liée…) est refusé.
 //!
 //! Les formules sont celles des info-bulles : des valeurs **avant** défense et résistance.
 
@@ -20,17 +21,56 @@ pub const RANGE_UNIT: f32 = 12.0;
 /// relues dans le binaire), limitées aux familles prises en charge : (compétence, champ, valeur).
 /// Champ 1..20 = var ; 21 = delay_cooltime en secondes.
 const OVERRIDES: &[(u32, u8, f32)] = &[
+    (3151, 21, 40.0),
     (21304, 2, 0.2),
+    (21311, 21, 15.0),
+    (45101, 1, 0.4),
+    (45104, 1, 0.5),
+    (45106, 1, 0.5),
+    (45107, 1, 0.5),
+    (45111, 1, 0.6),
+    (45116, 1, 1.5),
+    (45117, 1, 0.6),
+    (45117, 21, 60.0),
+    (45120, 1, 0.5),
+    (45121, 1, 1.2),
+    (45125, 1, 1.0),
     (45127, 1, 1.2),
+    (45135, 1, 0.5),
+    (45203, 1, 1.2),
+    (45206, 1, 1.2),
     (45208, 21, 25.0),
+    (45210, 1, 1.3),
+    (45211, 1, 1.3),
+    (45217, 1, 1.3),
+    (45221, 1, 1.4),
+    (45222, 1, 1.3),
     (45223, 21, 30.0),
+    (45227, 1, 1.4),
     (45228, 21, 15.0),
+    (45315, 1, 0.4),
+    (45404, 1, 0.9),
+    (45416, 1, 1.1),
+    (45418, 1, 1.2),
+    (45419, 1, 1.0),
+    (45426, 1, 0.6),
+    (45428, 1, 1.2),
+    (45505, 1, 1.7),
+    (45516, 1, 2.0),
+    (45517, 1, 1.8),
+    (45518, 1, 1.7),
+    (45519, 1, 1.8),
+    (47016, 1, 2.7),
+    (48203, 21, 300.0),
+    (48208, 1, 0.35),
+    (48208, 2, 0.05),
     (48209, 1, 1.2),
     (48211, 1, 0.6),
     (48212, 1, 0.6),
     (48213, 1, 0.6),
     (48214, 1, 0.5),
     (48258, 1, 0.9),
+    (48259, 1, 0.439),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,11 +108,35 @@ struct StateApply {
     chance: (f32, f32),
 }
 
+/// Types d'animation (db_skillstage, `stage_type_id`) qui jouent les impacts de cette nature
+/// (§3.4). Sans fiche, le client n'envoie pas la compétence : elle est refusée.
+fn stage_plays(kind: SpellKind, stage: u16) -> bool {
+    match kind {
+        SpellKind::Physical | SpellKind::Magical => matches!(stage, 101 | 111 | 122 | 201 | 401 | 404 | 411 | 501 | 502),
+        SpellKind::Curse | SpellKind::Bless => matches!(stage, 401 | 501),
+        SpellKind::Heal => stage == 401,
+        SpellKind::Summon | SpellKind::Unsummon => true,
+    }
+}
+
+/// Zone autour de la cible principale [D pour le centre].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Area {
+    /// Unités du monde.
+    pub radius: f32,
+    pub max_targets: u8,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct SpellDef {
+    stage: u16,
     state: Option<StateApply>,
     kind: SpellKind,
-    vars: [f32; 6],
+    area: Option<Area>,
+    /// Coups : (base, par niveau).
+    hits: (f32, f32),
+    self_only: bool,
+    vars: [f32; 20],
     mp: (i32, i32),
     /// Secondes : (base, par niveau).
     cast: (f32, f32),
@@ -100,10 +164,30 @@ pub struct SpellQuote {
     pub flat: f64,
     /// Part des PV max (soin).
     pub hp_ratio: f64,
+    /// État posé en plus de l'effet (ou seul : 301).
     pub state: Option<StateQuote>,
+    pub area: Option<Area>,
+    /// Coups portés à chaque cible.
+    pub hits: u8,
+    /// Sans cible à choisir : le lanceur.
+    pub self_only: bool,
+    /// Type d'animation du client, qui commande la forme de FIRE.
+    pub stage: u16,
 }
 
 impl SpellQuote {
+    /// (target_count, fire_count) de FIRE pour `targets` cibles (§3.4). Ces champs commandent le
+    /// nombre d'impacts joués ; `target_count` ne doit jamais dépasser le nombre d'impacts, ni
+    /// être nul avec des impacts (types 121–123 : boucle sans fin du client).
+    pub fn fire_counts(&self, targets: usize) -> (u8, u8) {
+        let impacts = (targets * usize::from(self.hits)).min(255) as u8;
+        match self.stage {
+            201 | 401 | 501 | 502 => (impacts, 1),
+            404 => (impacts, impacts),
+            _ => (targets.min(255) as u8, 1),
+        }
+    }
+
     /// Valeur affichée par l'info-bulle, arrondie comme elle (`int`).
     pub fn nominal(&self, power: i32, target_max_hp: i32) -> i32 {
         let v = f64::from(power) * self.ratio + self.flat + f64::from(target_max_hp) * self.hp_ratio;
@@ -126,12 +210,12 @@ const MUST_BE_ZERO: &[&str] = &[
     "cost_item_count", "need_state_id", "need_havoc", "is_toggle", "is_corpse", "skill_enchant_link_id",
 ];
 
-/// 301 : état de `state_id`, dont tous les effets doivent être connus ; les états
-/// supplémentaires (v1..v5) ne sont pas pris en charge.
+/// État de `state_id`, dont tous les effets doivent être connus et de même nature (bonus ou
+/// malus) que la compétence.
 fn state_of(r: Row<'_>, states: &StateBook) -> Option<(SpellKind, StateApply)> {
     let state = states.get(u32::try_from(r.int("state_id")).ok()?)?;
     let harmful = r.int("is_harmful") == 1;
-    if state.harmful != harmful || (1..=5).any(|n| r.float(&format!("var{n}")) != 0.0) {
+    if state.harmful != harmful {
         return None;
     }
     let apply = StateApply {
@@ -143,41 +227,83 @@ fn state_of(r: Row<'_>, states: &StateBook) -> Option<(SpellKind, StateApply)> {
     (apply.chance.0 > 0.0).then_some((if harmful { SpellKind::Curse } else { SpellKind::Bless }, apply))
 }
 
-fn definition(r: Row<'_>, states: &StateBook) -> Option<SpellDef> {
+/// Forme d'une famille : (nature, zone, coups). `flag` (v6 ou v11) non nul : règle inconnue,
+/// refusée ; `max` est le nombre de cibles (999 = sans limite) [D, par analogie avec le texte
+/// du type 111].
+fn shape(effect: i32, v: &[f32; 20]) -> Option<(SpellKind, Option<Area>, (f32, f32))> {
+    let var = |n: usize| v[n - 1];
+    let area = |radius: f32, flag: f32, max: f32| {
+        let ok = flag == 0.0 && (1.0..=50.0).contains(&radius) && max.fract() == 0.0 && (1.0..=999.0).contains(&max);
+        ok.then(|| Area { radius: radius * RANGE_UNIT, max_targets: max.min(50.0) as u8 })
+    };
+    let one = (1.0, 0.0);
+    Some(match effect {
+        30001 => (SpellKind::Physical, None, one),
+        30009 | 30016 => (SpellKind::Physical, None, (var(5), var(6))),
+        30011 => (SpellKind::Physical, Some(area(var(5), var(6), var(7))?), one),
+        30012 => (SpellKind::Physical, Some(area(var(5), var(6), var(7))?), (var(8), var(9))),
+        231 => (SpellKind::Magical, None, one),
+        232 if (10..=12).all(|n| var(n) == 0.0) => (SpellKind::Magical, None, (var(7), var(8))),
+        261 if (7..=9).all(|n| var(n) == 0.0) => (SpellKind::Magical, Some(area(var(10), var(11), var(12))?), one),
+        263 => (SpellKind::Magical, Some(area(var(10), var(11), var(12))?), (var(7), var(8))),
+        501 => (SpellKind::Heal, None, one),
+        _ => return None,
+    })
+}
+
+fn definition(r: Row<'_>, states: &StateBook, stages: &HashMap<u32, u16>) -> Option<SpellDef> {
     let id = u32::try_from(r.id()).ok()?;
     // `is_passive` et `is_physical_act` sont inversés dans le schéma : 1 = active, 1 = magique.
     if r.int("is_valid") != 1 || r.int("is_passive") != 1 {
         return None;
     }
+    let vars: [f32; 20] = std::array::from_fn(|i| r.float(&format!("var{}", i + 1)));
     let mut state = None;
+    let (mut area, mut hits) = (None, (1.0, 0.0));
     let kind = match (id, r.int("effect_type")) {
-        (_, 301) => {
+        // Les états supplémentaires (v1..v5) ne sont pas pris en charge.
+        (_, 301) if vars[..5].iter().all(|v| *v == 0.0) => {
             let (kind, apply) = state_of(r, states)?;
             state = Some(apply);
             kind
         }
         (SUMMON, 601) => SpellKind::Summon,
         (UNSUMMON, 602) => SpellKind::Unsummon,
-        (_, 30001) => SpellKind::Physical,
-        (_, 231) => SpellKind::Magical,
-        (_, 501) => SpellKind::Heal,
-        _ => return None,
+        (_, effect) => {
+            let kind;
+            (kind, area, hits) = shape(effect, &vars)?;
+            if r.int("state_id") != 0 {
+                state = Some(state_of(r, states)?.1);
+            }
+            kind
+        }
     };
+    let stage = *stages.get(&id)?;
+    if !stage_plays(kind, stage) {
+        return None;
+    }
+    let mut self_only = false;
     if !matches!(kind, SpellKind::Summon | SpellKind::Unsummon) {
-        let harmful = i32::from(!matches!(kind, SpellKind::Heal | SpellKind::Bless));
+        let harmful = !matches!(kind, SpellKind::Heal | SpellKind::Bless);
+        // Sans cible à choisir (§5.3) : la demande vise le lanceur.
+        self_only = !harmful && r.int("is_need_target") == 0;
         let supported = MUST_BE_ZERO.iter().all(|c| r.float(c) == 0.0 && r.int(c) == 0)
-            && (state.is_some() || r.int("state_id") == 0)
-            && r.int("target") == 1
-            && r.int("is_need_target") == 1
-            && r.int("is_harmful") == harmful;
+            && (r.int("target") == 1 || (area.is_some() && r.int("target") == 2))
+            && (self_only || r.int("is_need_target") == 1)
+            && r.int("is_harmful") == i32::from(harmful)
+            && (area.is_none() || (r.int("uf_self") == 0 && r.int("tf_monster") == 1));
         if !supported {
             return None;
         }
     }
     let mut def = SpellDef {
+        stage,
         state,
         kind,
-        vars: std::array::from_fn(|i| r.float(&format!("var{}", i + 1))),
+        area,
+        hits,
+        self_only,
+        vars,
         mp: (r.int("cost_mp"), r.int("cost_mp_per_skl")),
         cast: (r.float("delay_cast"), r.float("delay_cast_per_skl")),
         cooldown: (r.float("delay_cooltime"), r.float("delay_cooltime_per_skl")),
@@ -201,7 +327,10 @@ pub struct SpellBook {
 impl SpellBook {
     pub fn open(dbc_dir: &Path, states: &StateBook) -> Result<Self, StoreError> {
         let table = NamedDbc::open(dbc_dir, "skill")?;
-        Ok(Self { spells: table.rows().filter_map(|r| Some((u32::try_from(r.id()).ok()?, definition(r, states)?))).collect() })
+        let stages = NamedDbc::open(dbc_dir, "skillstage")?;
+        let stages: HashMap<u32, u16> =
+            stages.rows().filter_map(|r| Some((u32::try_from(r.id()).ok()?, u16::try_from(r.int("stage_type_id")).ok()?))).collect();
+        Ok(Self { spells: table.rows().filter_map(|r| Some((u32::try_from(r.id()).ok()?, definition(r, states, &stages)?))).collect() })
     }
 
     pub fn len(&self) -> usize {
@@ -219,6 +348,8 @@ impl SpellBook {
         }
         let l = f64::from(level);
         let v = d.vars.map(f64::from);
+        let hits = (d.hits.0 + d.hits.1 * f32::from(level) + 1e-4).trunc();
+        let hits = (1.0..=20.0).contains(&hits).then_some(hits as u8)?;
         let (ratio, flat, hp_ratio) = match d.kind {
             SpellKind::Physical => (v[0] + l * v[1], v[2] + l * v[3], 0.0),
             SpellKind::Magical => (v[0] + l * v[1], v[3] + l * v[4], 0.0),
@@ -249,6 +380,10 @@ impl SpellBook {
             flat,
             hp_ratio,
             state,
+            area: d.area,
+            hits,
+            self_only: d.self_only,
+            stage: d.stage,
         })
     }
 }
@@ -281,11 +416,27 @@ mod tests {
         let q = book.quote(3202, 1).unwrap();
         assert_eq!((q.kind, q.cast), (SpellKind::Heal, 250));
         assert_eq!(q.nominal(100, 1000), 243);
-        // 45127 : surchargée par l'exécutable. 45116 et 2501 : refusées.
+        // 2032 Triple Assaut : 2,9 + 0,1·L coups ; 2043 : coups et étourdissement.
+        assert_eq!(book.quote(2032, 1).map(|q| q.hits), Some(3));
+        assert_eq!(book.quote(2043, 1).map(|q| (q.hits, q.state.map(|s| s.id))), Some((3, Some(6006))));
+        // 2063 : zone de 5 × 12, 10 cibles. 2053 (v6 = 1) et 3025 (v11 = 1) : règle inconnue.
+        assert_eq!(book.quote(2063, 1).and_then(|q| q.area), Some(Area { radius: 60.0, max_targets: 10 }));
+        assert!(book.quote(2053, 1).is_none() && book.quote(3025, 1).is_none());
+        // 3201 : sans cible à choisir, sur soi.
+        assert!(book.quote(3201, 1).unwrap().self_only);
+        // Forme de FIRE : coups d'arme (122) par vagues de cibles, sorts (401) un acte par impact.
+        let q = book.quote(2032, 1).unwrap();
+        assert_eq!((q.stage, q.fire_counts(1)), (122, (1, 1)));
+        assert_eq!((q.hits, SpellQuote { stage: 401, ..q }.fire_counts(4), SpellQuote { stage: 404, ..q }.fire_counts(2)), (3, (12, 1), (6, 6)));
+        assert_eq!(SpellQuote { stage: 501, ..q }.fire_counts(100), (255, 1));
+        // 45127 et 45116 (zone) : v1 surchargé par l'exécutable. 2501 : refusée.
+        if let (Some(a), Some(b)) = (book.quote(45116, 1), book.quote(45116, 2)) {
+            assert!((2.0 * a.ratio - b.ratio - 1.5).abs() < 1e-3 && a.area.is_some());
+        }
         if let (Some(a), Some(b)) = (book.quote(45127, 1), book.quote(45127, 2)) {
             assert!((2.0 * a.ratio - b.ratio - 1.2).abs() < 1e-3, "v1 surchargé");
         }
-        assert!(book.quote(45116, 1).is_none() && book.quote(2501, 1).is_none());
+        assert!(book.quote(2501, 1).is_none());
         // Invocation : 8,8 s − 0,8 s par niveau ; 60 + 20 PM par niveau.
         let q = book.quote(SUMMON, 1).unwrap();
         assert_eq!((q.kind, q.cast, q.mp, q.cooldown), (SpellKind::Summon, 800, 80, 1000));

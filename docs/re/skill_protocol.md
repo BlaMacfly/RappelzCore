@@ -177,6 +177,48 @@ Type 2 réussi : la cible en vie est déplacée à (x, y) à la vitesse donnée 
   Un HPMP n'est requis pour aucun impact 0–23, 40–42 ; il reste utile pour max_hp / max_mp, SP et resynchronisation.
 - Regen : HPMP avec `display` (+0x23) ≠ 0 affiche un nombre ; TS_SC_REGEN_HPMP (516) met à jour sans nombre.
 
+### 3.4 Impacts réellement joués : multiple, target_count, fire_count (2026-11-24) [O sauf mention]
+
+Les dégâts sont joués par des **actes** (SFireActMng, FUN_00690f30, `ev_3057c40b8c0eb42b0c0460e287a3b4d5aa4f80e6acc717e640bd26bcf2fcfc6a`)
+ou, pour la mêlée, par l'action du lanceur. Tout dépend de `stage_type_id` (db_skillstage, stage+0x14), **pas** de l'effect_type.
+Nombre d'actes N, `ti` = target_count, n = nombre d'impacts :
+
+| Condition | N |
+|---|---|
+| `multiple` ≠ 0, ou type 201, 212, 251, 401, 601, 604 | ti |
+| 501, 502 | n |
+| 504 | 1 si n > 0 |
+| autre type à acte | 0 si ti = 0, sinon **fire_count** (intervalle 10 si > 1) |
+
+Fabrique FUN_0068fcf0, table statique 0xe91820 indexée par type − 101. Relus séparément : FUN_00696620
+(`ev_90f12eda74061e0fb18739cb8b5278b922e08c0387f1e309320f7e37fab1cf2a`), FUN_00695440 (401,
+`ev_206fad0467bd9d9e569611cf5ea2d29ab00d836b9fe47119b065bde8b3978b05`), FUN_00694e20 (301,
+`ev_5a3712e6fc219e5d40b4d163fb97ea87d15aebbe2fd4731ecfa9fdb18751ee52`), FUN_00986390 (122,
+`ev_3bed5a8479e73816fa77529c89f4791bcad882837d9bde6f9c09f08df88f421b`), entrée 411 de la table. Le reste du tableau vient d'un
+sous-agent, non relu.
+
+| Type (lignes) | Impacts joués |
+|---|---|
+| 401 (710) | ti > 1 : acte i → impact i (types 0, 1, 2, 10, 23 seulement) ; ti = 1 : liste entière, mais un seul dégât (le dernier), tous les RESULT et soins |
+| 201 (32), 212 (9), 404 (10, N = fire_count) | acte i → impact i |
+| 501 (84), 502 (15) | acte i → impact i |
+| 411 (82) | chaque acte joue toute la liste, chaque impact sur sa cible : fire_count = 1 |
+| 301 (105) | impact 0 seulement, et jamais un soin (20) : FUN_00696620 ne le construit pas |
+| 101 (145) | `stage_data_01` = 0 : toute la liste au premier coup ; sinon un impact par coup |
+| 111 (5) | un impact par coup |
+| 121, 122, 123 (93) | chaque coup joue ti impacts **consécutifs** : ordre coup par coup (c1..cm, c1..cm…) |
+| 601, 604 (49) | acte i → impact i ; 604 ne met rien en file PV |
+| 0, 602, 901, 902, 1001 | aucun acte |
+
+- **Aucune fiche db_skillstage : le client n'envoie pas la compétence** (§2.1). 281 des 539 compétences de type 301 sont dans ce cas
+  (compétences de monstres et de créatures).
+- Acte dont la cible est inconnue : terminé sans impact. Mêlée : `target` connu exigé. `range` n'est lu que par 503.
+- **ti > n** sur 401, 404, 212 : lecture hors du vecteur. **ti = 0 avec n > 0 sur 121–123** : boucle sans fin dans le destructeur de
+  l'action (gel du client [D]). Ne jamais envoyer ni l'un ni l'autre.
+- Aucun regroupement par cible : un nombre par impact joué, sur la cible de l'impact. Au **premier** impact joué, le client applique
+  toute la file PV du lanceur ; pour chaque cible, le **dernier** impact mis en file porte la valeur finale.
+- Aucun impact joué (301 + soin, ti = 0…) : la file reste en attente jusqu'à un 509 ou un CASTING du lanceur.
+
 ## 4. États
 
 ### 4.1 TS_SC_STATE (505) — 31 octets [O]
@@ -516,7 +558,8 @@ règle de `state_level_*` (§7).
 - Aucune formule de dégâts **finale** (défense, résistance, précision, critique, niveau) n'existe côté client ; les 612 compétences de
   type 301 et les types sans formule restent à définir serveur.
 - `casting_type`, `casting_level`, `toggle_group`, `percentage`, `hate_mod`, uf_* (hors uf_enemy), sens de `target` pour le choix des
-  cibles : non établis. Sens exact de multiple / fire_count : copiés, usage graphique non suivi.
+  cibles : non établis. multiple / target_count / fire_count : voir §3.4 ; nombre de coups par animation (101 à `stage_data_01` ≠ 0,
+  111, 121–123) : dans les fichiers d'animation, non lus.
 - Champs +0x11 de REBIRTH, +0x29 de KNOCK_BACK, +0x20 / +0xd des chaînes, octets de 404 et entrées de 451 : [D] ou [?].
 - Expiration locale d'un CASTING sans suite : aucune trouvée, absence non prouvée.
 - TS_SC_RESULT(400) : message éventuel dans une fenêtre non examinée.
@@ -582,7 +625,7 @@ n'accepte que 0).
 
 | Élément | Choix |
 |---|---|
-| Périmètre | effet 301 à cible unique : **180 malus** (monstres seulement) et **6 bonus** (joueurs seulement), soit 234 compétences prises en charge avec le §14. Écartés : zones (302…), bascules, auras, compétences liées, 301 dont v1..v5 ne sont pas nuls |
+| Périmètre | effet 301 à cible unique : **180 malus** (monstres seulement) et **6 bonus** (joueurs seulement), soit 234 compétences prises en charge avec le §14 ; **rectifié au §16** : 152 de ces malus n'ont pas de fiche d'animation et ne peuvent pas être lancés depuis le client d'origine. Écartés : zones (302…), bascules, auras, compétences liées, 301 dont v1..v5 ne sont pas nuls |
 | États retenus | 609, seulement si **tous** leurs effets sont établis : types −1, 0, 1 (valeur) et 2 (pourcentage), banque A limitée à attaque, attaque magique, défense, défense magique, vitesses d'attaque et de déplacement (bits 7, 8, 9, 10, 11, 13) ; bases 0, 1, 3 (dégâts), 11, 12 (soins). Écartés : banque B, PV/PM max (bits 21, 22), sommeil (6005), invisibilité (6016)… |
 | Colonnes | `add_damage_base` et `add_damage_per_skl` sont **entières**, `amplify_*` et `value_*` décimales |
 | Niveau, durée, chance | §8.4 ; échec : RESULT avec succès 0, sans 505, le monstre est provoqué quand même **[D]** |
@@ -600,3 +643,34 @@ soins de 31 toutes les 3 s ; 9656 sur un monstre refusée. Tests unitaires : éc
 défense réduite, tics, mort par tic, plafond de soin, vitesse d'attaque, expiration, exclusion, départ.
 **Non vérifié : client graphique d'origine** ; effet de la défense réduite et du ralentissement en jeu réel (tests
 unitaires pour la défense ; le ralentissement n'est pas testé au-delà de sa pose).
+
+## 16. Implémentation RappelzCore (2026-11-24) — zones, coups multiples, contrôles
+
+### Rectifications des lots précédents
+
+| Publié | Constat |
+|---|---|
+| 13023 (Enracinement) et 13003 traités comme simples dégâts périodiques | leur texte dit qu'ils **emprisonnent** la cible : ils l'immobilisent désormais. Règle ajoutée : un malus dont `state_time_type` porte le bit 8 est refusé s'il n'est pas dans la liste des contrôles établis (les 15 malus de compétence qui portent ce bit sont tous des contrôles **[D]**) |
+| « 234 compétences » | 152 malus (et quelques dégâts et soins) sans fiche db_skillstage : jamais envoyés par le client. Ils sont maintenant refusés |
+| FIRE toujours 1 cible, 1 coup | suffisant pour un seul impact ; la forme suit désormais le type d'animation (§3.4) |
+
+### Choix
+
+| Élément | Choix |
+|---|---|
+| Périmètre | **253** compétences lançables au niveau 1 : dégâts à cible unique 30001, 231 ; coups multiples 30009, 30016, 232 ; zones 30011, 261 ; zones à coups multiples 30012, 263 ; soins 501 ; états 301 ; avec ou sans état posé ; 4001, 4002. Types d'animation admis : dégâts 101, 111, 122, 201, 401, 404, 411, 501, 502 ; états 401, 501 ; soins 401 |
+| Zone | centre = cible principale **[D]** ; rayon × 12 (même unité que `cast_range`) **[D]** ; monstres vivants et visibles du lanceur, la cible principale puis les plus proches |
+| Nombre de cibles | v7 (300xx) ou v12 (26x) : maximum, 999 = sans limite **[D]**, par analogie avec le texte du type 111 ; plafonné à 50. Valeur 0, ou v6 / v11 ≠ 0 : règle inconnue, **refusé** (ex. 2053, 3025) |
+| Coups multiples | tous appliqués au tir, chacun avec son jet de défense ; l'intervalle (v7, v9 ou v10 [D]) est ignoré |
+| FIRE | impacts par vagues (premier coup sur chaque cible, puis deuxième…) ; compteurs selon §3.4, toujours ≥ 1 et ≤ nombre d'impacts |
+| Dégâts + état | un jet par cible survivante après les dégâts **[D]** ; 505 après FIRE, sans impact RESULT |
+| Contrôles | 6005 sommeil (ni mouvement ni action, tombe au premier dégât), 6006 étourdissement, 6007 / 13003 / 13023 immobilisation ; d'après les textes. Refusés : 6008, 6009, 6012, 6014, 6019, 13601… |
+| Arrêt sur place | TS_SC_MOVE vers la position courante **[D]**. Le client ne bloque que le déplacement au clavier du joueur local pour ces états (FUN_00a53730, sous-agent) : tout le reste est au serveur |
+| Sur soi | `is_need_target` = 0 et `target` = 1 : la demande doit viser le lanceur |
+| Surcharges (§7.1) | étendues aux nouvelles familles, 3151 et 48203 compris |
+
+Validation (MariaDB de test isolée, trois monstres, `rz-bot --cast`) : 2032 → trois impacts sur une cible (538 → 418 → 305 → 175) ;
+2063 → trois cibles, dont une tuée, état 12063 sur les deux survivantes puis retrait ; 9508 → trois cibles ; 3024 et 2013 →
+étourdissement, aucune attaque du monstre avant le retrait ; 3023 → tics et immobilisation ; 3201 → soin sur soi. Tests unitaires :
+zone, limite, monstre mort ou hors zone, PV décroissants, arrêt sur place, reprise, réveil, refus d'une autre cible, compteurs de FIRE.
+**Non vérifié : client graphique d'origine** ; rayon et centre de zone, arrêt visible d'un monstre, zones à coups multiples en réel.

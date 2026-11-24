@@ -9,7 +9,7 @@ use rz_proto::msg::Message;
 use rz_proto::msg_game as game;
 use rz_proto::RawPacket;
 use rz_rappelz::spells::StateQuote;
-use rz_rappelz::states::{Mods, Pulse, Stat, StateDef};
+use rz_rappelz::states::{Control, Mods, Pulse, Stat, StateDef};
 
 use crate::gameplay::magic_for;
 use crate::world::World;
@@ -69,6 +69,35 @@ impl World {
         self.mods(bearer).apply(stat, base)
     }
 
+    /// Contrôles cumulés du porteur.
+    pub(crate) fn control(&self, bearer: u32) -> Control {
+        let mut c = Control::default();
+        for s in self.states.bearers.get(&bearer).into_iter().flatten() {
+            c.no_move |= s.def.control.no_move;
+            c.no_action |= s.def.control.no_action;
+        }
+        c
+    }
+
+    /// Dégâts reçus : le sommeil tombe.
+    pub(crate) fn wake(&mut self, bearer: u32) {
+        self.remove_states(bearer, |s| s.def.control.wakes);
+    }
+
+    /// Arrête sur place un monstre immobilisé ; le client reçoit sa position comme destination [D].
+    fn halt(&mut self, bearer: u32) {
+        let now = self.now();
+        let Some(m) = self.monsters.get_mut(&bearer) else { return };
+        if m.motion.remaining_points(now).is_empty() {
+            return;
+        }
+        let speed = m.motion.speed.clamp(1.0, 255.0) as u8;
+        m.motion.settle(now);
+        let (x, y) = m.motion.position(now);
+        let packet = rz_proto::msg::ScMove { start_time: now, handle: bearer, tlayer: 0, speed, points: vec![rz_proto::msg::MovePoint { x, y }] };
+        self.broadcast_around(bearer, &packet.to_packet(), false);
+    }
+
     /// Attaque (physique ou magique) effective d'un joueur.
     pub(crate) fn power_of(&self, player: u32, magical: bool) -> i32 {
         let Some(p) = self.players.get(&player) else { return 0 };
@@ -125,8 +154,12 @@ impl World {
             def,
         };
         let packet = state.packet(bearer, state.level);
+        let stops = state.def.control.no_move;
         self.states.bearers.entry(bearer).or_default().push(state);
         self.broadcast_around(bearer, &packet, true);
+        if stops {
+            self.halt(bearer);
+        }
         self.refresh_bearer(bearer);
         true
     }
@@ -219,6 +252,9 @@ impl World {
         let dead = kind == game::state_damage::DAMAGE && result == 0;
         let packet = game::ScStateDamage { caster, target: bearer, state_code: code, state_level: level, kind, value, result, last: last || dead, total };
         self.broadcast_around(bearer, &packet.to_packet(), true);
+        if kind == game::state_damage::DAMAGE && value > 0 {
+            self.wake(bearer);
+        }
         if dead {
             let now = self.now();
             self.kill_monster(bearer, caster, now);

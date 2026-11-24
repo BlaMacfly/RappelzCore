@@ -2,8 +2,9 @@
 //! docs/re/skill_protocol.md §4.6 et §8.5).
 //!
 //! Seuls les états dont **tous** les effets sont établis et calculés par le serveur sont
-//! retenus : modificateurs de statistiques (types 1 et 2, banque A) et dégâts ou soins
-//! périodiques (bases 1, 3, 11, 12). Un état partiellement compris est refusé.
+//! retenus : modificateurs de statistiques (types 1 et 2, banque A), dégâts ou soins
+//! périodiques (bases 1, 3, 11, 12) et contrôles décrits par leur texte ([`Control`]). Un état
+//! partiellement compris est refusé.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -84,10 +85,37 @@ impl Periodic {
     }
 }
 
+/// Contrôle de la cible, d'après le texte du client (aucun champ de calcul).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Control {
+    pub no_move: bool,
+    pub no_action: bool,
+    /// Tombe dès que le porteur subit des dégâts.
+    pub wakes: bool,
+}
+
+/// Tous les malus de compétence dont `state_time_type` porte ce bit contrôlent leur cible [D] :
+/// un tel état absent de [`control_of`] est refusé.
+const TIME_TYPE_CONTROL: i32 = 8;
+
+fn control_of(id: u32) -> Option<Control> {
+    let c = |no_move, no_action, wakes| Some(Control { no_move, no_action, wakes });
+    match id {
+        // Endormissement : « inapte à toute action », se réveille sur dégâts.
+        6005 => c(true, true, true),
+        // Étourdissement : « inapte à toute action ».
+        6006 => c(true, true, false),
+        // Immobilisation ; Prison de Givre et Enracinement (dégâts périodiques en plus).
+        6007 | 13003 | 13023 => c(true, false, false),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct StateDef {
     pub id: u32,
     pub harmful: bool,
+    pub control: Control,
     pub periodic: Option<Periodic>,
     /// (masque de bits, base, par niveau, pourcentage).
     changes: Vec<(u32, f64, f64, bool)>,
@@ -144,6 +172,11 @@ fn definition(r: Row<'_>) -> Option<StateDef> {
             })
         }
     };
+    let control = match r.int("state_time_type") & TIME_TYPE_CONTROL {
+        0 => Control::default(),
+        _ if !harmful => Control::default(),
+        _ => control_of(id)?,
+    };
     let mut changes = Vec::new();
     match r.int("effect_type") {
         -1 | 0 => {}
@@ -167,11 +200,11 @@ fn definition(r: Row<'_>) -> Option<StateDef> {
         }
         _ => return None,
     }
-    if periodic.is_none() && changes.is_empty() {
+    if periodic.is_none() && changes.is_empty() && control == Control::default() {
         return None;
     }
     let exclusive = ["duplicate_group_1", "duplicate_group_2", "duplicate_group_3"].map(|c| r.int(c));
-    Some(StateDef { id, harmful, periodic, changes, exclusive })
+    Some(StateDef { id, harmful, control, periodic, changes, exclusive })
 }
 
 #[derive(Clone, Debug, Default)]
@@ -206,6 +239,7 @@ impl StateDef {
         Self {
             id,
             harmful,
+            control: Control::default(),
             periodic: periodic.map(|(pulse, interval, add)| Periodic { pulse, interval, amplify: (0.0, 0.0), add: (add, 0.0) }),
             changes: change.map(|(s, v)| (bit(s), v, 0.0, true)).into_iter().collect(),
             exclusive: [0; 3],
@@ -246,7 +280,11 @@ mod tests {
         // 13222 Eau Régénératrice : soin toutes les 3 s.
         let p = book.get(13222).unwrap().periodic.unwrap();
         assert_eq!((p.pulse, p.interval, p.amount(28, 100)), (Pulse::HealHp, 300, 34));
-        // États refusés : sommeil (aucun effet chiffré établi), banque B.
-        assert!(book.get(6005).is_none());
+        assert!(book.get(13023).unwrap().control.no_move, "Enracinement immobilise aussi");
+        // Contrôles : étourdissement et sommeil ; refusés : peur (6008), gel (6009), cauchemar.
+        let c = book.get(6006).unwrap().control;
+        assert_eq!((c.no_move, c.no_action, c.wakes), (true, true, false));
+        assert!(book.get(6005).unwrap().control.wakes);
+        assert!([6008, 6009, 6012, 6014, 6019, 13601].iter().all(|id| book.get(*id).is_none()));
     }
 }
