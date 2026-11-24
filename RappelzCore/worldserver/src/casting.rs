@@ -196,6 +196,8 @@ impl World {
         }
     }
     pub(crate) fn cancel_restoration(&mut self, handle: u32) {
+        // Mêmes causes d'annulation (mouvement, téléportation, départ…) pour les autres compétences.
+        self.cancel_spell(handle);
         let Some(c) = self.casts.remove(&handle) else {
             return;
         };

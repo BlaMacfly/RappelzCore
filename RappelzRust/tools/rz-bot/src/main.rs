@@ -54,6 +54,15 @@ struct Cli {
     /// Propose un échange au joueur nommé (premier objet du sac + 50 rupees), jusqu'à la validation.
     #[arg(long)]
     trade_with: Option<String>,
+    /// Lance cette compétence (niveau 1) sur le premier monstre visible, jusqu'à sa mort.
+    #[arg(long)]
+    cast: Option<u16>,
+    /// Avec --summon ou --cast : bouge pendant l'incantation (elle doit être annulée).
+    #[arg(long)]
+    interrupt: bool,
+    /// Coupe brutalement la connexion juste après avoir validé l'échange (test de robustesse).
+    #[arg(long)]
+    vanish: bool,
     /// Accepte la première demande d'échange reçue et valide.
     #[arg(long)]
     trade_accept: bool,
@@ -221,19 +230,12 @@ async fn main() -> Result<()> {
         lr.y,
         lr.race
     );
-    let target = MovePoint {
-        x: lr.x + 40.0,
-        y: lr.y + 30.0,
-    };
-    w.send(&msg::CsMoveRequest {
-        handle: lr.handle,
-        x: lr.x,
-        y: lr.y,
-        cur_time: 0,
-        speed_sync: false,
-        points: vec![target],
-    })
-    .await?;
+    // Une incantation exige d'être immobile.
+    if cli.cast.is_none() && !cli.summon {
+        let target = MovePoint { x: lr.x + 40.0, y: lr.y + 30.0 };
+        let points = vec![target];
+        w.send(&msg::CsMoveRequest { handle: lr.handle, x: lr.x, y: lr.y, cur_time: 0, speed_sync: false, points }).await?;
+    }
     for c in &cli.cmds {
         w.send(&msg::CsChatRequest {
             target: String::new(),
@@ -267,6 +269,7 @@ async fn main() -> Result<()> {
     let mut nearest_npc: Option<(u32, f32)> = None;
     // Avec --quest : PNJ à portée encore à essayer.
     let mut npc_queue: std::collections::VecDeque<u32> = Default::default();
+    let mut cast_target = None::<u32>;
     // Invocations : handle de créature → handle de carte.
     let mut card_of = std::collections::HashMap::<u32, u32>::new();
     let skill = |skill_id: u16, caster: u32, target: u32| game::CsSkill { skill_id, caster, target, x: 0.0, y: 0.0, z: 0.0, layer: 0, skill_level: 1 };
@@ -316,8 +319,12 @@ async fn main() -> Result<()> {
                 (e.handle, e.kind)
             } {
                 (_, EnterKind::Npc { .. }) => npcs += 1,
-                (_, EnterKind::Monster { monster_id, .. }) => {
-                    tracing::info!("[monde] monstre visible (id brut {monster_id})")
+                (h, EnterKind::Monster { monster_id, creature, .. }) => {
+                    tracing::info!("[monde] monstre visible (id brut {monster_id}, {} PV)", creature.hp);
+                    if let (Some(id), None) = (cli.cast, cast_target) {
+                        cast_target = Some(h);
+                        w.send(&skill(id, lr.handle, h)).await?;
+                    }
                 }
                 (enter_handle, EnterKind::Player(pl)) => {
                     if !requested && cli.trade_with.as_deref() == Some(pl.name.as_str()) {
@@ -355,6 +362,28 @@ async fn main() -> Result<()> {
             gid::TS_SC_REMOVE_SUMMON_INFO => tracing::info!("[invocation] fiche retirée : carte {}", game::Handle::<{ gid::TS_SC_REMOVE_SUMMON_INFO }>::from_packet(&p)?.0),
             gid::TS_EQUIP_SUMMON => tracing::info!("[invocation] formation {:?}", game::EquipSummon::from_packet(&p)?.cards),
             gid::TS_SC_UNSUMMON => tracing::info!("[invocation] renvoi de {}", game::Handle::<{ gid::TS_SC_UNSUMMON }>::from_packet(&p)?.0),
+            gid::TS_SC_SKILL => {
+                let s = game::ScSkill::from_packet(&p)?;
+                let phase = ["FIRE", "CASTING", "UPDATE", "CANCEL", "REGION_FIRE", "COMPLETE"].get(s.skill_type as usize).copied().unwrap_or("?");
+                let int = |o: usize| s.payload.get(o..o + 4).map_or(0, |b| i32::from_le_bytes(b.try_into().unwrap()));
+                // Impact : PV finaux en +5, montant en +9 (soin) ou +0xa (dégâts).
+                let hit = s.payload.get(9).copied();
+                match (phase, hit) {
+                    ("CASTING", _) => tracing::info!("[compétence] {} CASTING {} cs", s.skill_id, int(0)),
+                    ("FIRE", Some(20)) => tracing::info!("[compétence] {} FIRE soin {} (PV {}), PM {}", s.skill_id, int(18), int(14), s.caster_mp),
+                    ("FIRE", Some(_)) => tracing::info!("[compétence] {} FIRE {} dégâts (PV cible {}), PM {}", s.skill_id, int(19), int(14), s.caster_mp),
+                    _ => tracing::info!("[compétence] {} {phase}, PM {}", s.skill_id, s.caster_mp),
+                }
+                if cli.interrupt && phase == "CASTING" {
+                    w.send(&msg::CsMoveRequest { handle: lr.handle, x: lr.x, y: lr.y, cur_time: 0, speed_sync: false, points: vec![MovePoint { x: lr.x + 5.0, y: lr.y }] }).await?;
+                }
+                if let (Some(id), Some(target)) = (cli.cast, cast_target) {
+                    if phase == "FIRE" && int(14) > 0 {
+                        tokio::time::sleep(Duration::from_millis(1100)).await;
+                        w.send(&skill(id, lr.handle, target)).await?;
+                    }
+                }
+            }
             gid::TS_SC_TAKE_ITEM_RESULT => {
                 let r = game::ScTakeItemResult::from_packet(&p)?;
                 tracing::info!("[sol] ramassage : objet {} par {}", r.0, r.1);
@@ -404,6 +433,10 @@ async fn main() -> Result<()> {
                         if confirmed.len() == 2 && !processed {
                             processed = true;
                             w.send(&game::Trade { handle: trade_partner.unwrap_or(0), mode: tm::PROCESS, ..Default::default() }).await?;
+                            if cli.vanish {
+                                tracing::info!("[échange] connexion coupée après validation");
+                                std::process::exit(0);
+                            }
                         }
                     }
                     tm::PROCESS => tracing::info!("[échange] terminé"),

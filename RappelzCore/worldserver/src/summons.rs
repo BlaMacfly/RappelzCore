@@ -3,12 +3,13 @@
 //! 4001 / 4002, la cible étant le handle de la **carte**.
 //!
 //! Socle actuel : fiches (301), formation (303/324), invoquer, renvoyer, suivi du maître,
-//! visibilité. Pas encore : combat, EXP, évolution, monture, équipement, incantation.
+//! visibilité. L'incantation de 4001 / 4002 est dans `spells.rs`. Pas encore : combat, EXP,
+//! évolution, monture, équipement.
 
 use anyhow::Result;
 use rz_database::pets::{self, Pet, NOT_IN_FORMATION};
 use rz_proto::msg::{self, CreatureInfo, EnterKind, Message, MovePoint, ScEnter};
-use rz_proto::msg_game::{self as game, id as gid, summon_skill, FORMATION_SLOTS};
+use rz_proto::msg_game::{self as game, id as gid, FORMATION_SLOTS};
 use rz_proto::RawPacket;
 
 use crate::gameplay::{max_hp_for, max_mp_for, ITEM_HANDLE_BASE};
@@ -27,11 +28,6 @@ const FOLLOW_SNAP: f32 = 300.0;
 
 pub fn summon_handle(card: u32) -> u32 {
     SUMMON_HANDLE_BASE + card
-}
-
-/// Coût en PM : 4001 = 60 + 20/niveau, 4002 = 5 (db_skill, mesuré) [O].
-pub fn mana_cost(skill: u16, level: u8) -> i32 {
-    if skill == summon_skill::SUMMON { 60 + 20 * i32::from(level) } else { 5 }
 }
 
 /// Niveau utilisable par les formules provisoires (u8) de `gameplay`.
@@ -176,9 +172,12 @@ impl Session {
         self.in_game.as_ref()?.pets.iter().find(|p| ITEM_HANDLE_BASE + p.card == item_handle)
     }
 
-    /// La créature de cette carte est-elle actuellement invoquée ?
+    /// La créature de cette carte est-elle invoquée, ou en cours d'invocation ?
     pub fn is_summoned(&self, item_handle: u32) -> bool {
-        self.pet_of(item_handle).is_some_and(|p| self.ctx.world.lock().unwrap().summons.contains_key(&summon_handle(p.card)))
+        self.pet_of(item_handle).is_some_and(|p| {
+            let w = self.ctx.world.lock().unwrap();
+            w.summons.contains_key(&summon_handle(p.card)) || w.summoning(p.card).is_some()
+        })
     }
 
     /// Accorde les fiches de créature avec les cartes possédées : nouvelles cartes (créature créée
@@ -196,7 +195,13 @@ impl Session {
         let missing: Vec<(u32, u32)> = cards.into_iter().filter(|(c, _)| !g.pets.iter().any(|p| p.card == *c)).collect();
 
         for card in gone {
-            self.ctx.world.lock().unwrap().unsummon(summon_handle(card));
+            {
+                let mut w = self.ctx.world.lock().unwrap();
+                if let Some(caster) = w.summoning(card) {
+                    w.cancel_spell(caster);
+                }
+                w.unsummon(summon_handle(card));
+            }
             self.in_game.as_mut().unwrap().pets.retain(|p| p.card != card);
             self.send(&game::Handle::<{ gid::TS_SC_REMOVE_SUMMON_INFO }>(ITEM_HANDLE_BASE + card));
         }
@@ -281,49 +286,6 @@ impl Session {
         self.send_formation();
         Ok(())
     }
-
-    /// TS_CS_SKILL 4001 / 4002. Immédiat : ni incantation ni TS_SC_SKILL pour l'instant.
-    pub fn summon_skill(&mut self, req: &game::CsSkill) {
-        let ok = self.try_summon_skill(req);
-        let result = if ok.is_ok() { msg::result::SUCCESS } else { msg::result::ACCESS_DENIED };
-        self.send(&msg::ScResult { request: gid::TS_CS_SKILL, result, value: 0 });
-        if let (Err(why), Some(g)) = (ok, &self.in_game) {
-            self.ctx.world.lock().unwrap().notify(g.handle, why);
-        }
-    }
-
-    fn try_summon_skill(&self, req: &game::CsSkill) -> std::result::Result<(), &'static str> {
-        let g = self.in_game.as_ref().ok_or("Hors du monde.")?;
-        let known = crate::skills::learned(&g.character).ok().and_then(|s| s.get(&u32::from(req.skill_id)).copied()).unwrap_or(0);
-        if req.skill_level == 0 || req.skill_level > known {
-            return Err("Compétence non apprise.");
-        }
-        let pet = self.pet_of(req.target).ok_or("Aucune carte de créature sélectionnée.")?;
-        if !g.items.iter().any(|i| i.guid == pet.card && i.in_bag()) {
-            return Err("La carte doit être dans le sac.");
-        }
-        let run_speed = self.ctx.data.creatures.get(pet.entry).map_or(80.0, |c| c.run_speed.clamp(1, 250) as f32);
-        let cost = mana_cost(req.skill_id, req.skill_level);
-        let mut w = self.ctx.world.lock().unwrap();
-        let owned = w.players.get(&g.handle).is_some_and(|p| p.guid == g.character.guid && p.hp > 0 && p.mp >= cost);
-        if !owned {
-            return Err("PM insuffisants ou état invalide.");
-        }
-        let done = if req.skill_id == summon_skill::SUMMON {
-            w.summon(g.handle, pet, run_speed)
-        } else {
-            w.unsummon(summon_handle(pet.card))
-        };
-        if !done {
-            return Err(if req.skill_id == summon_skill::SUMMON {
-                "Une créature est déjà invoquée."
-            } else {
-                "Cette créature n'est pas invoquée."
-            });
-        }
-        w.spend_mana(g.handle, cost);
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -331,10 +293,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mana_costs_and_handle_ranges() {
-        assert_eq!(mana_cost(summon_skill::SUMMON, 1), 80);
-        assert_eq!(mana_cost(summon_skill::SUMMON, 5), 160);
-        assert_eq!(mana_cost(summon_skill::UNSUMMON, 5), 5);
+    fn handle_ranges() {
         assert!(summon_handle(1) > SUMMON_HANDLE_BASE && summon_handle(0x0fff_ffff) < 0x4000_0000);
         assert_eq!(capped(300), 255);
     }

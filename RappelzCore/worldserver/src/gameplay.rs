@@ -85,6 +85,10 @@ pub fn max_hp_for(level: u8) -> i32 {
 pub fn max_mp_for(level: u8) -> i32 {
     40 + level as i32 * 10
 }
+/// Attaque magique, telle qu'envoyée dans TS_SC_STAT_INFO.
+pub fn magic_for(level: u8) -> i32 {
+    10 + level as i32 * 2
+}
 pub fn attack_for(level: u8) -> i32 {
     12 + level as i32 * 4
 }
@@ -306,10 +310,9 @@ impl Session {
             }
             gid::TS_CS_SKILL => {
                 let req = game::CsSkill::from_packet(&p)?;
-                if matches!(req.skill_id, game::summon_skill::SUMMON | game::summon_skill::UNSUMMON) {
-                    self.summon_skill(&req);
-                } else {
-                    self.cast_skill(req);
+                match self.ctx.data.spells.quote(u32::from(req.skill_id), req.skill_level) {
+                    Some(quote) => self.cast_spell(&req, quote),
+                    None => self.cast_skill(req),
                 }
             }
             gid::TS_EQUIP_SUMMON => self.set_formation(game::EquipSummon::from_packet(&p)?).await?,

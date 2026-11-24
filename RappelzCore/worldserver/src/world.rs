@@ -146,7 +146,7 @@ pub struct MonsterEntity {
 }
 
 impl MonsterEntity {
-    fn alive(&self) -> bool {
+    pub(crate) fn alive(&self) -> bool {
         self.dead_since.is_none()
     }
 
@@ -167,6 +167,8 @@ pub struct World {
     pub(crate) casts:HashMap<u32,crate::casting::PendingCast>,
     /// Échanges entre joueurs en cours (TS_TRADE).
     pub(crate) trades: crate::trade::Trades,
+    /// Compétences en cours d'incantation (`spells.rs`).
+    pub(crate) spells: HashMap<u32, crate::spells::PendingSpell>,
     /// Créatures invoquées.
     pub(crate) summons: HashMap<u32, crate::summons::SummonEntity>,
     /// Objets au sol (butin, objets jetés).
@@ -193,7 +195,7 @@ fn dist((ax, ay): (f32, f32), (bx, by): (f32, f32)) -> f32 {
 }
 
 /// Dégâts d'un coup : attaque − défense/2, ±10 %, au moins 1.
-fn roll_damage(attack: i32, defence: i32) -> i32 {
+pub(crate) fn roll_damage(attack: i32, defence: i32) -> i32 {
     let base = (attack - defence / 2).max(1) as f32;
     (base * (0.9 + rand::random::<f32>() * 0.2)).round().max(1.0) as i32
 }
@@ -239,7 +241,7 @@ impl World {
             next_monster_handle: MONSTER_HANDLE_BASE,
             visibility_distance,
             max_online: 0,
-            last_regen: 0, trades: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            last_regen: 0, trades: Default::default(), spells: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         for &(_, id, x, y, z, respawn) in &data.monster_spawns {
             if let Some(info) = data.monsters.get(&id) {
@@ -584,15 +586,7 @@ impl World {
         }
     }
 
-    /// Retire des PM à un joueur et l'annonce à ceux qui le voient.
-    pub(crate) fn spend_mana(&mut self, handle: u32, cost: i32) {
-        let Some(p) = self.players.get_mut(&handle) else { return };
-        p.mp = (p.mp - cost).max(0);
-        let packet = Self::hpmp_packet(handle, p.hp, p.max_hp, p.mp, p.max_mp, 0);
-        self.broadcast_around(handle, &packet, true);
-    }
-
-    fn hpmp_packet(handle: u32, hp: i32, max_hp: i32, mp: i32, max_mp: i32, add_hp: i32) -> RawPacket {
+    pub(crate) fn hpmp_packet(handle: u32, hp: i32, max_hp: i32, mp: i32, max_mp: i32, add_hp: i32) -> RawPacket {
         game::ScHpMp { handle, add_hp, hp, max_hp, add_mp: 0, mp, max_mp, need_to_display: add_hp != 0 }.to_packet()
     }
 
@@ -645,6 +639,7 @@ impl World {
     pub fn tick(&mut self) {
         let now = self.now();
         self.tick_restorations(self.cast_clock());
+        self.tick_spells();
         self.tick_player_attacks(now);
         self.tick_monsters(now);
         self.tick_ground(now);
@@ -715,7 +710,7 @@ impl World {
         }
     }
 
-    fn kill_monster(&mut self, mh: u32, killer: u32, now: u32) {
+    pub(crate) fn kill_monster(&mut self, mh: u32, killer: u32, now: u32) {
         let Some(m) = self.monsters.get_mut(&mh) else { return };
         m.dead_since = Some(now);
         m.corpse_consumed=false;m.corpse_generation=m.corpse_generation.saturating_add(1);
@@ -875,7 +870,7 @@ mod tests {
             parties:Default::default(),party_clients:HashSet::new(),party_sent:HashMap::new(),
             started: Instant::now(), players: HashMap::new(), npcs: HashMap::new(), monsters: HashMap::new(),
             next_handle: 3, next_monster_handle: MONSTER_HANDLE_BASE, visibility_distance: 540.0,
-            max_online: 0, last_regen: 0, trades: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            max_online: 0, last_regen: 0, trades: Default::default(), spells: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         let mut receivers = Vec::new();
         for handle in [1, 2] {
@@ -1055,7 +1050,7 @@ mod tests {
         let pool=rz_database::sqlx::mysql::MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(20))
             .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused").unwrap();
         let data=GameData {progression:None,restoration:None,skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
-            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default(),creatures:Default::default()};
+            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default(),creatures:Default::default(),spells:Default::default()};
         let settings=Settings {realm_id:1,network_key:vec![],characters_per_realm:1,start_level:1,start_money:0,start_positions:[(0.0,0.0);3],
             region_size:180,cell_size:6,move_speed:120,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
         let ctx=Arc::new(Ctx {login:pool.clone(),chars:pool.clone(),world_db:pool,data,world:Mutex::new(world),settings,
@@ -1137,6 +1132,97 @@ mod tests {
         events.send(WorldEvent::TradeUncertain).unwrap();
         assert!(session.settle_before_leaving().await.is_err());
         assert!(session.in_game.is_none(), "aucune sauvegarde possible");
+    }
+
+    fn spell_quote(kind: rz_rappelz::spells::SpellKind, cast: u32) -> rz_rappelz::spells::SpellQuote {
+        rz_rappelz::spells::SpellQuote { id: 2001, level: 1, kind, mp: 5, cast, cooldown: 1000, group: 77,
+            range: Some(192.0), ratio: 1.0, flat: 0.0, hp_ratio: 0.0 }
+    }
+
+    #[test]
+    fn damage_spell_casts_fires_once_kills_and_recharges() {
+        use rz_rappelz::spells::SpellKind;
+        let (mut world, mut receivers) = test_world();
+        let monster = test_monster(&mut world);
+        world.update_visibility();
+        let (events, mut rewards) = tokio::sync::mpsc::unbounded_channel();
+        world.players.get_mut(&1).unwrap().events = events;
+        let guid = world.players[&1].guid;
+        let mp = world.players[&1].mp;
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        let q = spell_quote(SpellKind::Physical, 0);
+        let known = vec![(2001u32, 1u8, 1000u32, 77u32)];
+        world.begin_spell(1, guid, monster, q, crate::spells::Action::Effect, known.clone()).unwrap();
+        assert_eq!(world.monsters[&monster].hp, 0, "attaque 16 contre 10 PV");
+        assert_eq!(world.players[&1].mp, mp - 5);
+        assert!(matches!(rewards.try_recv().unwrap(), WorldEvent::Reward { exp: 5, .. }));
+        let packets: Vec<_> = std::iter::from_fn(|| receivers[0].try_recv().ok()).collect();
+        let fire = packets.iter().filter(|p| p.id == game::ScSkill::ID).map(|p| game::ScSkill::from_packet(p).unwrap()).collect::<Vec<_>>();
+        assert_eq!(fire.len(), 1);
+        assert_eq!((fire[0].skill_type, fire[0].caster_mp, fire[0].mp_cost), (game::skill_type::FIRE, mp - 5, 5));
+        // Queue FIRE : 9 octets puis l'impact de 32 octets (type, cible, PV finaux nuls).
+        assert_eq!(fire[0].payload.len(), 9 + 32);
+        assert_eq!(&fire[0].payload[10..14], &monster.to_le_bytes());
+        assert_eq!(&fire[0].payload[14..18], &0i32.to_le_bytes());
+        let list = packets.iter().find(|p| p.id == game::ScSkillList::ID).map(|p| game::ScSkillList::from_packet(p).unwrap()).unwrap();
+        assert_eq!((list.skills[0].skill_id, list.skills[0].total_cool_time), (2001, 1000));
+        assert!(list.skills[0].remain_cool_time > 900);
+        // Recharge, puis cible morte.
+        assert_eq!(world.begin_spell(1, guid, monster, q, crate::spells::Action::Effect, known), Err("Compétence en recharge."));
+        world.cast_cooldowns.clear();
+        assert_eq!(world.begin_spell(1, guid, monster, q, crate::spells::Action::Effect, vec![]), Err("Cible invalide ou hors de portée."));
+        assert_eq!(world.players[&1].mp, mp - 5, "aucun coût sur un refus");
+    }
+
+    #[test]
+    fn interrupted_cast_costs_nothing_and_heal_is_capped() {
+        use rz_rappelz::spells::SpellKind;
+        let (mut world, mut receivers) = test_world();
+        let monster = test_monster(&mut world);
+        world.update_visibility();
+        let guid = world.players[&1].guid;
+        let (mp, mhp) = (world.players[&1].mp, world.monsters[&monster].hp);
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        world.begin_spell(1, guid, monster, spell_quote(SpellKind::Magical, 200), crate::spells::Action::Effect, vec![]).unwrap();
+        assert!(world.begin_spell(1, guid, monster, spell_quote(SpellKind::Magical, 200), crate::spells::Action::Effect, vec![]).is_err());
+        world.tick_spells();
+        assert_eq!(world.monsters[&monster].hp, mhp, "incantation en cours");
+        world.cancel_restoration(1); // mouvement, annulation…
+        let phases: Vec<u8> = std::iter::from_fn(|| receivers[0].try_recv().ok())
+            .filter(|p| p.id == game::ScSkill::ID).map(|p| game::ScSkill::from_packet(&p).unwrap().skill_type).collect();
+        assert_eq!(phases, vec![game::skill_type::CASTING, game::skill_type::CANCEL]);
+        assert_eq!((world.players[&1].mp, world.monsters[&monster].hp), (mp, mhp));
+        assert!(world.cast_cooldowns.is_empty());
+        // Soin : plafonné aux PV max, montant réel dans l'impact ADD_HP.
+        { let p = world.players.get_mut(&2).unwrap(); p.hp = p.max_hp - 3; }
+        let max = world.players[&2].max_hp;
+        let mut heal = spell_quote(SpellKind::Heal, 0);
+        heal.flat = 500.0;
+        world.begin_spell(1, guid, 2, heal, crate::spells::Action::Effect, vec![]).unwrap();
+        assert_eq!(world.players[&2].hp, max);
+        let fire = std::iter::from_fn(|| receivers[1].try_recv().ok()).filter(|p| p.id == game::ScSkill::ID)
+            .map(|p| game::ScSkill::from_packet(&p).unwrap()).last().unwrap();
+        assert_eq!(fire.payload.len(), 9 + 13);
+        assert_eq!(fire.payload[9], game::skill_hit::ADD_HP);
+        assert_eq!(&fire.payload[14..18], &max.to_le_bytes());
+        assert_eq!(&fire.payload[18..22], &3i32.to_le_bytes());
+        // Une compétence nuisible ne vise pas un joueur.
+        world.cast_cooldowns.clear();
+        assert!(world.begin_spell(1, guid, 2, spell_quote(SpellKind::Physical, 0), crate::spells::Action::Effect, vec![]).is_err());
+    }
+
+    #[test]
+    fn a_card_being_summoned_is_tracked_until_the_cast_ends() {
+        let (mut world, mut receivers) = test_world();
+        let guid = world.players[&1].guid;
+        let pet = rz_database::pets::Pet { card: 5, entry: 1401, level: 1, ..Default::default() };
+        let q = spell_quote(rz_rappelz::spells::SpellKind::Summon, 800);
+        world.begin_spell(1, guid, 99, q, crate::spells::Action::Summon { pet, run_speed: 100.0 }, vec![]).unwrap();
+        assert_eq!((world.summoning(5), world.summoning(6)), (Some(1), None));
+        assert!(world.summons.is_empty());
+        world.cancel_spell(1); // carte partie : sync_pets annule l'incantation
+        assert_eq!(world.summoning(5), None);
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
     }
 
     #[test]
@@ -1415,7 +1501,7 @@ mod tests {
     fn test_monster(world: &mut World) -> u32 {
         world.spawn_monster(MonsterInfo {
             id: 711, name: "Fixture".into(), level: 1, hp: 10, mp: 5,
-            attack: 20, defence: 6, exp: 5, jp: 3, gold_min: 0, gold_max: 0,
+            attack: 20, defence: 6, magic_defence: 4, exp: 5, jp: 3, gold_min: 0, gold_max: 0,
             run_speed: 100.0, attack_range: 20.0, race: 0,
         }, 10.0, 0.0, 0.0, 15)
     }

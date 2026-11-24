@@ -589,7 +589,7 @@ ctor FUN_0070e980 ; le reste suit l'ordre epic 9.5 [D].
 | TS_SC_HPMP | 509 | S→C | 36 | +7 handle ; +0xb add_hp ; +0xf hp ; +0x13 max_hp ; +0x17 add_mp ; +0x1b mp ; +0x1f max_mp ; +0x23 u8 display [D noms] | 0x37 [O] |
 | TS_SC_REGEN_HPMP | 516 | S→C | 27 | +7 handle ; 4 × i32 hp_regen, mp_regen, hp, mp [D noms] | 0x56 [O] |
 | TS_SC_STATUS_CHANGE | 500 | S→C | 15 | +7 handle ; +0xb u32 status | 0x31 [O] |
-| TS_SC_STATE | 505 | S→C | 31 | +7 handle ; +0xb u16 state_handle ; +0xd u16 level ; +0xf u32 code ; +0x13 i32 remain (-1 = permanent) ; +0x17 u32 start ; +0x1b i32 value | 0x34 [O] |
+| TS_SC_STATE | 505 | S→C | 31 | +7 handle ; +0xb u16 state_handle ; +0xd u16 level ; +0xf u32 code ; +0x13 i32 **heure de fin** (-1 = permanent) ; +0x17 u32 start ; +0x1b i32 value | 0x34 [O] |
 | TS_SC_SP / TS_SC_ENERGY | 514 / 515 | S→C | 15 / 13 | +7 handle ; +0xb i16 sp ; +0xd i16 max_sp / +0xb i16 energy | 0x48 / 0x54 [O] |
 | TS_SC_SKILL_LIST | 403 | S→C | 14+14n | +7 target ; +0xb u16 n ; +0xd u8 modification_type ; {i32 id, u8 base_lv, u8 cur_lv, u32 total_cool, u32 remain_cool}[n] | 0x2d, FUN_00a2ae90 [O] |
 | TS_SC_ADDED_SKILL_LIST | 404 | S→C | 13+6n | +7 target ; +0xb u16 n ; {i32 id, u8, u8}[n] | [O] (non implémenté) |
@@ -615,7 +615,7 @@ Hits de TS_SC_SKILL (FIRE), taille de chaque entrée selon l'octet `type` en tê
 2 → 45, 10 → 10, 20/21 → 13, 22 → 25, 23 → 23, 30 → 19, 40/41 → 36, 42 → 17. Entrée DAMAGE [D] :
 `u8 type, u32 target, i32 target_hp, u8 damage_type, i32 damage, i32 flag, u16 elemental[7]`.
 
-**Quêtes (600–605, dialogues `start_quest` / `end_quest`)** : voir [quest_protocol.md](quest_protocol.md). **Entrepôt (211/212) et échange (280)** : voir [storage_trade_protocol.md](storage_trade_protocol.md). **Objets au sol, butin et ramassage** : voir [ground_item_protocol.md](ground_item_protocol.md). **Invocations** : voir [summon_protocol.md](summon_protocol.md).
+**Quêtes (600–605, dialogues `start_quest` / `end_quest`)** : voir [quest_protocol.md](quest_protocol.md). **Entrepôt (211/212) et échange (280)** : voir [storage_trade_protocol.md](storage_trade_protocol.md). **Objets au sol, butin et ramassage** : voir [ground_item_protocol.md](ground_item_protocol.md). **Invocations** : voir [summon_protocol.md](summon_protocol.md). **Compétences et états** : voir [skill_protocol.md](skill_protocol.md).
 
 ### 9.4 Comportements notables [O]
 - **TS_SC_DIALOG** : menus lus seulement pour `type` 0, 3, 10 ; menu découpé sur `'\t'`

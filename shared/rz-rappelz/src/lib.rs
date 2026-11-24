@@ -9,6 +9,7 @@ pub mod progression;
 pub mod quests;
 pub mod rdb;
 pub mod skills;
+pub mod spells;
 pub mod restoration;
 mod rdb_schemas;
 pub mod to_dbc;

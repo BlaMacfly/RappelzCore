@@ -343,4 +343,5 @@ d'origine.**
 
 Restent à faire : combat et EXP des créatures, statistiques réelles (PV/PM provisoires tirés du niveau, pleins à
 chaque invocation), évolution (307), renommage (322/323), monture (320/321), équipement de créature, apprivoisement
-(310), familiers (350–354), incantation et TS_SC_SKILL pour 4001/4002 (l'effet est immédiat), double invocation.
+(310), familiers (350–354), double invocation. L'incantation et TS_SC_SKILL de 4001/4002 sont faits :
+`skill_protocol.md` §14.

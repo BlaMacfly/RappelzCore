@@ -163,7 +163,9 @@ impl Session {
                 .into_iter()
                 .map(|(skill_id, level)| {
                     let q=self.ctx.data.restoration.as_ref().and_then(|book|u16::try_from(skill_id).ok().and_then(|id|book.quote(id,level)));
-                    let (total,remain)=q.map_or((0,0),|q|(q.cooldown,world.cooldown_remaining(g.character.guid,q.group)));
+                    // Le client démarre seul ses recharges avec le dernier total reçu : l'annoncer ici.
+                    let key=q.map(|q|(q.cooldown,q.group)).or_else(||self.ctx.data.spells.quote(skill_id,level).map(|q|(q.cooldown,q.group)));
+                    let (total,remain)=key.map_or((0,0),|(cooldown,group)|(cooldown,world.cooldown_remaining(g.character.guid,group)));
                     game::SkillInfo {
                     skill_id: skill_id as i32,
                     base_skill_level: level,

@@ -935,7 +935,8 @@ pub struct ScState {
     pub state_level: u16,
     /// +0x0f
     pub state_code: u32,
-    /// +0x13 (-1 = permanent)
+    /// +0x13 : **heure de fin** (horloge du jeu, centièmes ; -1 = permanent), pas une durée [O].
+    /// Niveau 0 = retrait de l'état ; clé (handle, state_handle, code).
     pub remain_time: i32,
     /// +0x17
     pub start_time: u32,
