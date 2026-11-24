@@ -57,6 +57,9 @@ struct Cli {
     /// Lance cette compétence (niveau 1) sur le premier monstre visible, jusqu'à sa mort.
     #[arg(long)]
     cast: Option<u16>,
+    /// Avec --cast : vise son propre personnage (bonus, soins).
+    #[arg(long)]
+    cast_self: bool,
     /// Avec --summon ou --cast : bouge pendant l'incantation (elle doit être annulée).
     #[arg(long)]
     interrupt: bool,
@@ -276,6 +279,10 @@ async fn main() -> Result<()> {
     // Échange : partenaire, verrous et confirmations vus.
     let (mut trade_partner, mut requested) = (None::<u32>, false);
     let (mut frozen, mut confirmed, mut processed) = (std::collections::HashSet::<u32>::new(), std::collections::HashSet::<u32>::new(), false);
+    if let (Some(id), true) = (cli.cast, cli.cast_self) {
+        cast_target = Some(lr.handle);
+        w.send(&skill(id, lr.handle, lr.handle)).await?;
+    }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(cli.stay);
     while let Ok(Ok(Some(p))) = tokio::time::timeout_at(deadline, r.recv()).await {
         match p.id {
@@ -370,6 +377,7 @@ async fn main() -> Result<()> {
                 let hit = s.payload.get(9).copied();
                 match (phase, hit) {
                     ("CASTING", _) => tracing::info!("[compétence] {} CASTING {} cs", s.skill_id, int(0)),
+                    ("FIRE", Some(game::skill_hit::RESULT)) => tracing::info!("[compétence] {} FIRE état posé : {}, PM {}", s.skill_id, s.payload.get(14) == Some(&1), s.caster_mp),
                     ("FIRE", Some(20)) => tracing::info!("[compétence] {} FIRE soin {} (PV {}), PM {}", s.skill_id, int(18), int(14), s.caster_mp),
                     ("FIRE", Some(_)) => tracing::info!("[compétence] {} FIRE {} dégâts (PV cible {}), PM {}", s.skill_id, int(19), int(14), s.caster_mp),
                     _ => tracing::info!("[compétence] {} {phase}, PM {}", s.skill_id, s.caster_mp),
@@ -378,10 +386,23 @@ async fn main() -> Result<()> {
                     w.send(&msg::CsMoveRequest { handle: lr.handle, x: lr.x, y: lr.y, cur_time: 0, speed_sync: false, points: vec![MovePoint { x: lr.x + 5.0, y: lr.y }] }).await?;
                 }
                 if let (Some(id), Some(target)) = (cli.cast, cast_target) {
-                    if phase == "FIRE" && int(14) > 0 {
+                    if phase == "FIRE" && hit != Some(game::skill_hit::RESULT) && int(14) > 0 {
                         tokio::time::sleep(Duration::from_millis(1100)).await;
                         w.send(&skill(id, lr.handle, target)).await?;
                     }
+                }
+            }
+            gid::TS_SC_STATE => {
+                let s = game::ScState::from_packet(&p)?;
+                tracing::info!("[état] porteur {} : code {} niveau {} (instance {}, {} cs)", s.handle, s.state_code, s.state_level, s.state_handle, s.remain_time - s.start_time as i32);
+            }
+            gid::TS_SC_STATE_DAMAGE => {
+                let d = game::ScStateDamage::from_packet(&p)?;
+                tracing::info!("[état] tic {} sur {} : type {} valeur {} → {} (total {}, fin {})", d.state_code, d.target, d.kind, d.value, d.result, d.total, d.last);
+            }
+            id::TS_SC_STAT_INFO => {
+                if let Some(c) = msg::ScStatInfo::from_packet(&p)?.combat_stats() {
+                    tracing::info!("[stats] attaque {} défense {} vitesse {}", c.attack, c.defence, c.move_speed);
                 }
             }
             gid::TS_SC_TAKE_ITEM_RESULT => {
@@ -463,7 +484,7 @@ async fn main() -> Result<()> {
                 let c = msg::ScChat::from_packet(&p)?;
                 chats.push(format!("{} : {}", c.sender, c.message));
             }
-            id::TS_SC_STAT_INFO | id::TS_TIMESYNC => {}
+            id::TS_TIMESYNC => {}
             gid::TS_SC_INVENTORY => {
                 for it in game::ScInventory::from_packet(&p)?.items {
                     tracing::info!(

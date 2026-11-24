@@ -69,6 +69,8 @@ pub struct GameData {
     pub creatures: rz_rappelz::creatures::CreatureBook,
     /// Compétences actives dont la formule est connue (Skill.dbc).
     pub spells: rz_rappelz::spells::SpellBook,
+    /// États dont tous les effets sont établis (Tenacity.dbc).
+    pub states: rz_rappelz::states::StateBook,
 }
 
 /// Statistiques d'un monstre (Monster.dbc).
@@ -258,11 +260,15 @@ impl GameData {
             Ok(book)=>{tracing::info!(">> progression : {:?} statistiques/niveaux/invocations",book.counts());Some(book)},
             Err(error)=>{tracing::warn!("Progression du métier indisponible : {error}");None},
         };
-        let spells = rz_rappelz::spells::SpellBook::open(&dbc_dir).unwrap_or_else(|error| {
+        let states = rz_rappelz::states::StateBook::open(&dbc_dir).unwrap_or_else(|error| {
+            tracing::warn!("États indisponibles : {error}");
+            Default::default()
+        });
+        let spells = rz_rappelz::spells::SpellBook::open(&dbc_dir, &states).unwrap_or_else(|error| {
             tracing::warn!("Compétences actives indisponibles : {error}");
             Default::default()
         });
-        tracing::info!(">> {} compétences actives prises en charge (Skill.dbc)", spells.len());
+        tracing::info!(">> {} compétences actives prises en charge (Skill.dbc), {} états (Tenacity.dbc)", spells.len(), states.len());
         let quests = match rz_rappelz::quests::QuestBook::open(&dbc_dir) {
             Ok(book) => {
                 tracing::info!(">> {} quêtes, {} liens PNJ (Quest.dbc, QuestLink.dbc)", book.quests.len(), book.links.len());
@@ -273,7 +279,7 @@ impl GameData {
                 Default::default()
             }
         };
-        Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns, quests, creatures, spells })
+        Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns, quests, creatures, spells, states })
     }
 
     /// Le PNJ (`NpcResource.id`) tient-il un entrepôt ?

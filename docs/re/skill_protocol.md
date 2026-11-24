@@ -557,7 +557,7 @@ règle de `state_level_*` (§7).
 | `is_physical_act` | confirmé inversé : 0 pour 59/61 compétences 30001 et 84/84 de 30011, 1 pour 55/56 de 231 |
 | Soin en % (501) | libellé du client : « Augmente la récupération de HP de …% » ; l'assiette (PV max ?) n'est **pas** établie |
 
-## 14. Implémentation RappelzCore (2026-11-24) — premier lot
+## 14. Implémentation RappelzCore (2026-11-24) — premier lot (états : §15)
 
 | Élément | Choix |
 |---|---|
@@ -577,3 +577,26 @@ pendant l'incantation : CANCEL, PM intacts ; refus : non apprise, en mouvement, 
 4002 (50 cs), et 4001 interrompue. Tests unitaires : dégâts, mort, recharge, annulation, soin plafonné, refus sur
 joueur. **Non vérifié : client graphique d'origine** ; `modification_type` 1 à la connexion (le client RappelzRust
 n'accepte que 0).
+
+## 15. Implémentation RappelzCore (2026-11-24) — états
+
+| Élément | Choix |
+|---|---|
+| Périmètre | effet 301 à cible unique : **180 malus** (monstres seulement) et **6 bonus** (joueurs seulement), soit 234 compétences prises en charge avec le §14. Écartés : zones (302…), bascules, auras, compétences liées, 301 dont v1..v5 ne sont pas nuls |
+| États retenus | 609, seulement si **tous** leurs effets sont établis : types −1, 0, 1 (valeur) et 2 (pourcentage), banque A limitée à attaque, attaque magique, défense, défense magique, vitesses d'attaque et de déplacement (bits 7, 8, 9, 10, 11, 13) ; bases 0, 1, 3 (dégâts), 11, 12 (soins). Écartés : banque B, PV/PM max (bits 21, 22), sommeil (6005), invisibilité (6016)… |
+| Colonnes | `add_damage_base` et `add_damage_per_skl` sont **entières**, `amplify_*` et `value_*` décimales |
+| Niveau, durée, chance | §8.4 ; échec : RESULT avec succès 0, sans 505, le monstre est provoqué quand même **[D]** |
+| Ordre | FIRE (impact RESULT, 10 octets, genre 10) puis 505 ; 505 renvoyé après l'ENTER à chaque nouvel observateur ; retrait = 505 niveau 0 |
+| Même code | niveau inférieur refusé, sinon remplacement en gardant `state_handle` **[D]** ; au plus 40 états par porteur |
+| Exclusion | un groupe `duplicate_group_*` commun : l'ancien état est retiré **[D]** (le client ne l'applique pas) |
+| Modificateurs | (base + valeurs) × (1 + somme des pourcentages) **[D]** ; attaque, défenses, délai d'attaque (base × 100 / vitesse), vitesse des joueurs au prochain déplacement et des monstres en poursuite ; STAT_INFO renvoyée au porteur |
+| Tics | 406 toutes les `fire_interval` secondes, premier tic après un intervalle **[D]** ; puissance du lanceur figée à la pose **[D]** ; dégâts **sans défense** [D] ; mort récompensée au lanceur ; soins plafonnés |
+| Fin | expiration, mort du porteur, déconnexion, abandon de poursuite du monstre ; **non sauvegardés** (perdus à la déconnexion et à l'arrêt) |
+
+Validation (MariaDB de test isolée, `rz-bot --cast`, `--cast-self`) : 3603 → état 5005 (3000 cs), revu par un
+personnage reconnecté, retiré à l'échéance ; 3023 → état 13023 (289 cs), deux tics de 18 (538 → 520 → 502), fin 1 au
+second, retrait ; 10010 → 7051 posé puis retiré ; 9656 sur soi → attaque 92 → 101 dans STAT_INFO ; 3222 sur soi →
+soins de 31 toutes les 3 s ; 9656 sur un monstre refusée. Tests unitaires : échec de probabilité, ordre des paquets,
+défense réduite, tics, mort par tic, plafond de soin, vitesse d'attaque, expiration, exclusion, départ.
+**Non vérifié : client graphique d'origine** ; effet de la défense réduite et du ralentissement en jeu réel (tests
+unitaires pour la défense ; le ralentissement n'est pas testé au-delà de sa pose).

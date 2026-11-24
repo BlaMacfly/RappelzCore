@@ -566,6 +566,8 @@ impl Session {
         let mut world = self.ctx.world.lock().unwrap();
         let now = world.now();
         world.cancel_restoration(g.handle);
+        // Vitesse modifiée par les états ; `move_speed` garde la valeur de base (publish_stats).
+        let speed = world.stat(g.handle, rz_rappelz::states::Stat::MoveSpeed, i32::from(s.move_speed)).clamp(1, 255) as u8;
         let Some(p) = world.players.get_mut(&g.handle) else { return };
         // Anti-téléportation : le départ annoncé doit être proche de la position serveur.
         let (sx, sy) = p.motion.position(now);
@@ -574,10 +576,10 @@ impl Session {
         } else {
             (sx, sy)
         };
-        p.motion = Motion { x, y, start_time: now, points: req.points.clone(), speed: s.move_speed as f32 * s.speed_scale };
+        p.motion = Motion { x, y, start_time: now, points: req.points.clone(), speed: f32::from(speed) * s.speed_scale };
         p.move_speed=s.move_speed;
         let layer = p.layer;
-        let packet = msg::ScMove { start_time: now, handle: g.handle, tlayer: layer, speed: s.move_speed, points: req.points }.to_packet();
+        let packet = msg::ScMove { start_time: now, handle: g.handle, tlayer: layer, speed, points: req.points }.to_packet();
         world.broadcast_around(g.handle, &packet, true);
     }
 

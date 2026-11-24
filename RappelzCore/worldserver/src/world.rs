@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
+use rz_rappelz::states::Stat;
 use rz_proto::msg::{self, CreatureInfo, EnterKind, MovePoint, PlayerEnterInfo, ScEnter};
 use rz_proto::msg_game::{self as game, AttackInfo};
 use rz_proto::{Message, RawPacket};
@@ -167,6 +168,8 @@ pub struct World {
     pub(crate) casts:HashMap<u32,crate::casting::PendingCast>,
     /// Échanges entre joueurs en cours (TS_TRADE).
     pub(crate) trades: crate::trade::Trades,
+    /// États en cours par porteur (`states.rs`).
+    pub(crate) states: crate::states::States,
     /// Compétences en cours d'incantation (`spells.rs`).
     pub(crate) spells: HashMap<u32, crate::spells::PendingSpell>,
     /// Créatures invoquées.
@@ -241,7 +244,7 @@ impl World {
             next_monster_handle: MONSTER_HANDLE_BASE,
             visibility_distance,
             max_online: 0,
-            last_regen: 0, trades: Default::default(), spells: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            last_regen: 0, trades: Default::default(), states: Default::default(), spells: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         for &(_, id, x, y, z, respawn) in &data.monster_spawns {
             if let Some(info) = data.monsters.get(&id) {
@@ -303,6 +306,7 @@ impl World {
         for summon in self.summoned_by(handle) {
             self.unsummon(summon);
         }
+        self.clear_states(handle);
         let p = self.players.remove(&handle)?;
         self.parties.disconnected(handle);
         self.party_clients.remove(&handle);self.party_sent.remove(&handle);
@@ -350,15 +354,17 @@ impl World {
     pub fn publish_stats(&self, owner:u32) {
         let Some(player)=self.players.get(&owner) else {return;};
         let level=player.enter.creature.level;
+        let mods=self.mods(owner);
         // Retain the existing opaque template. Only the three checked combat fields
         // below are authoritative; the second attack slot is not a new left-hand rule.
         let mut snapshot=msg::ScStatInfo::from_stats(owner,&msg::BasicStats {
             attributes:[10;7],attack:10+level*2,defence:5+level,
-            magic_point:10+level*2,magic_defence:5+level,move_speed:i16::from(player.move_speed),
-            attack_speed:100,attack_range:50,
+            magic_point:mods.apply(Stat::MagicAttack,10+level*2),magic_defence:mods.apply(Stat::MagicDefence,5+level),
+            move_speed:mods.apply(Stat::MoveSpeed,i32::from(player.move_speed)).min(255) as i16,
+            attack_speed:mods.apply(Stat::AttackSpeed,crate::states::BASE_ATTACK_SPEED).min(1000) as i16,attack_range:50,
         },0);
-        snapshot.stats[0x1f-0x0b..0x1f-0x0b+4].copy_from_slice(&player.attack.to_le_bytes());
-        snapshot.stats[0x27-0x0b..0x27-0x0b+4].copy_from_slice(&player.defence.to_le_bytes());
+        snapshot.stats[0x1f-0x0b..0x1f-0x0b+4].copy_from_slice(&mods.apply(Stat::Attack,player.attack).to_le_bytes());
+        snapshot.stats[0x27-0x0b..0x27-0x0b+4].copy_from_slice(&mods.apply(Stat::Defence,player.defence).to_le_bytes());
         self.send_to(owner,snapshot.to_packet());
     }
 
@@ -367,6 +373,7 @@ impl World {
         if let Some(p) = self.players.get(&handle) {
             let mut packets = vec![self.player_enter(p, now), Self::wear_packet(p)];
             if let Some(movement) = Self::move_packet(handle, p.layer, &p.motion, now) { packets.push(movement); }
+            packets.extend(self.state_packets(handle));
             return packets;
         }
         if let Some(p) = self.ground_enter(handle) {
@@ -388,6 +395,7 @@ impl World {
             if let Some(movement) = Self::move_packet(handle, 0, &m.motion, now) {
                 out.push(movement);
             }
+            out.extend(self.state_packets(handle));
             return out;
         }
         Vec::new()
@@ -640,6 +648,7 @@ impl World {
         let now = self.now();
         self.tick_restorations(self.cast_clock());
         self.tick_spells();
+        self.tick_states(now);
         self.tick_player_attacks(now);
         self.tick_monsters(now);
         self.tick_ground(now);
@@ -672,14 +681,17 @@ impl World {
             if dist(ppos, m.motion.position(now)) > m.info.attack_range + 45.0 {
                 continue; // le client rapproche le joueur de sa cible
             }
-            let (attack, p_hp, p_mp) = {
+            let attack = self.power_of(ph, false);
+            let delay = self.attack_delay(ph, PLAYER_ATTACK_DELAY);
+            let defence = self.mods(mh);
+            let (p_hp, p_mp) = {
                 let p = self.players.get_mut(&ph).unwrap();
-                p.next_attack = now + PLAYER_ATTACK_DELAY;
+                p.next_attack = now + delay;
                 p.last_combat = now;
-                (p.attack, p.hp, p.mp)
+                (p.hp, p.mp)
             };
             let m = self.monsters.get_mut(&mh).unwrap();
-            let damage = roll_damage(attack, m.info.defence);
+            let damage = roll_damage(attack, defence.apply(Stat::Defence, m.info.defence));
             m.hp = (m.hp - damage).max(0);
             if m.target.is_none() {
                 m.target = Some(ph);
@@ -689,7 +701,7 @@ impl World {
                 attacker: ph,
                 target: mh,
                 attack_speed: 100,
-                attack_delay: PLAYER_ATTACK_DELAY as u16 * 10,
+                attack_delay: (delay * 10).min(u32::from(u16::MAX)) as u16,
                 attack_action: game::attack_action::ATTACK,
                 attack_flag: 0,
                 attacks: vec![AttackInfo {
@@ -711,6 +723,7 @@ impl World {
     }
 
     pub(crate) fn kill_monster(&mut self, mh: u32, killer: u32, now: u32) {
+        self.clear_states(mh);
         let Some(m) = self.monsters.get_mut(&mh) else { return };
         m.dead_since = Some(now);
         m.corpse_consumed=false;m.corpse_generation=m.corpse_generation.saturating_add(1);
@@ -758,7 +771,8 @@ impl World {
             let mpos = m.motion.position(now);
             let d = dist(ppos, mpos);
             if d > self.visibility_distance * 1.5 {
-                // Trop loin : le monstre abandonne et rentre.
+                // Trop loin : le monstre abandonne, rentre et perd ses états.
+                self.clear_states(mh);
                 let m = self.monsters.get_mut(&mh).unwrap();
                 m.target = None;
                 m.hp = m.info.hp;
@@ -771,12 +785,14 @@ impl World {
             }
             if d > m.info.attack_range {
                 if now >= m.next_chase {
+                    // Un ralentissement ne fige pas complètement : le client exige une vitesse non nulle.
+                    let run_speed = self.stat(mh, Stat::MoveSpeed, m.info.run_speed as i32).max(1) as f32;
                     let m = self.monsters.get_mut(&mh).unwrap();
                     m.next_chase = now + 100;
                     // S'arrête à portée d'attaque du joueur.
                     let t = ((d - m.info.attack_range * 0.8) / d).clamp(0.0, 1.0);
                     let dest = MovePoint { x: mpos.0 + (ppos.0 - mpos.0) * t, y: mpos.1 + (ppos.1 - mpos.1) * t };
-                    m.motion = Motion { x: mpos.0, y: mpos.1, start_time: now, points: vec![dest], speed: m.info.run_speed };
+                    m.motion = Motion { x: mpos.0, y: mpos.1, start_time: now, points: vec![dest], speed: run_speed };
                     if let Some(packet) = Self::move_packet(mh, 0, &self.monsters[&mh].motion, now) {
                         self.broadcast_around(mh, &packet, false);
                     }
@@ -786,10 +802,13 @@ impl World {
             if now < m.next_attack {
                 continue;
             }
-            let (attack, m_hp, m_mp) = (m.info.attack, m.hp, m.info.mp);
-            self.monsters.get_mut(&mh).unwrap().next_attack = now + MONSTER_ATTACK_DELAY;
+            let (base_attack, m_hp, m_mp) = (m.info.attack, m.hp, m.info.mp);
+            let attack = self.stat(mh, Stat::Attack, base_attack);
+            let delay = self.attack_delay(mh, MONSTER_ATTACK_DELAY);
+            let guard = self.mods(target);
+            self.monsters.get_mut(&mh).unwrap().next_attack = now + delay;
             let p = self.players.get_mut(&target).unwrap();
-            let damage = roll_damage(attack, p.defence);
+            let damage = roll_damage(attack, guard.apply(Stat::Defence, p.defence));
             p.hp = (p.hp - damage).max(0);
             p.last_combat = now;
             let (p_hp, p_max, p_mp, p_mmax) = (p.hp, p.max_hp, p.mp, p.max_mp);
@@ -797,7 +816,7 @@ impl World {
                 attacker: mh,
                 target,
                 attack_speed: 100,
-                attack_delay: MONSTER_ATTACK_DELAY as u16 * 10,
+                attack_delay: (delay * 10).min(u32::from(u16::MAX)) as u16,
                 attack_action: game::attack_action::ATTACK,
                 attack_flag: 0,
                 attacks: vec![AttackInfo {
@@ -870,7 +889,7 @@ mod tests {
             parties:Default::default(),party_clients:HashSet::new(),party_sent:HashMap::new(),
             started: Instant::now(), players: HashMap::new(), npcs: HashMap::new(), monsters: HashMap::new(),
             next_handle: 3, next_monster_handle: MONSTER_HANDLE_BASE, visibility_distance: 540.0,
-            max_online: 0, last_regen: 0, trades: Default::default(), spells: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            max_online: 0, last_regen: 0, trades: Default::default(), states: Default::default(), spells: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         let mut receivers = Vec::new();
         for handle in [1, 2] {
@@ -1050,7 +1069,7 @@ mod tests {
         let pool=rz_database::sqlx::mysql::MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(20))
             .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused").unwrap();
         let data=GameData {progression:None,restoration:None,skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
-            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default(),creatures:Default::default(),spells:Default::default()};
+            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default(),creatures:Default::default(),spells:Default::default(),states:Default::default()};
         let settings=Settings {realm_id:1,network_key:vec![],characters_per_realm:1,start_level:1,start_money:0,start_positions:[(0.0,0.0);3],
             region_size:180,cell_size:6,move_speed:120,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
         let ctx=Arc::new(Ctx {login:pool.clone(),chars:pool.clone(),world_db:pool,data,world:Mutex::new(world),settings,
@@ -1136,7 +1155,7 @@ mod tests {
 
     fn spell_quote(kind: rz_rappelz::spells::SpellKind, cast: u32) -> rz_rappelz::spells::SpellQuote {
         rz_rappelz::spells::SpellQuote { id: 2001, level: 1, kind, mp: 5, cast, cooldown: 1000, group: 77,
-            range: Some(192.0), ratio: 1.0, flat: 0.0, hp_ratio: 0.0 }
+            range: Some(192.0), ratio: 1.0, flat: 0.0, hp_ratio: 0.0, state: None }
     }
 
     #[test]
@@ -1209,6 +1228,125 @@ mod tests {
         // Une compétence nuisible ne vise pas un joueur.
         world.cast_cooldowns.clear();
         assert!(world.begin_spell(1, guid, 2, spell_quote(SpellKind::Physical, 0), crate::spells::Action::Effect, vec![]).is_err());
+    }
+
+    #[test]
+    fn curse_is_posed_changes_stats_pulses_kills_and_is_removed() {
+        use rz_rappelz::spells::{SpellKind, StateQuote};
+        use rz_rappelz::states::{Pulse, StateDef};
+        let (mut world, mut receivers) = test_world();
+        let monster = test_monster(&mut world);
+        world.update_visibility();
+        let (events, mut rewards) = tokio::sync::mpsc::unbounded_channel();
+        world.players.get_mut(&1).unwrap().events = events;
+        let guid = world.players[&1].guid;
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        let def = StateDef::fixture(5005, true, Some((Stat::Defence, -0.5)), Some((Pulse::MagicDamage, 100, 6.0)));
+        let mut q = spell_quote(SpellKind::Curse, 0);
+        // Probabilité nulle : RESULT d'échec, aucun état, mais le monstre est provoqué.
+        q.state = Some(StateQuote { id: 5005, level: 2, duration: 300, chance: 0.0 });
+        world.begin_spell(1, guid, monster, q, crate::spells::Action::State(def.clone()), vec![]).unwrap();
+        assert!(world.mods(monster).is_neutral());
+        assert_eq!(world.monsters[&monster].target, Some(1));
+        world.cast_cooldowns.clear();
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        q.state = Some(StateQuote { id: 5005, level: 2, duration: 300, chance: 100.0 });
+        world.begin_spell(1, guid, monster, q, crate::spells::Action::State(def.clone()), vec![]).unwrap();
+        let packets: Vec<_> = std::iter::from_fn(|| receivers[0].try_recv().ok()).collect();
+        let at = |id: u16| packets.iter().position(|p| p.id == id).unwrap();
+        assert!(at(game::ScSkill::ID) < at(game::ScState::ID), "505 après FIRE");
+        let fire = game::ScSkill::from_packet(&packets[at(game::ScSkill::ID)]).unwrap();
+        assert_eq!(fire.payload.len(), 9 + 10);
+        assert_eq!((fire.payload[9], fire.payload[14], fire.payload[15]), (game::skill_hit::RESULT, 1, 10));
+        let state = game::ScState::from_packet(&packets[at(game::ScState::ID)]).unwrap();
+        assert_eq!((state.handle, state.state_code, state.state_level), (monster, 5005, 2));
+        assert_eq!(state.remain_time as u32 - state.start_time, 300);
+        assert_eq!(world.stat(monster, Stat::Defence, 6), 3);
+        // Un niveau plus faible est refusé ; un niveau égal garde la même instance.
+        let weak = StateQuote { id: 5005, level: 1, duration: 900, chance: 100.0 };
+        assert!(!world.apply_state(monster, 1, &weak, def.clone(), 0));
+        assert!(world.apply_state(monster, 1, &q.state.unwrap(), def.clone(), 0));
+        let again = std::iter::from_fn(|| receivers[0].try_recv().ok()).find(|p| p.id == game::ScState::ID).unwrap();
+        assert_eq!(game::ScState::from_packet(&again).unwrap().state_handle, state.state_handle);
+        assert_eq!(world.state_packets(monster).len(), 1);
+        // Deux tics de 6 sur 10 PV : le second tue, récompense le lanceur et retire l'état.
+        let start = world.now();
+        world.tick_states(start + 50);
+        assert_eq!(world.monsters[&monster].hp, 10);
+        world.tick_states(start + 101);
+        assert_eq!(world.monsters[&monster].hp, 4);
+        world.tick_states(start + 101);
+        assert_eq!(world.monsters[&monster].hp, 4, "un seul tic par intervalle");
+        world.tick_states(start + 202);
+        assert!(!world.monsters[&monster].alive());
+        assert!(matches!(rewards.try_recv().unwrap(), WorldEvent::Reward { exp: 5, .. }));
+        let packets: Vec<_> = std::iter::from_fn(|| receivers[0].try_recv().ok()).collect();
+        let pulses: Vec<_> = packets.iter().filter(|p| p.id == game::ScStateDamage::ID).map(|p| game::ScStateDamage::from_packet(p).unwrap()).collect();
+        assert_eq!(pulses.iter().map(|d| (d.caster, d.target, d.kind, d.value, d.result, d.last, d.total)).collect::<Vec<_>>(),
+            vec![(1, monster, 1, 6, 4, false, 6), (1, monster, 1, 6, 0, true, 12)]);
+        let gone = packets.iter().filter(|p| p.id == game::ScState::ID).map(|p| game::ScState::from_packet(p).unwrap()).last().unwrap();
+        assert_eq!((gone.state_handle, gone.state_level), (state.state_handle, 0));
+        assert!(world.state_packets(monster).is_empty());
+        world.tick_states(start + 400);
+    }
+
+    #[test]
+    fn bless_modifies_stats_heals_expires_and_falls_on_death() {
+        use rz_rappelz::spells::{SpellKind, StateQuote};
+        use rz_rappelz::states::{Pulse, StateDef};
+        let (mut world, mut receivers) = test_world();
+        let monster = test_monster(&mut world);
+        world.update_visibility();
+        let guid = world.players[&1].guid;
+        let attack = StateDef::fixture(1001, false, Some((Stat::Attack, 0.5)), None);
+        let mut q = spell_quote(SpellKind::Bless, 0);
+        q.state = Some(StateQuote { id: 1001, level: 1, duration: 200, chance: 100.0 });
+        assert!(world.begin_spell(1, guid, monster, q, crate::spells::Action::State(attack.clone()), vec![]).is_err());
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        world.begin_spell(1, guid, 2, q, crate::spells::Action::State(attack.clone()), vec![]).unwrap();
+        assert_eq!((world.power_of(2, false), world.power_of(1, false)), (24, 16));
+        let stats = std::iter::from_fn(|| receivers[1].try_recv().ok()).filter(|p| p.id == msg::ScStatInfo::ID)
+            .filter_map(|p| msg::ScStatInfo::from_packet(&p).unwrap().combat_stats()).last().unwrap();
+        assert_eq!(stats.attack, 24);
+        // Vitesse d'attaque doublée : délai divisé par deux.
+        let quick = StateDef::fixture(1002, false, Some((Stat::AttackSpeed, 1.0)), None);
+        let long = StateQuote { id: 1002, level: 1, duration: 9000, chance: 100.0 };
+        world.apply_state(2, 2, &long, quick.clone(), 0);
+        assert_eq!((world.attack_delay(2, 150), world.attack_delay(1, 150)), (75, 150));
+        // Soin périodique plafonné.
+        let regen = StateDef::fixture(1003, false, None, Some((Pulse::HealHp, 100, 30.0)));
+        world.players.get_mut(&2).unwrap().hp = 90;
+        world.apply_state(2, 1, &StateQuote { id: 1003, level: 1, duration: 150, chance: 100.0 }, regen, 0);
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        let start = world.now();
+        world.tick_states(start + 101);
+        assert_eq!(world.players[&2].hp, 100);
+        let heal = std::iter::from_fn(|| receivers[1].try_recv().ok()).find(|p| p.id == game::ScStateDamage::ID).map(|p| game::ScStateDamage::from_packet(&p).unwrap()).unwrap();
+        assert_eq!((heal.kind, heal.value, heal.result, heal.last), (game::state_damage::HEAL_HP, 10, 100, true));
+        // Expiration : 1001 et 1003 partent, 1002 reste ; la mort retire le reste.
+        world.tick_states(start + 250);
+        assert_eq!((world.power_of(2, false), world.state_packets(2).len()), (16, 1));
+        world.players.get_mut(&2).unwrap().hp = 0;
+        world.tick_states(start + 251);
+        assert!(world.state_packets(2).is_empty());
+        // Départ : aucun état ne survit.
+        world.apply_state(1, 1, &long, quick, 0);
+        world.remove_player(1);
+        assert!(world.state_packets(1).is_empty());
+    }
+
+    #[test]
+    fn exclusive_states_replace_each_other() {
+        use rz_rappelz::spells::StateQuote;
+        use rz_rappelz::states::StateDef;
+        let (mut world, _receivers) = test_world();
+        let mut a = StateDef::fixture(1, false, Some((Stat::Attack, 0.5)), None);
+        let mut b = StateDef::fixture(2, false, Some((Stat::Attack, 1.0)), None);
+        (a.exclusive[0], b.exclusive[2]) = (7, 7);
+        let quote = |id| StateQuote { id, level: 1, duration: 500, chance: 100.0 };
+        world.apply_state(1, 1, &quote(1), a, 0);
+        world.apply_state(1, 1, &quote(2), b, 0);
+        assert_eq!((world.state_packets(1).len(), world.power_of(1, false)), (1, 32));
     }
 
     #[test]

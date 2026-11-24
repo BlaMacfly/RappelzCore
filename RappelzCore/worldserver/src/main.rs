@@ -16,6 +16,7 @@ mod party;
 mod quests;
 mod storage;
 mod spells;
+mod states;
 mod summons;
 mod trade;
 mod session;

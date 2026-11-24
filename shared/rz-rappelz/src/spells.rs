@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::dbcstore::{NamedDbc, Row, StoreError};
+use crate::states::StateBook;
 
 pub const SUMMON: u32 = 4001;
 pub const UNSUMMON: u32 = 4002;
@@ -40,13 +41,36 @@ pub enum SpellKind {
     Magical,
     /// mag·(v1+L·v2)+v3+L·v4, plus (v5+L·v6) des PV max de la cible [D pour l'assiette].
     Heal,
+    /// 301 : pose un état sur un monstre (malus) ou un joueur (bonus).
+    Curse,
+    Bless,
     /// 4001 / 4002 : la cible est une carte (docs/re/summon_protocol.md).
     Summon,
     Unsummon,
 }
 
+/// État posé, évalué pour un niveau de compétence (§7).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StateQuote {
+    pub id: u32,
+    pub level: u16,
+    /// Centièmes de seconde.
+    pub duration: u32,
+    /// Pourcentage.
+    pub chance: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StateApply {
+    id: u32,
+    level: (f32, f32),
+    second: (f32, f32),
+    chance: (f32, f32),
+}
+
 #[derive(Clone, Copy, Debug)]
 struct SpellDef {
+    state: Option<StateApply>,
     kind: SpellKind,
     vars: [f32; 6],
     mp: (i32, i32),
@@ -76,6 +100,7 @@ pub struct SpellQuote {
     pub flat: f64,
     /// Part des PV max (soin).
     pub hp_ratio: f64,
+    pub state: Option<StateQuote>,
 }
 
 impl SpellQuote {
@@ -98,16 +123,39 @@ fn centiseconds((base, per): (f32, f32), level: u8) -> Option<u32> {
 const MUST_BE_ZERO: &[&str] = &[
     "cost_hp", "cost_hp_per_skl", "cost_hp_per", "cost_hp_per_skl_per", "cost_mp_per", "cost_mp_per_skl_per",
     "cost_havoc", "cost_havoc_per_skl", "cost_energy", "cost_energy_per_skl", "cost_exp", "cost_jp", "cost_item",
-    "cost_item_count", "need_state_id", "need_havoc", "is_toggle", "is_corpse", "state_id", "skill_enchant_link_id",
+    "cost_item_count", "need_state_id", "need_havoc", "is_toggle", "is_corpse", "skill_enchant_link_id",
 ];
 
-fn definition(r: Row<'_>) -> Option<SpellDef> {
+/// 301 : état de `state_id`, dont tous les effets doivent être connus ; les états
+/// supplémentaires (v1..v5) ne sont pas pris en charge.
+fn state_of(r: Row<'_>, states: &StateBook) -> Option<(SpellKind, StateApply)> {
+    let state = states.get(u32::try_from(r.int("state_id")).ok()?)?;
+    let harmful = r.int("is_harmful") == 1;
+    if state.harmful != harmful || (1..=5).any(|n| r.float(&format!("var{n}")) != 0.0) {
+        return None;
+    }
+    let apply = StateApply {
+        id: state.id,
+        level: (r.int("state_level_base") as f32, r.float("state_level_per_skl")),
+        second: (r.float("state_second"), r.float("state_second_per_level")),
+        chance: (r.int("probability_on_hit") as f32, r.int("probability_inc_by_slv") as f32),
+    };
+    (apply.chance.0 > 0.0).then_some((if harmful { SpellKind::Curse } else { SpellKind::Bless }, apply))
+}
+
+fn definition(r: Row<'_>, states: &StateBook) -> Option<SpellDef> {
     let id = u32::try_from(r.id()).ok()?;
     // `is_passive` et `is_physical_act` sont inversés dans le schéma : 1 = active, 1 = magique.
     if r.int("is_valid") != 1 || r.int("is_passive") != 1 {
         return None;
     }
+    let mut state = None;
     let kind = match (id, r.int("effect_type")) {
+        (_, 301) => {
+            let (kind, apply) = state_of(r, states)?;
+            state = Some(apply);
+            kind
+        }
         (SUMMON, 601) => SpellKind::Summon,
         (UNSUMMON, 602) => SpellKind::Unsummon,
         (_, 30001) => SpellKind::Physical,
@@ -115,10 +163,10 @@ fn definition(r: Row<'_>) -> Option<SpellDef> {
         (_, 501) => SpellKind::Heal,
         _ => return None,
     };
-    let targeted = matches!(kind, SpellKind::Physical | SpellKind::Magical | SpellKind::Heal);
-    if targeted {
-        let harmful = i32::from(kind != SpellKind::Heal);
+    if !matches!(kind, SpellKind::Summon | SpellKind::Unsummon) {
+        let harmful = i32::from(!matches!(kind, SpellKind::Heal | SpellKind::Bless));
         let supported = MUST_BE_ZERO.iter().all(|c| r.float(c) == 0.0 && r.int(c) == 0)
+            && (state.is_some() || r.int("state_id") == 0)
             && r.int("target") == 1
             && r.int("is_need_target") == 1
             && r.int("is_harmful") == harmful;
@@ -127,6 +175,7 @@ fn definition(r: Row<'_>) -> Option<SpellDef> {
         }
     }
     let mut def = SpellDef {
+        state,
         kind,
         vars: std::array::from_fn(|i| r.float(&format!("var{}", i + 1))),
         mp: (r.int("cost_mp"), r.int("cost_mp_per_skl")),
@@ -150,9 +199,9 @@ pub struct SpellBook {
 }
 
 impl SpellBook {
-    pub fn open(dbc_dir: &Path) -> Result<Self, StoreError> {
+    pub fn open(dbc_dir: &Path, states: &StateBook) -> Result<Self, StoreError> {
         let table = NamedDbc::open(dbc_dir, "skill")?;
-        Ok(Self { spells: table.rows().filter_map(|r| Some((u32::try_from(r.id()).ok()?, definition(r)?))).collect() })
+        Ok(Self { spells: table.rows().filter_map(|r| Some((u32::try_from(r.id()).ok()?, definition(r, states)?))).collect() })
     }
 
     pub fn len(&self) -> usize {
@@ -174,7 +223,18 @@ impl SpellBook {
             SpellKind::Physical => (v[0] + l * v[1], v[2] + l * v[3], 0.0),
             SpellKind::Magical => (v[0] + l * v[1], v[3] + l * v[4], 0.0),
             SpellKind::Heal => (v[0] + l * v[1], v[2] + l * v[3], v[4] + l * v[5]),
-            SpellKind::Summon | SpellKind::Unsummon => (0.0, 0.0, 0.0),
+            SpellKind::Curse | SpellKind::Bless | SpellKind::Summon | SpellKind::Unsummon => (0.0, 0.0, 0.0),
+        };
+        let state = match d.state {
+            None => None,
+            Some(s) => {
+                let value = s.level.0 + (s.level.1 * f32::from(level) + 1e-4).trunc();
+                let duration = centiseconds(s.second, level).filter(|d| *d > 0)?;
+                let chance = s.chance.0 + s.chance.1 * f32::from(level);
+                // Niveau 0 = retrait côté client : un tel état ne peut pas être posé.
+                let value = (1.0..=10_000.0).contains(&value).then_some(value as u16)?;
+                Some(StateQuote { id: s.id, level: value, duration, chance })
+            }
         };
         Some(SpellQuote {
             id,
@@ -188,6 +248,7 @@ impl SpellBook {
             ratio,
             flat,
             hp_ratio,
+            state,
         })
     }
 }
@@ -200,8 +261,14 @@ mod tests {
     #[test]
     fn real_skills_follow_the_client_formulas() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../client-data/server-data/dbc");
-        let Ok(book) = SpellBook::open(&dir) else { return };
+        let states = StateBook::open(&dir).unwrap_or_default();
+        let Ok(book) = SpellBook::open(&dir, &states) else { return };
         assert!(book.len() > 40, "{}", book.len());
+        // 3603 Peau Fragile : état 5005, niveau = niveau de compétence, 30 s.
+        let q = book.quote(3603, 2).unwrap();
+        assert_eq!((q.kind, q.state.map(|s| (s.id, s.level, s.duration))), (SpellKind::Curse, Some((5005, 2, 3000))));
+        // 3222 Eau Régénératrice : niveau d'état 28 par niveau.
+        assert_eq!(book.quote(3222, 1).and_then(|q| q.state).map(|s| (s.level, s.duration)), Some((28, 1600)));
         // 2001 Frappe Centrée : att·(0,795+0,12·L)+0+L·103,5 ; portée d'attaque ; instantanée.
         let q = book.quote(2001, 2).unwrap();
         assert_eq!((q.kind, q.mp, q.cast, q.cooldown, q.range), (SpellKind::Physical, 36, 0, 1000, None));
@@ -214,7 +281,7 @@ mod tests {
         let q = book.quote(3202, 1).unwrap();
         assert_eq!((q.kind, q.cast), (SpellKind::Heal, 250));
         assert_eq!(q.nominal(100, 1000), 243);
-        // 45127 : surchargée par l'exécutable. 30011 (zone) et 301 (états) : refusées.
+        // 45127 : surchargée par l'exécutable. 45116 et 2501 : refusées.
         if let (Some(a), Some(b)) = (book.quote(45127, 1), book.quote(45127, 2)) {
             assert!((2.0 * a.ratio - b.ratio - 1.2).abs() < 1e-3, "v1 surchargé");
         }

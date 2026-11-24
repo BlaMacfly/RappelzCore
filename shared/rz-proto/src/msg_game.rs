@@ -49,6 +49,7 @@ pub mod id {
     pub const TS_SC_ADDED_SKILL_LIST: u16 = 404;
     pub const TS_SC_QUEST_LIST: u16 = 600;
     pub const TS_SC_QUEST_STATUS: u16 = 601;
+    pub const TS_SC_STATE_DAMAGE: u16 = 406;
     pub const TS_SC_ADD_SUMMON_INFO: u16 = 301;
     pub const TS_SC_REMOVE_SUMMON_INFO: u16 = 302;
     pub const TS_EQUIP_SUMMON: u16 = 303;
@@ -1079,6 +1080,51 @@ impl Message for ScQuestList {
     }
 }
 
+/// Types de TM_STATE_DAMAGE [O].
+pub mod state_damage {
+    pub const DAMAGE: u16 = 1;
+    pub const MP_LOSS: u16 = 2;
+    pub const HEAL_HP: u16 = 4;
+    pub const HEAL_MP: u16 = 5;
+}
+
+/// TM_STATE_DAMAGE (406), 36 octets [O] : tic de dégâts ou de soin d'un état ; la valeur finale
+/// suffit au client (pas de TS_SC_HPMP).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ScStateDamage {
+    pub caster: u32,
+    pub target: u32,
+    pub state_code: u32,
+    pub state_level: u16,
+    pub kind: u16,
+    pub value: i32,
+    /// PV ou PM après le tic.
+    pub result: i32,
+    pub last: bool,
+    pub total: i32,
+}
+
+impl Message for ScStateDamage {
+    const ID: u16 = id::TS_SC_STATE_DAMAGE;
+    fn write(&self, w: &mut Writer) {
+        w.u32(self.caster).u32(self.target).u32(self.state_code).u16(self.state_level).u16(self.kind);
+        w.i32(self.value).i32(self.result).bool(self.last).i32(self.total);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            caster: r.u32()?,
+            target: r.u32()?,
+            state_code: r.u32()?,
+            state_level: r.u16()?,
+            kind: r.u16()?,
+            value: r.i32()?,
+            result: r.i32()?,
+            last: r.bool()?,
+            total: r.i32()?,
+        })
+    }
+}
+
 // ───────────────────────────── Invocations ─────────────────────────────
 // docs/re/summon_protocol.md. Ce client n'envoie pas TS_CS_SUMMON (304) : invoquer et renvoyer
 // sont des compétences (TS_CS_SKILL) dont la cible est le handle de la **carte**.
@@ -1755,6 +1801,17 @@ mod tests {
         assert_eq!(&bytes[7..11], &0x0102_0304i32.to_le_bytes());
         assert_eq!(&bytes[0xb..0xf], &5i32.to_le_bytes());
         assert_eq!(bytes[0x23], 2);
+    }
+
+    #[test]
+    fn state_damage_matches_observed_layout() {
+        let d = ScStateDamage { caster: 1, target: 2, state_code: 13023, state_level: 3, kind: 1, value: 42, result: 58, last: true, total: 84 };
+        assert_eq!(size_of(&d), 36);
+        roundtrip(&d);
+        let b = d.to_packet().to_bytes();
+        assert_eq!((&b[0x15..0x17], &b[0x17..0x1b]), (&1u16.to_le_bytes()[..], &42i32.to_le_bytes()[..]));
+        assert_eq!((b[0x1f], &b[0x20..0x24]), (1, &84i32.to_le_bytes()[..]));
+        assert_eq!(size_of(&ScState::default()), 31);
     }
 
     #[test]

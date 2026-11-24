@@ -12,6 +12,7 @@ use rz_proto::msg::{self, Message};
 use rz_proto::msg_game::{self as game, id as gid, skill_hit, skill_type};
 use rz_proto::{RawPacket, Writer};
 use rz_rappelz::spells::{SpellKind, SpellQuote};
+use rz_rappelz::states::{Stat, StateDef};
 
 use crate::session::Session;
 use crate::summons::summon_handle;
@@ -25,6 +26,7 @@ const MELEE_RANGE: f32 = 24.0;
 #[derive(Clone, Debug)]
 pub(crate) enum Action {
     Effect,
+    State(StateDef),
     Summon { pet: Pet, run_speed: f32 },
     Unsummon { card: u32 },
 }
@@ -46,6 +48,13 @@ pub(crate) struct PendingSpell {
 fn casting_payload(duration: u32) -> Vec<u8> {
     let mut w = Writer::new();
     w.u32(duration).u16(0).zeros(3);
+    w.finish(0).body
+}
+
+/// Impact RESULT (10 octets) : succès, genre 10 = état ajouté [O].
+fn state_payload(target: u32, success: bool) -> Vec<u8> {
+    let mut w = Writer::new();
+    w.bool(false).f32(0.0).u8(1).u8(1).u16(1).u8(skill_hit::RESULT).u32(target).bool(success).i32(10);
     w.finish(0).body
 }
 
@@ -86,11 +95,11 @@ impl World {
         let now = self.now();
         let position = match q.kind {
             SpellKind::Summon | SpellKind::Unsummon => return true,
-            SpellKind::Heal => match self.players.get(&target).filter(|t| t.hp > 0 && t.layer == p.layer) {
+            SpellKind::Heal | SpellKind::Bless => match self.players.get(&target).filter(|t| t.hp > 0 && t.layer == p.layer) {
                 Some(t) => t.motion.position(now),
                 None => return false,
             },
-            SpellKind::Physical | SpellKind::Magical => match self.monsters.get(&target).filter(|m| m.alive()) {
+            SpellKind::Physical | SpellKind::Magical | SpellKind::Curse => match self.monsters.get(&target).filter(|m| m.alive()) {
                 Some(m) => m.motion.position(now),
                 None => return false,
             },
@@ -187,7 +196,7 @@ impl World {
         let q = c.quote;
         // L'invocation peut échouer (déjà présente, limite) : ni coût ni recharge dans ce cas.
         let done = match &c.action {
-            Action::Effect => true,
+            Action::Effect | Action::State(_) => true,
             Action::Summon { pet, run_speed } => self.summon(handle, pet, *run_speed),
             Action::Unsummon { card } => self.unsummon(summon_handle(*card)),
         };
@@ -198,23 +207,31 @@ impl World {
             self.notify(handle, "Invocation impossible.");
             return;
         }
-        let (power, level_now) = {
+        {
             let p = self.players.get_mut(&handle).unwrap();
             p.mp = (p.mp - q.mp).max(0);
             p.enter.creature.mp = p.mp;
             p.last_combat = now as u32;
-            let magic = crate::gameplay::magic_for(p.enter.creature.level.clamp(0, 255) as u8);
-            (if q.kind == SpellKind::Physical { p.attack } else { magic }, self.now())
-        };
+        }
+        let power = self.power_of(handle, q.kind != SpellKind::Physical);
+        let level_now = self.now();
         let mut killed = None;
+        // État à poser, après FIRE (le client attend 505 ensuite).
+        let mut posed = None;
         // Vitaux finaux de la cible, pour ceux qui la voient sans voir le lanceur.
         let mut vitals = None;
         let payload = match q.kind {
             SpellKind::Physical | SpellKind::Magical => {
-                let m = self.monsters.get_mut(&c.target).unwrap();
                 let physical = q.kind == SpellKind::Physical;
                 let nominal = q.nominal(power, 0);
-                let damage = crate::world::roll_damage(nominal, if physical { m.info.defence } else { m.info.magic_defence });
+                let mods = self.mods(c.target);
+                let m = self.monsters.get_mut(&c.target).unwrap();
+                let defence = if physical {
+                    mods.apply(Stat::Defence, m.info.defence)
+                } else {
+                    mods.apply(Stat::MagicDefence, m.info.magic_defence)
+                };
+                let damage = crate::world::roll_damage(nominal, defence);
                 m.hp = (m.hp - damage).max(0);
                 if m.target.is_none() {
                     m.target = Some(handle);
@@ -241,10 +258,28 @@ impl World {
                 vitals = Some(World::hpmp_packet(c.target, t.hp, t.max_hp, t.mp, t.max_mp, amount));
                 heal_payload(c.target, t.hp, amount)
             }
+            SpellKind::Curse | SpellKind::Bless => {
+                let hit = match q.state {
+                    Some(s) => rand::random::<f32>() * 100.0 < s.chance,
+                    None => false,
+                };
+                if let (true, Action::State(def), Some(s)) = (hit, &c.action, q.state) {
+                    posed = Some((s, def.clone()));
+                }
+                if let Some(m) = self.monsters.get_mut(&c.target) {
+                    m.target.get_or_insert(handle);
+                }
+                state_payload(c.target, posed.is_some())
+            }
             SpellKind::Summon | SpellKind::Unsummon => game::ScSkill::fire_payload(false, 0.0, 0, 1, &[]),
         };
         if let Some(packet) = self.spell_event(handle, &c, skill_type::FIRE, q.mp, payload) {
             self.broadcast_around(handle, &packet, true);
+        }
+        if let Some((s, def)) = posed {
+            let physical = def.periodic.is_some_and(|p| p.pulse == rz_rappelz::states::Pulse::PhysicalDamage);
+            let power = self.power_of(handle, !physical);
+            self.apply_state(c.target, handle, &s, def, power);
         }
         if let Some(packet) = vitals {
             for viewer in self.players.keys().copied().collect::<Vec<_>>() {
@@ -321,6 +356,10 @@ impl Session {
                 } else {
                     Action::Unsummon { card: pet.card }
                 }
+            }
+            SpellKind::Curse | SpellKind::Bless => {
+                let def = q.state.and_then(|s| self.ctx.data.states.get(s.id)).ok_or("État non pris en charge.")?;
+                Action::State(def.clone())
             }
             _ => Action::Effect,
         };
