@@ -124,28 +124,30 @@ async fn transfer(
     Ok(true)
 }
 
-async fn move_gold(tx: &mut Transaction<'_, MySql>, from: u32, to: u32, gold: i64) -> Result<()> {
+/// Faux (l'appelant annule tout) si le donneur n'a pas cet or en base ou si le receveur déborde.
+async fn move_gold(tx: &mut Transaction<'_, MySql>, from: u32, to: u32, gold: i64) -> Result<bool> {
     if gold <= 0 {
-        return Ok(());
+        return Ok(true);
     }
-    // L'or vivant est celui des sessions (sauvegardé en absolu) ; on garde la base cohérente
-    // en cas d'arrêt avant la prochaine sauvegarde.
-    sqlx::query("UPDATE characters SET money = IF(money >= ?, money - ?, 0) WHERE guid = ?")
-        .bind(gold)
+    // Chaque joueur sauvegarde son or en confirmant : la base fait foi à l'exécution.
+    let taken = sqlx::query("UPDATE characters SET money = money - ? WHERE guid = ? AND money >= ?")
         .bind(gold)
         .bind(from)
+        .bind(gold)
         .execute(&mut **tx)
         .await?;
-    sqlx::query("UPDATE characters SET money = LEAST(money + ?, 4294967295) WHERE guid = ?")
+    let given = sqlx::query("UPDATE characters SET money = money + ? WHERE guid = ? AND money <= 4294967295 - ?")
         .bind(gold)
         .bind(to)
+        .bind(gold)
         .execute(&mut **tx)
         .await?;
-    Ok(())
+    Ok(taken.rows_affected() == 1 && given.rows_affected() == 1)
 }
 
 /// Exécute l'échange ; `None` (rien n'est modifié) si un objet n'est plus détenu dans le sac
-/// en quantité suffisante, ou si un sac n'a pas assez de place.
+/// en quantité suffisante, si l'or n'est pas en base ou si un sac n'a pas assez de place.
+/// Une erreur laisse l'issue **incertaine** : les deux sessions doivent partir sans sauvegarder.
 pub async fn exchange(
     db: &MySqlPool,
     a: Party<'_>,
@@ -181,8 +183,9 @@ pub async fn exchange(
     {
         return Ok(None);
     }
-    move_gold(&mut tx, a.guid, b.guid, a.gold).await?;
-    move_gold(&mut tx, b.guid, a.guid, b.gold).await?;
+    if !move_gold(&mut tx, a.guid, b.guid, a.gold).await? || !move_gold(&mut tx, b.guid, a.guid, b.gold).await? {
+        return Ok(None);
+    }
     tx.commit().await?;
     Ok(Some((side_a, side_b)))
 }

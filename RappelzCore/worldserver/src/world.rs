@@ -86,6 +86,8 @@ pub enum WorldEvent {
     /// Le joueur est mort.
     Died,
     /// Échange exécuté : objets perdus (guid, restant), objets reçus, variation de rupees.
+    /// Échange à l'issue SQL incertaine : quitter sans sauvegarder.
+    TradeUncertain,
     TradeApplied { lost: Vec<(u32, u32)>, gained: Vec<rz_database::trade::Received>, gold_delta: i64 },
 }
 
@@ -1082,6 +1084,59 @@ mod tests {
             assert_eq!(items.len(),1);assert_eq!((items[0].guid,items[0].entry,items[0].count,items[0].slot),(99,500,7,28));
             assert!(session.ctx.world.lock().unwrap().ground.items.is_empty());assert!(rx.try_recv().is_err());
         }
+    }
+
+    #[tokio::test]
+    async fn leaving_applies_a_finished_trade_before_any_save() {
+        let (mut session, mut rx) = isolated_session(None);
+        session.ctx.chars.close().await;
+        session.in_game.as_mut().unwrap().character.money = 100;
+        let (events, queue) = tokio::sync::mpsc::unbounded_channel();
+        session.events_rx = Some(queue);
+        // La base a déjà retiré 30 rupees ; l'événement attend encore dans la file.
+        events.send(WorldEvent::TradeApplied { lost: vec![(99, 3)], gained: vec![], gold_delta: -30 }).unwrap();
+        session.settle_before_leaving().await.unwrap();
+        let g = session.in_game.as_ref().unwrap();
+        assert_eq!(g.character.money, 70, "la sauvegarde de départ réécrirait l'ancien or");
+        assert_eq!(g.items[0].count, 3);
+        while rx.try_recv().is_ok() {}
+    }
+
+    #[tokio::test]
+    async fn leaving_waits_for_a_running_trade_and_receives_its_outcome() {
+        let (mut session, _rx) = isolated_session(None);
+        session.ctx.chars.close().await;
+        session.in_game.as_mut().unwrap().character.money = 100;
+        let (events, queue) = tokio::sync::mpsc::unbounded_channel();
+        session.events_rx = Some(queue);
+        let ctx = session.ctx.clone();
+        ctx.world.lock().unwrap().trades.settling.insert(1);
+        let other = ctx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+            let mut w = other.world.lock().unwrap();
+            events.send(WorldEvent::TradeApplied { lost: vec![], gained: vec![], gold_delta: -100 }).unwrap();
+            w.trades.settling.remove(&1);
+        });
+        session.settle_before_leaving().await.unwrap();
+        assert_eq!(session.in_game.as_ref().unwrap().character.money, 0);
+    }
+
+    #[tokio::test]
+    async fn uncertain_trade_leaves_without_saving_and_leaving_cancels_open_trades() {
+        let (mut session, _rx) = isolated_session(None);
+        session.ctx.chars.close().await;
+        {
+            let mut w = session.ctx.world.lock().unwrap();
+            w.trades.requests.insert(2, 1);
+        }
+        session.settle_before_leaving().await.unwrap();
+        assert!(session.ctx.world.lock().unwrap().trades.requests.is_empty());
+        let (events, queue) = tokio::sync::mpsc::unbounded_channel();
+        session.events_rx = Some(queue);
+        events.send(WorldEvent::TradeUncertain).unwrap();
+        assert!(session.settle_before_leaving().await.is_err());
+        assert!(session.in_game.is_none(), "aucune sauvegarde possible");
     }
 
     #[test]

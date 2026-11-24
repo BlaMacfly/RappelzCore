@@ -290,3 +290,21 @@ cours de négociation, refus (4), objets d'échange côté Brann (bot sans journ
 
 Restent ouverts : capacité réelle de l'entrepôt, entrepôt par compte ou par personnage, sens de 218/219 côté
 entrepôt, déclencheur du mode 11.
+
+### Correctif du 2026-11-24 : duplication d'or
+
+**Défaut présent depuis `8185dcf`.** L'échange mettait la base à jour, puis chaque session corrigeait son or en
+mémoire par un événement. Un joueur qui coupait sa connexion juste après avoir validé partait sans traiter cet
+événement ; sa sauvegarde de départ réécrivait l'ancien montant. Reproduit : 10 échanges sur 10 dupliqués.
+
+| Étape | Règle désormais appliquée |
+|---|---|
+| Exécution | les deux personnages sont marqués « en règlement » sous le verrou qui retire l'échange ; la marque tombe une fois les événements déposés, même si la tâche est abandonnée |
+| Départ | annuler ses échanges ouverts, attendre la fin du règlement, traiter les événements reçus, puis seulement sauvegarder |
+| Reconnexion | retirer l'ancienne session, attendre le règlement, puis lire le personnage en base |
+| Confirmation (8) | le personnage est sauvegardé ; la transaction exige que l'or offert soit en base et que le receveur ne déborde pas, sinon rien n'est modifié |
+| Issue SQL incertaine | les deux sessions partent sans sauvegarder |
+
+Validation : 17 échanges exécutés dont 13 avec coupure brutale (`rz-bot --trade-with … --vanish`), somme de l'or
+inchangée ; trois tests unitaires. Fenêtre restante, non traitée : un arrêt brutal du **serveur** dans les quelques
+millisecondes entre la validation SQL et le traitement de l'événement, si une sauvegarde périodique y tombe aussi.

@@ -507,6 +507,10 @@ impl Session {
                 }
                 self.quest_kill(monster_id).await?;
             }
+            WorldEvent::TradeUncertain => {
+                self.detach_world_without_save();
+                anyhow::bail!("échange incertain ; départ sans sauvegarde");
+            }
             WorldEvent::TradeApplied { lost, gained, gold_delta } => self.apply_trade(lost, gained, gold_delta).await?,
             WorldEvent::Died => {
                 let (x, y) = ctx.settings.start_position(self.in_game.as_ref().unwrap().character.race as i32);

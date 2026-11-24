@@ -5,7 +5,7 @@
 //! chaque objet, puis chaque session applique sa part via `WorldEvent::TradeApplied`.
 //! Pendant un échange, les actions qui modifient le sac ou les rupees sont refusées.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use rz_database::characters::BAG_SLOT_BASE;
@@ -50,6 +50,37 @@ pub struct Trades {
     /// Demande en attente : cible → demandeur.
     pub requests: HashMap<u32, u32>,
     pub open: HashMap<u32, TradeSide>,
+    /// Personnages (guid) dont un échange s'exécute en base : ni leur session ni une reconnexion
+    /// ne doit relire ou sauvegarder leur or avant la fin.
+    pub settling: HashSet<u32>,
+}
+
+/// Durée maximale d'attente d'un échange en cours d'exécution.
+const SETTLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Marque deux personnages pendant l'exécution ; la marque tombe même si la tâche est abandonnée.
+struct Settling {
+    ctx: std::sync::Arc<crate::Ctx>,
+    guids: [u32; 2],
+}
+
+impl Drop for Settling {
+    fn drop(&mut self) {
+        let mut w = self.ctx.world.lock().unwrap();
+        for g in &self.guids {
+            w.trades.settling.remove(g);
+        }
+    }
+}
+
+/// Attend la fin d'un échange en cours d'exécution pour ce personnage.
+pub async fn wait_settled(ctx: &crate::Ctx, guid: u32) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + SETTLE_TIMEOUT;
+    while ctx.world.lock().unwrap().trades.settling.contains(&guid) {
+        anyhow::ensure!(tokio::time::Instant::now() < deadline, "échange toujours en cours d'exécution");
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    Ok(())
 }
 
 impl Trades {
@@ -92,6 +123,11 @@ fn applied(side: Side, gold_delta: i64) -> WorldEvent {
 
 impl Session {
     pub async fn handle_trade(&mut self, req: game::Trade) -> Result<()> {
+        if req.mode == mode::CONFIRM {
+            // L'or offert doit être en base : la transaction l'exige (aucune sauvegarde périmée
+            // ne peut plus le réécrire, cf. `leave_world`).
+            self.save().await?;
+        }
         let Some(g) = &self.in_game else { return Ok(()) };
         let me = g.handle;
         let character = g.character.guid;
@@ -215,13 +251,19 @@ impl Session {
                 // Les deux ont validé : on sort l'échange de l'état partagé et on l'exécute.
                 let a = w.trades.open.remove(&me).unwrap();
                 let b = w.trades.open.remove(&partner).unwrap();
-                exec = Some((a, partner, b));
+                // Même verrou que le retrait : aucun départ ne peut passer entre les deux.
+                w.trades.settling.extend([a.character, b.character]);
+                let settling = Settling { ctx: ctx.clone(), guids: [a.character, b.character] };
+                exec = Some((a, partner, b, settling));
             }
             _ => {}
         }
         }
-        if let Some((a, partner, b)) = exec {
-            self.execute_trade(me, a, partner, b).await?;
+        if let Some((a, partner, b, settling)) = exec {
+            let done = self.execute_trade(me, a, partner, b).await;
+            // Les événements sont déjà dans les files : les départs en attente peuvent reprendre.
+            drop(settling);
+            done?;
         }
         Ok(())
     }
@@ -242,10 +284,17 @@ impl Session {
         let w = ctx.world.lock().unwrap();
         let outcome = match result {
             Ok(Some(sides)) => sides,
-            other => {
-                if let Err(error) = other {
-                    tracing::error!("échange {me} ↔ {partner} annulé : {error:#}");
+            Err(error) => {
+                // Issue incertaine (COMMIT peut-être passé) : aucune des deux sessions ne doit
+                // réécrire la base avec son état en mémoire.
+                if let Some(p) = w.players.get(&partner) {
+                    let _ = p.events.send(WorldEvent::TradeUncertain);
                 }
+                drop(w);
+                self.detach_world_without_save();
+                return Err(error.context("échange incertain ; départ sans sauvegarde"));
+            }
+            Ok(None) => {
                 for (h, o) in [(me, partner), (partner, me)] {
                     w.send_to(h, packet(o, mode::CANCEL, Default::default()));
                     w.notify(h, "Échange annulé : objets modifiés ou sac plein.");

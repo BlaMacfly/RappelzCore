@@ -352,7 +352,20 @@ impl Session {
             return Ok(());
         }
         let ctx = self.ctx.clone();
-        let Some(mut c) = characters::by_name(&ctx.chars, &name).await?.filter(|c| c.account == self.account_id()) else {
+        let Some(found) = characters::by_name(&ctx.chars, &name).await?.filter(|c| c.account == self.account_id()) else {
+            self.send(&msg::ScLoginResult { result: result::NOT_EXIST, ..Default::default() });
+            return Ok(());
+        };
+        // Retirer d'abord une session déjà en jeu (plus aucun échange possible pour elle), attendre
+        // un échange en cours d'exécution, puis seulement lire l'or et les objets en base.
+        {
+            let mut world = ctx.world.lock().unwrap();
+            if let Some(dup) = world.players.values().find(|p| p.guid == found.guid).map(|p| p.handle) {
+                world.remove_player(dup);
+            }
+        }
+        crate::trade::wait_settled(&ctx, found.guid).await?;
+        let Some(mut c) = characters::by_guid(&ctx.chars, found.guid).await?.filter(|c| c.account == self.account_id()) else {
             self.send(&msg::ScLoginResult { result: result::NOT_EXIST, ..Default::default() });
             return Ok(());
         };
@@ -504,7 +517,30 @@ impl Session {
         self.skill_catalog=None;
     }
 
+    /// Annule les échanges ouverts, attend celui qui s'exécute et traite ses événements.
+    pub(crate) async fn settle_before_leaving(&mut self) -> Result<()> {
+        let Some((handle, guid)) = self.in_game.as_ref().map(|g| (g.handle, g.character.guid)) else { return Ok(()) };
+        {
+            let mut w = self.ctx.world.lock().unwrap();
+            // Ne toucher qu'à son propre personnage (handle repris par une reconnexion).
+            if w.players.get(&handle).is_some_and(|p| p.guid == guid) {
+                w.cancel_trade(handle);
+            }
+        }
+        crate::trade::wait_settled(&self.ctx, guid).await?;
+        while let Some(ev) = self.events_rx.as_mut().and_then(|rx| rx.try_recv().ok()) {
+            self.handle_world_event(ev).await?;
+        }
+        Ok(())
+    }
+
     pub async fn leave_world(&mut self) -> Result<()> {
+        if self.in_game.is_none() {
+            return Ok(());
+        }
+        // Un échange qui vient d'aboutir a déjà modifié la base : appliquer sa part en mémoire
+        // avant toute sauvegarde, sinon l'ancien montant d'or serait réécrit (duplication).
+        self.settle_before_leaving().await?;
         if self.in_game.is_none() {
             return Ok(());
         }
