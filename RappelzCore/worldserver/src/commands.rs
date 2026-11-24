@@ -33,6 +33,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "money", level: 2, help: ".money <n> — ajoute des rupees" },
     Command { name: "additem", level: 2, help: ".additem <id> [nombre] — ajoute un objet (Item.dbc)" },
     Command { name: "quest", level: 2, help: ".quest add <id> | remove <id> — ajoute/retire une quête sans conditions (comme AzerothCore)" },
+    Command { name: "learn", level: 2, help: ".learn <id> [niveau] — apprend une compétence sans conditions (comme AzerothCore)" },
     Command { name: "spawn", level: 2, help: ".spawn <id_monstre> [respawn_s] — place un monstre ici (table creature)" },
     Command { name: "vendor", level: 3, help: ".vendor add <id_objet> — ajoute l'objet au PNJ ciblé le plus proche (npc_vendor)" },
 ];
@@ -157,6 +158,10 @@ pub async fn handle(session: &mut Session, line: &str) -> Result<()> {
                 reply(&format!("Quête {code} retirée."));
             }
             _ => reply("Usage : .quest add <id> | .quest remove <id> (id de Quest.dbc)"),
+        },
+        "learn" => match (args.first().and_then(|a| a.parse::<u32>().ok()), args.get(1).map_or(Ok(1), |a| a.parse::<u8>())) {
+            (Some(id), Ok(level)) if id > 0 && level > 0 && session.gm_learn(id, level) => reply(&format!("Compétence {id} apprise (niveau {level}).")),
+            _ => reply("Usage : .learn <id> [niveau]"),
         },
         "spawn" => match args.first().and_then(|a| a.parse::<u32>().ok()).and_then(|id| ctx.data.monsters.get(&id).cloned()) {
             Some(info) => {

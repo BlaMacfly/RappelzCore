@@ -73,6 +73,8 @@ pub fn handles(id: u16) -> bool {
             | gid::TS_CS_STORAGE
             | gid::TS_TRADE
             | gid::TS_CS_TAKE_ITEM
+            | gid::TS_EQUIP_SUMMON
+            | gid::TS_CS_GET_SUMMON_SETUP_INFO
     )
 }
 
@@ -124,6 +126,12 @@ impl Session {
             uid: it.guid as i64,
             count: it.count as i64,
             endurance,
+            // Carte : créature enregistrée, sinon créature par défaut de l'objet.
+            summon_code: self
+                .pet_of(it.handle())
+                .map(|p| p.entry)
+                .or_else(|| self.ctx.data.items.get(&it.entry).map(|i| i.card_creature))
+                .unwrap_or(0),
             level: 1,
             wear_position: if it.worn() {
                 it.slot as i16
@@ -296,7 +304,16 @@ impl Session {
                 let req = game::CsAttackRequest::from_packet(&p)?;
                 self.ctx.world.lock().unwrap().start_attack(handle, req.target_handle);
             }
-            gid::TS_CS_SKILL => self.cast_skill(game::CsSkill::from_packet(&p)?),
+            gid::TS_CS_SKILL => {
+                let req = game::CsSkill::from_packet(&p)?;
+                if matches!(req.skill_id, game::summon_skill::SUMMON | game::summon_skill::UNSUMMON) {
+                    self.summon_skill(&req);
+                } else {
+                    self.cast_skill(req);
+                }
+            }
+            gid::TS_EQUIP_SUMMON => self.set_formation(game::EquipSummon::from_packet(&p)?).await?,
+            gid::TS_CS_GET_SUMMON_SETUP_INFO => self.send_formation(),
             gid::TS_CS_CANCEL_ACTION => {
                 let mut world=self.ctx.world.lock().unwrap();
                 world.cancel_restoration(handle);world.stop_attack(handle);
@@ -441,7 +458,8 @@ impl Session {
             return Ok(());
         }
         let worn = !self.in_game.as_ref().is_some_and(|g| g.items.iter().any(|i| i.handle() == item_handle && i.in_bag()));
-        if worn {
+        if worn || self.pet_of(item_handle).is_some() {
+            // Une carte de créature ne se vend pas : la créature serait perdue.
             return Ok(());
         }
         if let Some(it) = self.remove_item(item_handle).await? {

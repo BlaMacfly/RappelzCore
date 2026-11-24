@@ -60,6 +60,12 @@ struct Cli {
     /// Ramasse les objets au sol visibles (TS_CS_TAKE_ITEM).
     #[arg(long)]
     loot: bool,
+    /// Invoque la créature de la première carte reçue (TS_CS_SKILL 4001, formation place 1).
+    #[arg(long)]
+    summon: bool,
+    /// Renvoie la créature dès qu'elle apparaît (TS_CS_SKILL 4002).
+    #[arg(long)]
+    unsummon: bool,
     /// Jette au sol le premier objet du sac (TS_CS_DROP_ITEM).
     #[arg(long)]
     drop: bool,
@@ -261,6 +267,9 @@ async fn main() -> Result<()> {
     let mut nearest_npc: Option<(u32, f32)> = None;
     // Avec --quest : PNJ à portée encore à essayer.
     let mut npc_queue: std::collections::VecDeque<u32> = Default::default();
+    // Invocations : handle de créature → handle de carte.
+    let mut card_of = std::collections::HashMap::<u32, u32>::new();
+    let skill = |skill_id: u16, caster: u32, target: u32| game::CsSkill { skill_id, caster, target, x: 0.0, y: 0.0, z: 0.0, layer: 0, skill_level: 1 };
     // Échange : partenaire, verrous et confirmations vus.
     let (mut trade_partner, mut requested) = (None::<u32>, false);
     let (mut frozen, mut confirmed, mut processed) = (std::collections::HashSet::<u32>::new(), std::collections::HashSet::<u32>::new(), false);
@@ -318,6 +327,12 @@ async fn main() -> Result<()> {
                     }
                     players.push(pl.name)
                 }
+                (h, EnterKind::Summon { creature, master, code, name, .. }) => {
+                    tracing::info!("[invocation] {name} (créature {code}, niveau {}, handle {h}) de {master} apparaît", creature.level);
+                    if let (true, Some(&card)) = (cli.unsummon && master == lr.handle, card_of.get(&h)) {
+                        w.send(&skill(game::summon_skill::UNSUMMON, lr.handle, card)).await?;
+                    }
+                }
                 (h, EnterKind::Item { code, count, owners, .. }) => {
                     tracing::info!("[sol] objet {h} : code {code} ×{count} (ayant droit {})", owners[0]);
                     if cli.loot {
@@ -326,6 +341,20 @@ async fn main() -> Result<()> {
                 }
                 (_, _) => {}
             },
+            gid::TS_SC_ADD_SUMMON_INFO => {
+                let a = game::ScAddSummonInfo::from_packet(&p)?;
+                tracing::info!("[invocation] fiche : carte {} → créature {} « {} » niveau {}", a.card_handle, a.code, a.name, a.level);
+                card_of.insert(a.summon_handle, a.card_handle);
+                if cli.summon && card_of.len() == 1 {
+                    let mut cards = [0; game::FORMATION_SLOTS];
+                    cards[0] = a.card_handle;
+                    w.send(&game::EquipSummon { open_dialog: 0, cards }).await?;
+                    w.send(&skill(game::summon_skill::SUMMON, lr.handle, a.card_handle)).await?;
+                }
+            }
+            gid::TS_SC_REMOVE_SUMMON_INFO => tracing::info!("[invocation] fiche retirée : carte {}", game::Handle::<{ gid::TS_SC_REMOVE_SUMMON_INFO }>::from_packet(&p)?.0),
+            gid::TS_EQUIP_SUMMON => tracing::info!("[invocation] formation {:?}", game::EquipSummon::from_packet(&p)?.cards),
+            gid::TS_SC_UNSUMMON => tracing::info!("[invocation] renvoi de {}", game::Handle::<{ gid::TS_SC_UNSUMMON }>::from_packet(&p)?.0),
             gid::TS_SC_TAKE_ITEM_RESULT => {
                 let r = game::ScTakeItemResult::from_packet(&p)?;
                 tracing::info!("[sol] ramassage : objet {} par {}", r.0, r.1);

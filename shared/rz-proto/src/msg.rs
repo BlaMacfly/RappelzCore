@@ -710,6 +710,9 @@ pub enum EnterKind {
     Npc { creature: CreatureInfo, npc_id: u32 },
     /// Monstre : 73 octets ; `monster_id` = id de Monster.
     Monster { creature: CreatureInfo, is_tamed: bool, monster_id: u32 },
+    /// Invocation (créature) : 96 octets [O] (docs/re/summon_protocol.md §3). `code` = id de
+    /// db_creature en clair (encodé en `EncodedId`) ; `flag` (+0x5f) de sens inconnu, 0.
+    Summon { creature: CreatureInfo, master: u32, code: u32, name: String, flag: u8 },
     /// Objet au sol : 70 octets [O] (docs/re/ground_item_protocol.md). `code` = code d'objet en
     /// clair (encodé en `EncodedId`), 0 = rupees ; `drop_time` en centièmes de seconde (horloge
     /// du jeu) ; `owners` / `parties` = rangs ayant droit au ramassage (0 partout = libre).
@@ -738,12 +741,13 @@ impl Message for ScEnter {
             EnterKind::Npc { .. } => obj_type::NPC,
             EnterKind::Monster { .. } => obj_type::MONSTER,
             EnterKind::Item { .. } => obj_type::ITEM,
+            EnterKind::Summon { .. } => obj_type::SUMMON,
             EnterKind::Other { obj_type, .. } => *obj_type,
         };
         // L'octet `type` est imposé par le client : 0 joueur, 1 créature, 2 objet statique.
         let enter_type = match &self.kind {
             EnterKind::Player(_) => enter_type::PLAYER,
-            EnterKind::Npc { .. } | EnterKind::Monster { .. } => enter_type::CREATURE,
+            EnterKind::Npc { .. } | EnterKind::Monster { .. } | EnterKind::Summon { .. } => enter_type::CREATURE,
             EnterKind::Item { .. } => enter_type::STATIC,
             EnterKind::Other { .. } => self.enter_type,
         };
@@ -771,6 +775,10 @@ impl Message for ScEnter {
             EnterKind::Monster { creature, is_tamed, monster_id } => {
                 creature.write(w);
                 w.bytes(&crate::entity_id::encode(*monster_id)).bool(*is_tamed);
+            }
+            EnterKind::Summon { creature, master, code, name, flag } => {
+                creature.write(w);
+                w.u32(*master).bytes(&crate::entity_id::encode(*code)).fixed_str(name, 19).u8(*flag);
             }
             EnterKind::Item { code, count, drop_time, owners, parties } => {
                 w.bytes(&crate::entity_id::encode(*code)).i64(*count).u32(*drop_time);
@@ -821,6 +829,13 @@ impl Message for ScEnter {
                 let monster_id = crate::entity_id::decode(r.bytes(8)?.try_into().unwrap());
                 EnterKind::Monster { creature, is_tamed: r.bool()?, monster_id }
             }
+            obj_type::SUMMON => EnterKind::Summon {
+                creature: CreatureInfo::read(r)?,
+                master: r.u32()?,
+                code: crate::entity_id::decode(r.bytes(8)?.try_into().unwrap()),
+                name: r.fixed_str(19)?,
+                flag: r.u8()?,
+            },
             obj_type::ITEM => EnterKind::Item {
                 code: crate::entity_id::decode(r.bytes(8)?.try_into().unwrap()),
                 count: r.i64()?,
@@ -1159,6 +1174,32 @@ impl<const I: u16> Message for Empty<I> {
 #[cfg(test)]
 mod tests {
 
+    #[test]
+    fn summon_enter_is_96_bytes_with_observed_offsets() {
+        let e = ScEnter {
+            enter_type: enter_type::CREATURE,
+            handle: 0x3000_0005,
+            x: 1.0,
+            y: 2.0,
+            z: 0.0,
+            layer: 0,
+            kind: EnterKind::Summon {
+                creature: CreatureInfo { hp: 100, max_hp: 100, mp: 50, max_mp: 50, level: 3, ..Default::default() },
+                master: 7,
+                code: 1401,
+                name: "Pixie".into(),
+                flag: 0,
+            },
+        };
+        let b = e.to_packet().to_bytes();
+        assert_eq!(b.len(), 96);
+        assert_eq!((b[7], b[0x19]), (1, obj_type::SUMMON));
+        assert_eq!(&b[0x40..0x44], &7u32.to_le_bytes());
+        assert_eq!(crate::entity_id::decode(b[0x44..0x4c].try_into().unwrap()), 1401);
+        assert_eq!(&b[0x4c..0x51], b"Pixie");
+        assert_eq!(b[0x5f], 0);
+        assert_eq!(ScEnter::from_packet(&e.to_packet()).unwrap(), e);
+    }
     #[test]
     fn ground_item_enter_is_70_bytes_with_observed_offsets() {
         let e = ScEnter {

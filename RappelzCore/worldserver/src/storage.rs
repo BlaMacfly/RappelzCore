@@ -84,6 +84,9 @@ impl Session {
     /// Dépôt (`deposit`) ou retrait d'une pile, entière ou partielle.
     async fn storage_move(&mut self, handle: u32, count: i64, deposit: bool) -> Result<()> {
         let ctx = self.ctx.clone();
+        if deposit && self.is_summoned(handle) {
+            return Ok(()); // créature invoquée : sa carte reste dans le sac
+        }
         let Some(g) = &mut self.in_game else { return Ok(()) };
         let owner = g.character.guid;
         let player = g.handle;

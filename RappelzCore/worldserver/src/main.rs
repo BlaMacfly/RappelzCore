@@ -15,6 +15,7 @@ mod job_progression;
 mod party;
 mod quests;
 mod storage;
+mod summons;
 mod trade;
 mod session;
 mod skills;

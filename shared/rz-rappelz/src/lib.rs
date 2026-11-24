@@ -2,6 +2,7 @@
 //! (voir `docs/re/`). Sert à convertir le client vers le format RappelzRust (MPQ/DBC).
 
 pub mod archive;
+pub mod creatures;
 pub mod dbcstore;
 pub mod layout;
 pub mod progression;

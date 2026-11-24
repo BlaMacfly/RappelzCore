@@ -97,7 +97,9 @@ impl Session {
         let character = g.character.guid;
         let money = g.character.money as i64;
         // Objet désigné par le client (modes 5, 10, 11) : il doit être dans le sac.
-        let mine = g.items.iter().find(|i| i.handle() == req.item.handle && i.in_bag()).cloned();
+        // … et une créature invoquée retient sa carte.
+        let mine =
+            g.items.iter().find(|i| i.handle() == req.item.handle && i.in_bag()).cloned().filter(|i| !self.is_summoned(i.handle()));
         let info = mine.as_ref().map(|i| self.item_info(i));
         let ctx = self.ctx.clone();
         let mut exec = None;

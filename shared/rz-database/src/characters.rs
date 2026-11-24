@@ -378,6 +378,8 @@ pub async fn delete_item(db: &MySqlPool, owner: u32, item_guid: u32) -> Result<(
         .execute(&mut *tx)
         .await?;
     sqlx::query("DELETE FROM item_instance WHERE guid = ?").bind(item_guid).execute(&mut *tx).await?;
+    // Carte de créature : la créature disparaît avec sa carte (`rz_database::pets`).
+    sqlx::query("DELETE FROM character_pet WHERE id = ? AND owner = ?").bind(item_guid).bind(owner).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }

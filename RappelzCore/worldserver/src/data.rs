@@ -65,6 +65,8 @@ pub struct GameData {
     pub monster_spawns: Vec<(u32, u32, f32, f32, f32, u32)>,
     /// Quêtes (Quest.dbc) et liens PNJ ↔ quête (QuestLink.dbc).
     pub quests: rz_rappelz::quests::QuestBook,
+    /// Créatures d'invocation (Creature.dbc).
+    pub creatures: rz_rappelz::creatures::CreatureBook,
 }
 
 /// Statistiques d'un monstre (Monster.dbc).
@@ -95,6 +97,8 @@ pub struct ItemInfo {
     pub buy_price: i64,
     pub sell_price: i64,
     pub endurance: u32,
+    /// Carte de créature : id de db_creature porté par défaut, 0 sinon.
+    pub card_creature: u32,
 }
 
 impl GameData {
@@ -205,6 +209,16 @@ impl GameData {
         let prices: HashMap<u32, (i64, u32)> =
             rz_database::world::item_prices(world).await?.into_iter().map(|(e, b, s)| (e, (b, s))).collect();
         let mut items = HashMap::new();
+        let creatures = match rz_rappelz::creatures::CreatureBook::open(&dbc_dir) {
+            Ok(book) => {
+                tracing::info!(">> {} créatures d'invocation (Creature.dbc)", book.creatures.len());
+                book
+            }
+            Err(error) => {
+                tracing::warn!("Invocations indisponibles : {error}");
+                Default::default()
+            }
+        };
         if let Ok(dbc) = NamedDbc::open(&dbc_dir, "item") {
             for r in dbc.rows() {
                 let id = r.id() as u32;
@@ -218,6 +232,7 @@ impl GameData {
                         buy_price: buy,
                         sell_price: sell as i64,
                         endurance: r.int("endurance").max(0) as u32,
+                        card_creature: creatures.card_creature(r.int("group"), r.int("summon_id")),
                     },
                 );
             }
@@ -249,7 +264,7 @@ impl GameData {
                 Default::default()
             }
         };
-        Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns, quests })
+        Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns, quests, creatures })
     }
 
     /// Le PNJ (`NpcResource.id`) tient-il un entrepôt ?

@@ -197,6 +197,11 @@ impl Session {
     /// TS_CS_DROP_ITEM : pose au sol tout ou partie d'une pile du sac.
     pub async fn drop_item(&mut self, req: game::CsDropItem) -> Result<()> {
         let ctx = self.ctx.clone();
+        if self.pet_of(req.item_handle).is_some() {
+            // L'objet au sol change de guid au ramassage : la créature de la carte serait perdue.
+            self.send(&game::ScDropResult { item_handle: req.item_handle, is_success: false });
+            return Ok(());
+        }
         let Some(g) = &mut self.in_game else { return Ok(()) };
         let me = g.handle;
         let owner = g.character.guid;

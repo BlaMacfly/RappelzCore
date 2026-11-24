@@ -165,6 +165,8 @@ pub struct World {
     pub(crate) casts:HashMap<u32,crate::casting::PendingCast>,
     /// Échanges entre joueurs en cours (TS_TRADE).
     pub(crate) trades: crate::trade::Trades,
+    /// Créatures invoquées.
+    pub(crate) summons: HashMap<u32, crate::summons::SummonEntity>,
     /// Objets au sol (butin, objets jetés).
     pub(crate) ground: crate::ground::Ground,
     /// Tables de butin AzerothCore (creature/reference_loot_template).
@@ -235,7 +237,7 @@ impl World {
             next_monster_handle: MONSTER_HANDLE_BASE,
             visibility_distance,
             max_online: 0,
-            last_regen: 0, trades: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            last_regen: 0, trades: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         for &(_, id, x, y, z, respawn) in &data.monster_spawns {
             if let Some(info) = data.monsters.get(&id) {
@@ -294,6 +296,9 @@ impl World {
     pub fn remove_player(&mut self, handle: u32) -> Option<PlayerEntity> {
         self.cancel_restoration(handle);
         self.cancel_trade(handle);
+        for summon in self.summoned_by(handle) {
+            self.unsummon(summon);
+        }
         let p = self.players.remove(&handle)?;
         self.parties.disconnected(handle);
         self.party_clients.remove(&handle);self.party_sent.remove(&handle);
@@ -363,6 +368,9 @@ impl World {
         if let Some(p) = self.ground_enter(handle) {
             return vec![p];
         }
+        if let Some(packets) = self.summon_enter(handle, now) {
+            return packets;
+        }
         if let Some(n) = self.npcs.get(&handle) {
             let kind = EnterKind::Npc { creature: n.creature.clone(), npc_id: n.npc_id };
             return vec![ScEnter { enter_type: 0, handle, x: n.x, y: n.y, z: n.z, layer: 0, kind }.to_packet()];
@@ -401,6 +409,9 @@ impl World {
         let position = if let Some(other) = self.players.get(&handle) {
             if other.layer != player.layer { return false; }
             other.motion.position(now)
+        } else if let Some(summon) = self.summons.get(&handle) {
+            if summon.layer != player.layer { return false; }
+            summon.motion.position(now)
         } else if player.layer != 0 {
             return false;
         } else if let Some(npc) = self.npcs.get(&handle) {
@@ -422,7 +433,7 @@ impl World {
         self.npcs.get(&handle).map(|npc|(npc.npc_id,npc.name.clone()))
     }
 
-    fn move_packet(handle: u32, layer: u8, motion: &Motion, now: u32) -> Option<RawPacket> {
+    pub(crate) fn move_packet(handle: u32, layer: u8, motion: &Motion, now: u32) -> Option<RawPacket> {
         let points = motion.remaining_points(now);
         if points.is_empty() { return None; }
         Some(msg::ScMove { start_time: now, handle, tlayer: layer,
@@ -450,15 +461,21 @@ impl World {
                     now_visible.insert(other);
                 }
             }
+            for s in self.summons.values() {
+                let (sx, sy) = s.motion.position(now);
+                if s.layer == layer && (sx - x).powi(2) + (sy - y).powi(2) <= range2 {
+                    now_visible.insert(s.handle);
+                }
+            }
+            for g in self.ground.items.values() {
+                if g.layer == layer && (g.x - x).powi(2) + (g.y - y).powi(2) <= range2 {
+                    now_visible.insert(g.handle);
+                }
+            }
             if layer == 0 {
                 for n in self.npcs.values() {
                     if (n.x - x).powi(2) + (n.y - y).powi(2) <= range2 {
                         now_visible.insert(n.handle);
-                    }
-                }
-                for g in self.ground.items.values() {
-                    if (g.x - x).powi(2) + (g.y - y).powi(2) <= range2 {
-                        now_visible.insert(g.handle);
                     }
                 }
                 for m in self.monsters.values() {
@@ -565,6 +582,14 @@ impl World {
         }
     }
 
+    /// Retire des PM à un joueur et l'annonce à ceux qui le voient.
+    pub(crate) fn spend_mana(&mut self, handle: u32, cost: i32) {
+        let Some(p) = self.players.get_mut(&handle) else { return };
+        p.mp = (p.mp - cost).max(0);
+        let packet = Self::hpmp_packet(handle, p.hp, p.max_hp, p.mp, p.max_mp, 0);
+        self.broadcast_around(handle, &packet, true);
+    }
+
     fn hpmp_packet(handle: u32, hp: i32, max_hp: i32, mp: i32, max_mp: i32, add_hp: i32) -> RawPacket {
         game::ScHpMp { handle, add_hp, hp, max_hp, add_mp: 0, mp, max_mp, need_to_display: add_hp != 0 }.to_packet()
     }
@@ -621,6 +646,7 @@ impl World {
         self.tick_player_attacks(now);
         self.tick_monsters(now);
         self.tick_ground(now);
+        self.tick_summons(now);
         if now.saturating_sub(self.last_regen) >= REGEN_INTERVAL {
             self.last_regen = now;
             self.tick_regen(now);
@@ -847,7 +873,7 @@ mod tests {
             parties:Default::default(),party_clients:HashSet::new(),party_sent:HashMap::new(),
             started: Instant::now(), players: HashMap::new(), npcs: HashMap::new(), monsters: HashMap::new(),
             next_handle: 3, next_monster_handle: MONSTER_HANDLE_BASE, visibility_distance: 540.0,
-            max_online: 0, last_regen: 0, trades: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            max_online: 0, last_regen: 0, trades: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
         };
         let mut receivers = Vec::new();
         for handle in [1, 2] {
@@ -1027,7 +1053,7 @@ mod tests {
         let pool=rz_database::sqlx::mysql::MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(20))
             .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused").unwrap();
         let data=GameData {progression:None,restoration:None,skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
-            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default()};
+            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default(),creatures:Default::default()};
         let settings=Settings {realm_id:1,network_key:vec![],characters_per_realm:1,start_level:1,start_money:0,start_positions:[(0.0,0.0);3],
             region_size:180,cell_size:6,move_speed:120,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
         let ctx=Arc::new(Ctx {login:pool.clone(),chars:pool.clone(),world_db:pool,data,world:Mutex::new(world),settings,
@@ -1036,7 +1062,7 @@ mod tests {
         let item=InvItem {guid:99,entry:500,count:7,slot:28};
         let character=rz_database::characters::Character {guid:1,account:1,level:1,health:100,power1:50,..Default::default()};
         let session=Session {ctx,addr:"127.0.0.1:1".parse().unwrap(),tx,account:None,gm_level:0,events_rx:None,dialog_npc:None,skill_catalog:None,storage_npc:None,
-            in_game:Some(InGame {handle:1,character,items:vec![item],quests:Default::default()})};
+            in_game:Some(InGame {handle:1,character,items:vec![item],quests:Default::default(),pets:vec![]})};
         (session,receivers.remove(0))
     }
 
@@ -1056,6 +1082,59 @@ mod tests {
             assert_eq!(items.len(),1);assert_eq!((items[0].guid,items[0].entry,items[0].count,items[0].slot),(99,500,7,28));
             assert!(session.ctx.world.lock().unwrap().ground.items.is_empty());assert!(rx.try_recv().is_err());
         }
+    }
+
+    #[test]
+    fn summon_appears_follows_its_master_and_leaves_with_it() {
+        let (mut world, mut receivers) = test_world();
+        let pet = rz_database::pets::Pet { card: 5, entry: 1401, level: 3, exp: 0, name: "Pixie".into(), slot: 0 };
+        let handle = crate::summons::summon_handle(5);
+        assert!(world.summon(1, &pet, 150.0));
+        assert!(!world.summon(1, &pet, 150.0), "déjà invoquée");
+        let other = rz_database::pets::Pet { card: 6, ..pet.clone() };
+        assert!(!world.summon(1, &other, 150.0), "limite par joueur");
+        // Un autre joueur voit l'ENTER avec le maître et le code de la créature.
+        let seen = receivers.iter_mut().skip(1).any(|rx| std::iter::from_fn(|| rx.try_recv().ok())
+            .filter(|p| p.id == msg::ScEnter::ID).filter_map(|p| msg::ScEnter::from_packet(&p).ok())
+            .any(|e| e.handle == handle && matches!(&e.kind, EnterKind::Summon { master: 1, code: 1401, name, .. } if name == "Pixie")));
+        assert!(seen, "ENTER d'invocation non reçu");
+        assert!(world.can_see(2, handle, world.now()));
+        // Suivi : le maître s'éloigne, la créature se met en route et s'arrête à distance.
+        let (x, y) = world.player_position(1).unwrap();
+        world.players.get_mut(&1).unwrap().motion = Motion::at(x + 150.0, y);
+        let now = world.now();
+        world.tick_summons(now);
+        let s = &world.summons[&handle];
+        assert!(!s.motion.points.is_empty());
+        let end = s.motion.position(now + 10_000);
+        assert!((dist(end, (x + 150.0, y)) - 20.0).abs() < 0.5, "{end:?}");
+        // Téléportation : elle rejoint directement son maître, couche comprise.
+        { let p = world.players.get_mut(&1).unwrap(); p.motion = Motion::at(x + 5000.0, y); p.layer = 4; }
+        world.tick_summons(now + 100);
+        let s = &world.summons[&handle];
+        assert_eq!(s.layer, 4);
+        assert!(dist(s.motion.position(now + 100), (x + 5000.0, y)) < 30.0);
+        // Renvoi, puis départ du maître.
+        assert!(world.unsummon(handle) && !world.unsummon(handle));
+        assert!(world.summon(1, &pet, 150.0));
+        world.remove_player(1);
+        assert!(world.summons.is_empty());
+    }
+
+    #[test]
+    fn ground_items_are_only_visible_on_their_own_layer() {
+        let (mut world, mut receivers) = test_world();
+        let (x, y) = world.player_position(1).unwrap();
+        world.players.get_mut(&2).unwrap().layer = 3;
+        let on_zero = world.drop_on_ground(500, 1, (x, y), 0, 0);
+        let on_three = world.drop_on_ground(500, 1, (x, y), 3, 0);
+        world.update_visibility();
+        let sees = |w: &World, h: u32, item: u32| w.players[&h].visible.contains(&item);
+        assert!(sees(&world, 1, on_zero) && !sees(&world, 1, on_three));
+        assert!(sees(&world, 2, on_three) && !sees(&world, 2, on_zero));
+        assert!(world.take_ground(1, on_three).is_none(), "autre couche");
+        assert!(world.take_ground(1, on_zero).is_some());
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
     }
 
     #[test]

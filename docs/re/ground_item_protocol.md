@@ -270,3 +270,6 @@ Louveteau Affamé (Potion Bleue 100 % + référence 510000), la mort produit deu
 TS_SC_ITEM_DROP_INFO, puis deux ramassages réussis (210, RESULT 204 → 0) ; les objets sont en base. Une potion
 jetée (pile 4 → 3) apparaît libre au sol puis est ramassée. Non vérifié : client graphique d'origine,
 exclusivité face à un second joueur (couverte par un test unitaire), disparition après 180 s en conditions réelles.
+
+**Correctif du 2026-11-24** : les objets au sol n'étaient montrés qu'à la couche 0, sans comparer leur propre couche ;
+ils ne sont désormais visibles que sur leur couche (test `ground_items_are_only_visible_on_their_own_layer`).

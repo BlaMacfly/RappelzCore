@@ -49,6 +49,12 @@ pub mod id {
     pub const TS_SC_ADDED_SKILL_LIST: u16 = 404;
     pub const TS_SC_QUEST_LIST: u16 = 600;
     pub const TS_SC_QUEST_STATUS: u16 = 601;
+    pub const TS_SC_ADD_SUMMON_INFO: u16 = 301;
+    pub const TS_SC_REMOVE_SUMMON_INFO: u16 = 302;
+    pub const TS_EQUIP_SUMMON: u16 = 303;
+    pub const TS_SC_UNSUMMON: u16 = 305;
+    pub const TS_CS_CHANGE_SUMMON_NAME: u16 = 323;
+    pub const TS_CS_GET_SUMMON_SETUP_INFO: u16 = 324;
     pub const TS_SC_OPEN_STORAGE: u16 = 211;
     pub const TS_CS_STORAGE: u16 = 212;
     pub const TS_TRADE: u16 = 280;
@@ -1072,6 +1078,101 @@ impl Message for ScQuestList {
     }
 }
 
+// ───────────────────────────── Invocations ─────────────────────────────
+// docs/re/summon_protocol.md. Ce client n'envoie pas TS_CS_SUMMON (304) : invoquer et renvoyer
+// sont des compétences (TS_CS_SKILL) dont la cible est le handle de la **carte**.
+
+pub mod summon_skill {
+    pub const SUMMON: u16 = 4001;
+    pub const UNSUMMON: u16 = 4002;
+}
+
+/// Nombre de cartes de la formation (TM_EQUIP_SUMMON) [O].
+pub const FORMATION_SLOTS: usize = 6;
+
+/// TS_SC_ADD_SUMMON_INFO (301), 46 octets [O] : fiche de créature, indexée par `summon_handle`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ScAddSummonInfo {
+    pub card_handle: u32,
+    pub summon_handle: u32,
+    pub name: String,
+    /// Id de db_creature.
+    pub code: i32,
+    pub level: i32,
+    pub sp: i32,
+}
+
+impl Message for ScAddSummonInfo {
+    const ID: u16 = id::TS_SC_ADD_SUMMON_INFO;
+    fn write(&self, w: &mut Writer) {
+        w.u32(self.card_handle).u32(self.summon_handle).fixed_str(&self.name, 19).i32(self.code).i32(self.level).i32(self.sp);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            card_handle: r.u32()?,
+            summon_handle: r.u32()?,
+            name: r.fixed_str(19)?,
+            code: r.i32()?,
+            level: r.i32()?,
+            sp: r.i32()?,
+        })
+    }
+}
+
+/// TM_EQUIP_SUMMON (303), 32 octets dans les deux sens [O] : `+7 u8` (0 en C→S, non lu en S→C),
+/// `+8 u32 card_handle[6]` = formation (cartes, pas créatures ; 0 = vide).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct EquipSummon {
+    pub open_dialog: u8,
+    pub cards: [u32; FORMATION_SLOTS],
+}
+
+impl Message for EquipSummon {
+    const ID: u16 = id::TS_EQUIP_SUMMON;
+    fn write(&self, w: &mut Writer) {
+        w.u8(self.open_dialog);
+        self.cards.iter().for_each(|c| {
+            w.u32(*c);
+        });
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        let open_dialog = r.u8()?;
+        let mut cards = [0; FORMATION_SLOTS];
+        for c in &mut cards {
+            *c = r.u32()?;
+        }
+        Ok(Self { open_dialog, cards })
+    }
+}
+
+/// TS_CS_CHANGE_SUMMON_NAME (323), 26 octets [O] : `+7 char[19] name`, sans handle.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CsChangeSummonName(pub String);
+
+impl Message for CsChangeSummonName {
+    const ID: u16 = id::TS_CS_CHANGE_SUMMON_NAME;
+    fn write(&self, w: &mut Writer) {
+        w.fixed_str(&self.0, 19);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self(r.fixed_str(19)?))
+    }
+}
+
+/// TS_CS_GET_SUMMON_SETUP_INFO (324), 8 octets [O] : `+7 u8` = 1 si la fenêtre de formation est fermée.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CsGetSummonSetupInfo(pub u8);
+
+impl Message for CsGetSummonSetupInfo {
+    const ID: u16 = id::TS_CS_GET_SUMMON_SETUP_INFO;
+    fn write(&self, w: &mut Writer) {
+        w.u8(self.0);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self(r.u8()?))
+    }
+}
+
 // ───────────────────────────── Entrepôt / échange ─────────────────────────────
 // docs/re/storage_trade_protocol.md
 
@@ -1653,6 +1754,24 @@ mod tests {
         assert_eq!(&bytes[7..11], &0x0102_0304i32.to_le_bytes());
         assert_eq!(&bytes[0xb..0xf], &5i32.to_le_bytes());
         assert_eq!(bytes[0x23], 2);
+    }
+
+    #[test]
+    fn summon_messages_match_observed_layouts() {
+        let a = ScAddSummonInfo { card_handle: 1, summon_handle: 2, name: "Pixie".into(), code: 1401, level: 3, sp: 4 };
+        assert_eq!(size_of(&a), 46);
+        roundtrip(&a);
+        let b = a.to_packet().to_bytes();
+        assert_eq!(&b[0x0f..0x14], b"Pixie");
+        assert_eq!(&b[0x22..0x26], &1401i32.to_le_bytes());
+        assert_eq!(&b[0x26..0x2a], &3i32.to_le_bytes());
+        let e = EquipSummon { open_dialog: 0, cards: [9, 8, 0, 0, 0, 7] };
+        assert_eq!(size_of(&e), 32);
+        roundtrip(&e);
+        assert_eq!(size_of(&CsChangeSummonName("A".into())), 26);
+        assert_eq!(size_of(&CsGetSummonSetupInfo(1)), 8);
+        assert_eq!(size_of(&Handle::<{ id::TS_SC_REMOVE_SUMMON_INFO }>(1)), 11);
+        assert_eq!(size_of(&Handle::<{ id::TS_SC_UNSUMMON }>(1)), 11);
     }
 
     #[test]

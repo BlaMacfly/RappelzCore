@@ -248,6 +248,8 @@ impl Session {
 
     /// Recalcule les objectifs liés à l'inventaire / au métier ; envoie 601 et sauvegarde si besoin.
     pub async fn refresh_quests(&mut self) -> Result<()> {
+        // Appelé à chaque changement de sac : les fiches de créature suivent les cartes.
+        self.sync_pets().await?;
         let Some((items, job_level)) = self.holder_state() else { return Ok(()) };
         let who = Inventory { items: &items, job_level };
         let book = &self.ctx.data.quests;

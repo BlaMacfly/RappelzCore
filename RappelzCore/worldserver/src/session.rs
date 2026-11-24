@@ -22,6 +22,8 @@ pub struct InGame {
     pub character: Character,
     pub items: Vec<crate::gameplay::InvItem>,
     pub quests: crate::quests::QuestLog,
+    /// Créatures liées aux cartes possédées (`character_pet`).
+    pub pets: Vec<rz_database::pets::Pet>,
 }
 
 pub struct Session {
@@ -446,9 +448,11 @@ impl Session {
         if !s.motd.is_empty() {
             ctx.world.lock().unwrap().notify(handle, &s.motd);
         }
-        self.in_game = Some(InGame { handle, character: c, items, quests });
+        self.in_game = Some(InGame { handle, character: c, items, quests, pets: Vec::new() });
         self.events_rx = Some(events_rx);
         self.send_initial_state();
+        self.sync_pets().await?;
+        self.send_formation();
         Ok(())
     }
 

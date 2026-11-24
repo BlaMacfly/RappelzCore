@@ -173,6 +173,19 @@ impl Session {
                 .collect(),
         });
     }
+    /// `.learn` : compétence ajoutée aux données du personnage (sauvegardées avec lui). Refuse ce
+    /// qui rendrait la liste enregistrée invalide.
+    pub fn gm_learn(&mut self, id: u32, level: u8) -> bool {
+        let Some(g) = &mut self.in_game else { return false };
+        let mut candidate = g.character.clone();
+        candidate.set_extra(&format!("{PREFIX}{id}"), level);
+        if learned(&candidate).is_err() {
+            return false;
+        }
+        g.character = candidate;
+        self.send_learned_skills();
+        true
+    }
     fn learning_result(&mut self, success: bool, message: &str) {
         self.send(&msg::ScResult {
             request: game::id::TS_CS_LEARN_SKILL,
