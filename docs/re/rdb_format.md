@@ -11,10 +11,10 @@ Légende (même convention que `data_archive.md`) :
 **[INC]** inconnu.
 
 Script de validation (Node.js, Python n'étant pas installé sur ce poste) :
-`C:\Users\Marty\Desktop\RappelzCore\docs\re\tools\rdb_dump.js`
+`docs/re/tools/rdb_dump.js`
 
 ```text
-node rdb_dump.js "C:/Users/Marty/Desktop/RappelzCore/Rappelz NoLimits/Resource" all 2     # toutes les tables, 2 exemples chacune
+node rdb_dump.js "Rappelz NoLimits/Resource" all 2     # toutes les tables, 2 exemples chacune
 node rdb_dump.js "<Resource>" item 5                                                    # une table
 ```
 
