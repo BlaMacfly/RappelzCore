@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // rdb_dump.js — parseur/validateur des bases client Rappelz (.rdb / db_item.ref), client « NoLimits » (9.5.x)
 // Usage : node rdb_dump.js <dossier Resource> [table|all] [nb_exemples]
-//   ex. node rdb_dump.js "C:/Users/Marty/Desktop/RappelzCore/Rappelz NoLimits/Resource" all 2
+//   ex. node rdb_dump.js "Rappelz NoLimits/Resource" all 2
 // Lecture seule : n'écrit jamais dans le dossier du client.
 // Schémas : dérivés des définitions RappelzRDBTool (glandu2, GPLv2) + vérifications sur SFrame.exe
 // (voir docs/re/rdb_format.md). Types : i8/i16/i32 signés, f32, f64, dec2 = i32/100, bit = 1 bit (LSB d'abord), cN = char[N] (latin1, NUL-terminé).

@@ -7,7 +7,7 @@ Légende : **[OBS]** observé dans le binaire ET vérifié sur les vrais fichier
 le binaire mais pas testé sur les fichiers, **[DED]** déduit, **[INC]** inconnu.
 
 Script de validation qui fonctionne (Node.js, car Python n'est pas installé sur ce poste) :
-`C:\Users\Marty\Desktop\RappelzCore\docs\re\tools\rappelz_data.js`
+`docs/re/tools/rappelz_data.js`
 (`node rappelz_data.js "<dossier client>" selftest [dossier_sortie]`, puis `stats`, `list [regex]`, `extract <regex> <dossier>`).
 
 ---
