@@ -71,6 +71,8 @@ pub struct GameData {
     pub spells: rz_rappelz::spells::SpellBook,
     /// États dont tous les effets sont établis (Tenacity.dbc).
     pub states: rz_rappelz::states::StateBook,
+    /// Passifs dont tous les effets sont établis.
+    pub passives: rz_rappelz::passives::PassiveBook,
 }
 
 /// Statistiques d'un monstre (Monster.dbc).
@@ -99,6 +101,8 @@ pub struct ItemInfo {
     pub id: u32,
     pub name: String,
     pub wear_type: i32,
+    /// Nature de l'objet (armes 101–113, bouclier 210…).
+    pub class: i32,
     pub buy_price: i64,
     pub sell_price: i64,
     pub endurance: u32,
@@ -235,6 +239,7 @@ impl GameData {
                         id,
                         name: strings.get(r.int("name_id")).to_string(),
                         wear_type: r.int("wear_type"),
+                        class: r.int("class"),
                         buy_price: buy,
                         sell_price: sell as i64,
                         endurance: r.int("endurance").max(0) as u32,
@@ -264,6 +269,8 @@ impl GameData {
             tracing::warn!("États indisponibles : {error}");
             Default::default()
         });
+        let passives = rz_rappelz::passives::PassiveBook::open(&dbc_dir).unwrap_or_default();
+        tracing::info!(">> {} passifs pris en charge (Skill.dbc)", passives.len());
         let spells = rz_rappelz::spells::SpellBook::open(&dbc_dir, &states).unwrap_or_else(|error| {
             tracing::warn!("Compétences actives indisponibles : {error}");
             Default::default()
@@ -279,7 +286,7 @@ impl GameData {
                 Default::default()
             }
         };
-        Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns, quests, creatures, spells, states })
+        Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns, quests, creatures, spells, states, passives })
     }
 
     /// Le PNJ (`NpcResource.id`) tient-il un entrepôt ?

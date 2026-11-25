@@ -50,6 +50,8 @@ pub mod id {
     pub const TS_SC_QUEST_LIST: u16 = 600;
     pub const TS_SC_QUEST_STATUS: u16 = 601;
     pub const TS_SC_STATE_DAMAGE: u16 = 406;
+    pub const TS_SC_AURA: u16 = 407;
+    pub const TS_CS_REMOVE_STATE: u16 = 408;
     pub const TS_SC_ADD_SUMMON_INFO: u16 = 301;
     pub const TS_SC_REMOVE_SUMMON_INFO: u16 = 302;
     pub const TS_EQUIP_SUMMON: u16 = 303;
@@ -1125,6 +1127,41 @@ impl Message for ScStateDamage {
     }
 }
 
+/// TS_SC_AURA (407), 14 octets [O] : surimpression d'une bascule dans la barre rapide.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ScAura {
+    pub handle: u32,
+    pub skill_id: u16,
+    pub active: bool,
+}
+
+impl Message for ScAura {
+    const ID: u16 = id::TS_SC_AURA;
+    fn write(&self, w: &mut Writer) {
+        w.u32(self.handle).u16(self.skill_id).bool(self.active);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { handle: r.u32()?, skill_id: r.u16()?, active: r.bool()? })
+    }
+}
+
+/// Paquet 408 (C→S), 15 octets [O] : double-clic sur l'icône d'un état.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CsRemoveState {
+    pub handle: u32,
+    pub state_code: u32,
+}
+
+impl Message for CsRemoveState {
+    const ID: u16 = id::TS_CS_REMOVE_STATE;
+    fn write(&self, w: &mut Writer) {
+        w.u32(self.handle).u32(self.state_code);
+    }
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { handle: r.u32()?, state_code: r.u32()? })
+    }
+}
+
 // ───────────────────────────── Invocations ─────────────────────────────
 // docs/re/summon_protocol.md. Ce client n'envoie pas TS_CS_SUMMON (304) : invoquer et renvoyer
 // sont des compétences (TS_CS_SKILL) dont la cible est le handle de la **carte**.
@@ -1811,6 +1848,10 @@ mod tests {
         let b = d.to_packet().to_bytes();
         assert_eq!((&b[0x15..0x17], &b[0x17..0x1b]), (&1u16.to_le_bytes()[..], &42i32.to_le_bytes()[..]));
         assert_eq!((b[0x1f], &b[0x20..0x24]), (1, &84i32.to_le_bytes()[..]));
+        let aura = ScAura { handle: 5, skill_id: 3426, active: true };
+        assert_eq!((size_of(&aura), size_of(&CsRemoveState::default())), (14, 15));
+        roundtrip(&aura);
+        roundtrip(&CsRemoveState { handle: 5, state_code: 1001 });
         assert_eq!(size_of(&ScState::default()), 31);
     }
 

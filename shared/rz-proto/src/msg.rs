@@ -1102,15 +1102,15 @@ impl ScStatInfo {
         put16(0x43, s.move_speed);
         put16(0x45, s.attack_speed);
         put16(0x47, s.attack_range);
-        put16(0x49, 1000); // poids maximal
-        put16(0x4b, 100); // vitesse d'incantation
-        put16(0x4d, 100); // vitesse de recharge
+        put16(0x4d, 100); // vitesse d'incantation
+        put16(0x4f, 100); // vitesse de recharge
         let mut put32 = |off: usize, v: i32| st[off - 0x0b..off - 0x0b + 4].copy_from_slice(&v.to_le_bytes());
         put32(0x1f, s.attack);
         put32(0x23, s.attack);
         put32(0x27, s.defence);
         put32(0x2f, s.magic_point);
         put32(0x33, s.magic_defence);
+        put32(0x49, 1000); // poids maximal : un i32 (lu en dword par le client)
         Self { handle, stats: st, info_type }
     }
 }

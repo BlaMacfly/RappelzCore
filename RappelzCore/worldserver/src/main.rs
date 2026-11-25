@@ -17,6 +17,7 @@ mod quests;
 mod storage;
 mod spells;
 mod states;
+mod stats;
 mod summons;
 mod trade;
 mod session;

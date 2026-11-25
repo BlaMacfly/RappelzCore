@@ -54,6 +54,7 @@ pub fn handles(id: u16) -> bool {
         id,
         gid::TS_CS_PUTON_ITEM
             | gid::TS_CS_SKILL
+            | gid::TS_CS_REMOVE_STATE
             | gid::TS_CS_LEARN_SKILL
             | gid::TS_CS_PUTOFF_ITEM
             | gid::TS_CS_DROP_ITEM
@@ -185,14 +186,12 @@ impl Session {
         self.send_quest_list();
         let c = &g.character;
         self.send(&game::ScExpUpdate { handle: g.handle, exp: c.xp as i64, jp: c.extra_i64("jp", 0) });
-        self.send(&game::ScHpMp {
-            handle: g.handle,
-            hp: c.health as i32,
-            max_hp: max_hp_for(c.level),
-            mp: c.power1 as i32,
-            max_mp: max_mp_for(c.level),
-            ..Default::default()
-        });
+        // Maxima de l'entité : passifs compris.
+        let (max_hp, max_mp) = match self.ctx.world.lock().unwrap().players.get(&g.handle) {
+            Some(p) => (p.max_hp, p.max_mp),
+            None => (max_hp_for(c.level), max_mp_for(c.level)),
+        };
+        self.send(&game::ScHpMp { handle: g.handle, hp: c.health as i32, max_hp, mp: c.power1 as i32, max_mp, ..Default::default() });
     }
 
     fn free_bag_slot(items: &[InvItem]) -> Option<u8> {
@@ -238,6 +237,7 @@ impl Session {
     fn broadcast_wear(&self) {
         let Some(g) = &self.in_game else { return };
         self.ctx.world.lock().unwrap().set_wear(g.handle, Self::wear_array(&g.items));
+        self.refresh_profile();
     }
 
     pub async fn handle_gameplay(&mut self, p: RawPacket) -> Result<()> {
@@ -307,6 +307,12 @@ impl Session {
             gid::TS_CS_ATTACK_REQUEST => {
                 let req = game::CsAttackRequest::from_packet(&p)?;
                 self.ctx.world.lock().unwrap().start_attack(handle, req.target_handle);
+            }
+            gid::TS_CS_REMOVE_STATE => {
+                let req = game::CsRemoveState::from_packet(&p)?;
+                if req.handle == handle {
+                    self.ctx.world.lock().unwrap().dismiss_state(handle, req.state_code);
+                }
             }
             gid::TS_CS_SKILL => {
                 let req = game::CsSkill::from_packet(&p)?;

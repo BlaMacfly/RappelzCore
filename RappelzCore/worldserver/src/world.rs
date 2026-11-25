@@ -110,6 +110,10 @@ pub struct PlayerEntity {
     pub max_hp: i32,
     pub mp: i32,
     pub max_mp: i32,
+    /// Part due au niveau, sans bonus.
+    pub base_max_hp: i32,
+    pub base_max_mp: i32,
+    pub(crate) profile: crate::stats::Profile,
     pub attack: i32,
     pub defence: i32,
     /// Configured wire speed; resting Motion::at deliberately has speed zero.
@@ -352,20 +356,9 @@ impl World {
 
     /// Send the current owner combat snapshot, never an observer's private statistics.
     pub fn publish_stats(&self, owner:u32) {
-        let Some(player)=self.players.get(&owner) else {return;};
-        let level=player.enter.creature.level;
-        let mods=self.mods(owner);
-        // Retain the existing opaque template. Only the three checked combat fields
-        // below are authoritative; the second attack slot is not a new left-hand rule.
-        let mut snapshot=msg::ScStatInfo::from_stats(owner,&msg::BasicStats {
-            attributes:[10;7],attack:10+level*2,defence:5+level,
-            magic_point:mods.apply(Stat::MagicAttack,10+level*2),magic_defence:mods.apply(Stat::MagicDefence,5+level),
-            move_speed:mods.apply(Stat::MoveSpeed,i32::from(player.move_speed)).min(255) as i16,
-            attack_speed:mods.apply(Stat::AttackSpeed,crate::states::BASE_ATTACK_SPEED).min(1000) as i16,attack_range:50,
-        },0);
-        snapshot.stats[0x1f-0x0b..0x1f-0x0b+4].copy_from_slice(&mods.apply(Stat::Attack,player.attack).to_le_bytes());
-        snapshot.stats[0x27-0x0b..0x27-0x0b+4].copy_from_slice(&mods.apply(Stat::Defence,player.defence).to_le_bytes());
-        self.send_to(owner,snapshot.to_packet());
+        if let Some(snapshot) = self.stat_snapshot(owner) {
+            self.send_to(owner, snapshot.to_packet());
+        }
     }
 
     /// Paquets d'apparition d'un objet du monde (ENTER + données associées).
@@ -601,8 +594,12 @@ impl World {
     /// Apply level-derived stats and publish the same authoritative state to all viewers.
     pub fn set_player_level(&mut self, handle: u32, level: u8, job_level: i32) -> bool {
         let Some(player) = self.players.get_mut(&handle) else { return false };
-        player.max_hp = crate::gameplay::max_hp_for(level);
-        player.max_mp = crate::gameplay::max_mp_for(level);
+        player.base_max_hp = crate::gameplay::max_hp_for(level);
+        player.base_max_mp = crate::gameplay::max_mp_for(level);
+        let (hp, mp) = (player.base_max_hp, player.base_max_mp);
+        let vitals = (self.stat(handle, Stat::MaxHp, hp).max(1), self.stat(handle, Stat::MaxMp, mp).max(1));
+        let player = self.players.get_mut(&handle).unwrap();
+        (player.max_hp, player.max_mp) = vitals;
         player.hp = player.max_hp;
         player.mp = player.max_mp;
         player.attack = crate::gameplay::attack_for(level);
@@ -807,10 +804,10 @@ impl World {
             let (base_attack, m_hp, m_mp) = (m.info.attack, m.hp, m.info.mp);
             let attack = self.stat(mh, Stat::Attack, base_attack);
             let delay = self.attack_delay(mh, MONSTER_ATTACK_DELAY);
-            let guard = self.mods(target);
             self.monsters.get_mut(&mh).unwrap().next_attack = now + delay;
+            let defence = self.stat(target, Stat::Defence, self.players[&target].defence);
             let p = self.players.get_mut(&target).unwrap();
-            let damage = roll_damage(attack, guard.apply(Stat::Defence, p.defence));
+            let damage = roll_damage(attack, defence);
             p.hp = (p.hp - damage).max(0);
             p.last_combat = now;
             let (p_hp, p_max, p_mp, p_mmax) = (p.hp, p.max_hp, p.mp, p.max_mp);
@@ -902,7 +899,7 @@ mod tests {
                 z: 0.0, layer: 0, motion: Motion::at(0.0, 0.0), enter: PlayerEnterInfo::default(),
                 wear: [0; game::WEAR_SLOTS], tx, events: tokio::sync::mpsc::unbounded_channel().0,
                 visible: if handle == 2 { HashSet::from([1]) } else { HashSet::new() },
-                hp: 50, max_hp: 100, mp: 20, max_mp: 50, attack: 16, defence: 6, move_speed:120,
+                hp: 50, max_hp: 100, mp: 20, max_mp: 50, base_max_hp: 100, base_max_mp: 50, profile: Default::default(), attack: 16, defence: 6, move_speed:120,
                 attack_target: None, next_attack: 0, last_combat: 0,
             });
         }
@@ -1071,7 +1068,7 @@ mod tests {
         let pool=rz_database::sqlx::mysql::MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(20))
             .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused").unwrap();
         let data=GameData {progression:None,restoration:None,skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
-            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default(),creatures:Default::default(),spells:Default::default(),states:Default::default()};
+            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default(),creatures:Default::default(),spells:Default::default(),states:Default::default(),passives:Default::default()};
         let settings=Settings {realm_id:1,network_key:vec![],characters_per_realm:1,start_level:1,start_money:0,start_positions:[(0.0,0.0);3],
             region_size:180,cell_size:6,move_speed:120,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
         let ctx=Arc::new(Ctx {login:pool.clone(),chars:pool.clone(),world_db:pool,data,world:Mutex::new(world),settings,
@@ -1157,7 +1154,7 @@ mod tests {
 
     fn spell_quote(kind: rz_rappelz::spells::SpellKind, cast: u32) -> rz_rappelz::spells::SpellQuote {
         rz_rappelz::spells::SpellQuote { id: 2001, level: 1, kind, mp: 5, cast, cooldown: 1000, group: 77,
-            range: Some(192.0), ratio: 1.0, flat: 0.0, hp_ratio: 0.0, state: None, area: None, hits: 1, self_only: false, stage: 401 }
+            range: Some(192.0), ratio: 1.0, flat: 0.0, hp_ratio: 0.0, state: None, area: None, hits: 1, self_only: false, toggle: None, stage: 401 }
     }
 
     #[test]
@@ -1448,6 +1445,107 @@ mod tests {
         let hp = world.players[&1].hp;
         world.begin_spell(1, guid, 1, q, crate::spells::Action::Effect, vec![]).unwrap();
         assert!(world.players[&1].hp > hp);
+    }
+
+    #[test]
+    fn profile_raises_stats_and_vitals_and_survives_level_up() {
+        use rz_rappelz::states::{Attributes, StateDef};
+        let (mut world, mut receivers) = test_world();
+        let monster = test_monster(&mut world);
+        world.update_visibility();
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        let mut profile = crate::stats::Profile {
+            attributes: Attributes { base: [20, 10, 10, 10, 10, 10, 10], ranged: false },
+            ..Default::default()
+        };
+        profile.passives.push(Stat::Strength, 10.0, false);
+        profile.passives.push(Stat::MaxHp, 0.5, true);
+        world.set_profile(1, profile);
+        // FOR +10 : 28 d'attaque ; PV max 100 → 150, PV courants inchangés.
+        assert_eq!((world.power_of(1, false), world.players[&1].max_hp, world.players[&1].hp), (44, 150, 50));
+        let packets: Vec<_> = std::iter::from_fn(|| receivers[0].try_recv().ok()).collect();
+        assert!(packets.iter().any(|p| p.id == game::ScHpMp::ID && game::ScHpMp::from_packet(p).unwrap().max_hp == 150));
+        let stat = packets.iter().filter(|p| p.id == msg::ScStatInfo::ID).map(|p| msg::ScStatInfo::from_packet(p).unwrap()).last().unwrap();
+        assert_eq!(stat.combat_stats().unwrap().attack, 44);
+        assert_eq!(i16::from_le_bytes([stat.stats[2], stat.stats[3]]), 30, "force affichée");
+        // Même profil : rien n'est renvoyé.
+        world.set_profile(1, profile);
+        assert!(receivers[0].try_recv().is_err());
+        // Un état s'ajoute aux passifs ; sa fin rend la valeur.
+        let quote = rz_rappelz::spells::StateQuote { id: 9, level: 1, duration: 100, chance: 100.0 };
+        world.apply_state(1, 1, &quote, StateDef::fixture(9, false, Some((Stat::MaxHp, 0.5)), None), 0);
+        assert_eq!(world.players[&1].max_hp, 200);
+        world.players.get_mut(&1).unwrap().hp = 190;
+        let now = world.now();
+        world.tick_states(now + 200);
+        assert_eq!((world.players[&1].max_hp, world.players[&1].hp), (150, 150), "PV ramenés au nouveau maximum");
+        // Montée de niveau : base du niveau 2 (120) et passifs conservés.
+        world.set_player_level(1, 2, 1);
+        assert_eq!((world.players[&1].max_hp, world.players[&1].hp, world.players[&1].base_max_hp), (180, 180, 120));
+        // Le coup porté utilise l'attaque dérivée : au moins (48 − 3) × 0,9.
+        world.monsters.get_mut(&monster).unwrap().hp = 1000;
+        world.players.get_mut(&1).unwrap().attack_target = Some(monster);
+        world.tick_player_attacks(now + 5000);
+        assert!(1000 - world.monsters[&monster].hp >= 40);
+    }
+
+    #[test]
+    fn toggle_switches_on_and_off_costs_mp_excludes_its_group_and_falls() {
+        use rz_rappelz::spells::{SpellKind, StateQuote, ToggleQuote, PERMANENT};
+        use rz_rappelz::states::StateDef;
+        let (mut world, mut receivers) = test_world();
+        world.update_visibility();
+        let guid = world.players[&1].guid;
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        let toggle = |id: u32, state: u32| {
+            let mut q = spell_quote(SpellKind::Toggle, 0);
+            (q.id, q.group, q.self_only) = (id, id, true);
+            q.state = Some(StateQuote { id: state, level: 1, duration: PERMANENT, chance: 100.0 });
+            q.toggle = Some(ToggleQuote { upkeep: 4, group: 7 });
+            q
+        };
+        let def = |id| StateDef::fixture(id, false, Some((Stat::Attack, 0.5)), None);
+        let cast = |world: &mut World, q, state| world.begin_spell(1, guid, 1, q, crate::spells::Action::State(def(state)), vec![]);
+        // Allumage : coût de lancement (5), FIRE avec RESULT muet, 505 permanent, 407 actif.
+        cast(&mut world, toggle(3426, 13426), 13426).unwrap();
+        assert_eq!((world.players[&1].mp, world.power_of(1, false)), (15, 24));
+        let packets: Vec<_> = std::iter::from_fn(|| receivers[0].try_recv().ok()).collect();
+        let fire = packets.iter().find(|p| p.id == game::ScSkill::ID).map(|p| game::ScSkill::from_packet(p).unwrap()).unwrap();
+        assert_eq!((fire.payload.len(), fire.payload[9], fire.payload[15]), (9 + 10, game::skill_hit::RESULT, 0));
+        let state = packets.iter().find(|p| p.id == game::ScState::ID).map(|p| game::ScState::from_packet(p).unwrap()).unwrap();
+        assert_eq!((state.state_level, state.remain_time), (1, -1));
+        let aura = |packets: &[RawPacket]| packets.iter().filter(|p| p.id == game::ScAura::ID)
+            .map(|p| game::ScAura::from_packet(p).unwrap()).map(|a| (a.skill_id, a.active)).collect::<Vec<_>>();
+        assert_eq!(aura(&packets), vec![(3426, true)]);
+        assert!(std::iter::from_fn(|| receivers[1].try_recv().ok()).all(|p| p.id != game::ScAura::ID), "407 réservé au porteur");
+        // Même groupe : la seconde remplace la première.
+        cast(&mut world, toggle(3427, 13427), 13427).unwrap();
+        assert_eq!((world.toggle_active(1, 3426), world.toggle_active(1, 3427), world.power_of(1, false)), (false, true, 24));
+        // Entretien : 4 PM toutes les 5 s.
+        let start = world.now();
+        world.tick_states(start + 499);
+        assert_eq!(world.players[&1].mp, 10);
+        world.tick_states(start + 501);
+        world.tick_states(start + 502);
+        assert_eq!(world.players[&1].mp, 6);
+        // Le joueur ne l'ôte pas par l'icône ; la même demande l'éteint, sans coût, malgré la recharge.
+        world.dismiss_state(1, 13427);
+        assert!(world.toggle_active(1, 3427));
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        cast(&mut world, toggle(3427, 13427), 13427).unwrap();
+        assert_eq!((world.toggle_active(1, 3427), world.players[&1].mp, world.power_of(1, false)), (false, 6, 16));
+        assert_eq!(aura(&std::iter::from_fn(|| receivers[0].try_recv().ok()).collect::<Vec<_>>()), vec![(3427, false)]);
+        // PM insuffisants à l'entretien, puis mort : extinction.
+        world.cast_cooldowns.clear();
+        cast(&mut world, toggle(3426, 13426), 13426).unwrap();
+        world.tick_states(world.now() + 600);
+        assert!(!world.toggle_active(1, 3426));
+        let mut own = StateDef::fixture(50, false, Some((Stat::Attack, 0.5)), None);
+        own.removable = true;
+        let quote = StateQuote { id: 50, level: 1, duration: 9000, chance: 100.0 };
+        world.apply_state(1, 1, &quote, own, 0);
+        world.dismiss_state(1, 50);
+        assert!(world.state_packets(1).is_empty());
     }
 
     #[test]

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::dbcstore::{NamedDbc, Row, StoreError};
+use crate::passives::{Held, Weapons};
 use crate::states::StateBook;
 
 pub const SUMMON: u32 = 4001;
@@ -84,6 +85,8 @@ pub enum SpellKind {
     /// 301 : pose un état sur un monstre (malus) ou un joueur (bonus).
     Curse,
     Bless,
+    /// 701 : état permanent du lanceur, entretenu en PM ; la même demande l'éteint.
+    Toggle,
     /// 4001 / 4002 : la cible est une carte (docs/re/summon_protocol.md).
     Summon,
     Unsummon,
@@ -115,8 +118,21 @@ fn stage_plays(kind: SpellKind, stage: u16) -> bool {
         SpellKind::Physical | SpellKind::Magical => matches!(stage, 101 | 111 | 122 | 201 | 401 | 404 | 411 | 501 | 502),
         SpellKind::Curse | SpellKind::Bless => matches!(stage, 401 | 501),
         SpellKind::Heal => stage == 401,
-        SpellKind::Summon | SpellKind::Unsummon => true,
+        // L'impact RESULT d'une bascule est purement visuel ; FIRE suffit à libérer le client.
+        SpellKind::Toggle | SpellKind::Summon | SpellKind::Unsummon => true,
     }
+}
+
+/// Entretien d'une bascule, toutes les 5 secondes (texte 1585).
+pub const UPKEEP_INTERVAL: u32 = 500;
+/// Durée d'un état sans fin : 505 annonce alors −1.
+pub const PERMANENT: u32 = u32::MAX;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToggleQuote {
+    pub upkeep: i32,
+    /// Bascules qui s'excluent, 0 = aucune [D].
+    pub group: u32,
 }
 
 /// Zone autour de la cible principale [D pour le centre].
@@ -127,10 +143,12 @@ pub struct Area {
     pub max_targets: u8,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct SpellDef {
+    weapons: Weapons,
     stage: u16,
     state: Option<StateApply>,
+    toggle_group: u32,
     kind: SpellKind,
     area: Option<Area>,
     /// Coups : (base, par niveau).
@@ -171,6 +189,7 @@ pub struct SpellQuote {
     pub hits: u8,
     /// Sans cible à choisir : le lanceur.
     pub self_only: bool,
+    pub toggle: Option<ToggleQuote>,
     /// Type d'animation du client, qui commande la forme de FIRE.
     pub stage: u16,
 }
@@ -267,6 +286,11 @@ fn definition(r: Row<'_>, states: &StateBook, stages: &HashMap<u32, u16>) -> Opt
             state = Some(apply);
             kind
         }
+        // Autres états (v4, v5…) non pris en charge ; v3 ne concerne que l'amélioration.
+        (_, 701) if vars[3..].iter().all(|v| *v == 0.0) && r.int("is_toggle") == 1 => {
+            state = Some(state_of(r, states)?.1);
+            SpellKind::Toggle
+        }
         (SUMMON, 601) => SpellKind::Summon,
         (UNSUMMON, 602) => SpellKind::Unsummon,
         (_, effect) => {
@@ -284,10 +308,12 @@ fn definition(r: Row<'_>, states: &StateBook, stages: &HashMap<u32, u16>) -> Opt
     }
     let mut self_only = false;
     if !matches!(kind, SpellKind::Summon | SpellKind::Unsummon) {
-        let harmful = !matches!(kind, SpellKind::Heal | SpellKind::Bless);
+        let harmful = !matches!(kind, SpellKind::Heal | SpellKind::Bless | SpellKind::Toggle);
         // Sans cible à choisir (§5.3) : la demande vise le lanceur.
         self_only = !harmful && r.int("is_need_target") == 0;
-        let supported = MUST_BE_ZERO.iter().all(|c| r.float(c) == 0.0 && r.int(c) == 0)
+        let toggle = kind == SpellKind::Toggle;
+        let supported = MUST_BE_ZERO.iter().all(|c| (toggle && *c == "is_toggle") || (r.float(c) == 0.0 && r.int(c) == 0))
+            && (!toggle || self_only)
             && (r.int("target") == 1 || (area.is_some() && r.int("target") == 2))
             && (self_only || r.int("is_need_target") == 1)
             && r.int("is_harmful") == i32::from(harmful)
@@ -297,8 +323,10 @@ fn definition(r: Row<'_>, states: &StateBook, stages: &HashMap<u32, u16>) -> Opt
         }
     }
     let mut def = SpellDef {
+        weapons: Weapons::of(r),
         stage,
         state,
+        toggle_group: r.int("toggle_group").max(0) as u32,
         kind,
         area,
         hits,
@@ -341,6 +369,11 @@ impl SpellBook {
         self.spells.is_empty()
     }
 
+    /// Arme exigée par la compétence (§5.2).
+    pub fn weapon_fits(&self, id: u32, held: Held) -> bool {
+        self.spells.get(&id).is_some_and(|d| d.weapons.fits(held))
+    }
+
     pub fn quote(&self, id: u32, level: u8) -> Option<SpellQuote> {
         let d = self.spells.get(&id)?;
         if level == 0 || level > 50 {
@@ -354,20 +387,26 @@ impl SpellBook {
             SpellKind::Physical => (v[0] + l * v[1], v[2] + l * v[3], 0.0),
             SpellKind::Magical => (v[0] + l * v[1], v[3] + l * v[4], 0.0),
             SpellKind::Heal => (v[0] + l * v[1], v[2] + l * v[3], v[4] + l * v[5]),
-            SpellKind::Curse | SpellKind::Bless | SpellKind::Summon | SpellKind::Unsummon => (0.0, 0.0, 0.0),
+            _ => (0.0, 0.0, 0.0),
         };
         let state = match d.state {
             None => None,
             Some(s) => {
                 let value = s.level.0 + (s.level.1 * f32::from(level) + 1e-4).trunc();
-                let duration = centiseconds(s.second, level).filter(|d| *d > 0)?;
+                let duration = match d.kind {
+                    SpellKind::Toggle => PERMANENT,
+                    _ => centiseconds(s.second, level).filter(|d| *d > 0)?,
+                };
                 let chance = s.chance.0 + s.chance.1 * f32::from(level);
                 // Niveau 0 = retrait côté client : un tel état ne peut pas être posé.
                 let value = (1.0..=10_000.0).contains(&value).then_some(value as u16)?;
                 Some(StateQuote { id: s.id, level: value, duration, chance })
             }
         };
+        let toggle = (d.kind == SpellKind::Toggle)
+            .then(|| ToggleQuote { upkeep: (v[0] + l * v[1]).clamp(0.0, 1e6) as i32, group: d.toggle_group });
         Some(SpellQuote {
+            toggle,
             id,
             level,
             kind: d.kind,
@@ -422,6 +461,11 @@ mod tests {
         // 2063 : zone de 5 × 12, 10 cibles. 2053 (v6 = 1) et 3025 (v11 = 1) : règle inconnue.
         assert_eq!(book.quote(2063, 1).and_then(|q| q.area), Some(Area { radius: 60.0, max_targets: 10 }));
         assert!(book.quote(2053, 1).is_none() && book.quote(3025, 1).is_none());
+        // 3427 Enchantement d'Arme : bascule du groupe 4, 1 + 2·L PM par 5 s… refusée (second état v4) ;
+        // 3426 : feu, 1 + 1·L PM.
+        let q = book.quote(3426, 2).unwrap();
+        assert_eq!((q.kind, q.toggle, q.state.map(|s| s.duration)), (SpellKind::Toggle, Some(ToggleQuote { upkeep: 3, group: 4 }), Some(PERMANENT)));
+        assert!(q.self_only && book.quote(3427, 1).is_none());
         // 3201 : sans cible à choisir, sur soi.
         assert!(book.quote(3201, 1).unwrap().self_only);
         // Forme de FIRE : coups d'arme (122) par vagues de cibles, sorts (401) un acte par impact.

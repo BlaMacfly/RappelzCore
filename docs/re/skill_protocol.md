@@ -674,3 +674,55 @@ Validation (MariaDB de test isolée, trois monstres, `rz-bot --cast`) : 2032 →
 étourdissement, aucune attaque du monstre avant le retrait ; 3023 → tics et immobilisation ; 3201 → soin sur soi. Tests unitaires :
 zone, limite, monstre mort ou hors zone, PV décroissants, arrêt sur place, reprise, réveil, refus d'une autre cible, compteurs de FIRE.
 **Non vérifié : client graphique d'origine** ; rayon et centre de zone, arrêt visible d'un monstre, zones à coups multiples en réel.
+
+## 17. Statistiques, passifs et bascules (2026-11-25)
+
+### 17.1 Constats
+
+- **Caractéristiques** : base par métier dans `BasicStat` (`stati_id` de db_job), effet d'un point dans les textes 1410–1416 : FOR
+  attaque de mêlée 2,8 et poids 10 ; VIT PV max 33 et défense 1,6 ; AGI attaque à distance 1,2, esquive 0,5, vitesse d'attaque 0,1 ;
+  DEX attaque à distance 2,2 et précision 0,5 ; INT attaque magique 2 et PM max 30 ; SAG défense magique 2, résistance et précision
+  magiques 0,5, régénération PM 4,1 ; CHA critique 0,2 % et butin 0,2 %. Texte 1417 : l'arme de mêlée dépend de la force, l'arme à
+  distance de l'agilité et de la dextérité. **Aucun texte ni table ne donne la part due au niveau.**
+- **STAT_INFO +0x49 est un i32** (`movd xmm0, [eax+0x15a]`, `ev_46b6e7d73ede4cd2fa6c261166b6735c497fada5506a0c2268cba37bc3d6e111` et
+  `ev_17cfd546c983010528f9443f2b1ee0edbb312a25ae7cee0c30a56cff42f024b8`) ; tout ce qui suit était décalé de deux octets dans
+  `network_protocol.md`, rectifié. Le serveur annonçait donc un poids maximal de 1000 + (100 << 16) = 6 554 600.
+- **Banque B** du client (type 1) : non initialisée par son constructeur ni par sa remise à zéro (sous-agent) ; un type 1 nul est
+  envoyé une fois à l'entrée.
+- **Arme requise** (FUN_006c8860, ordre relu en 0x6d20db, `ev_5a1ceb6a564462ff53d065a9f456101346799ab994d3a4ec02db567be1427a85`) : code =
+  `class` de l'objet, emplacement 0 (droite) et 1 (gauche). Sans condition (0x99) → accepté ; sinon bouclier seul (0x98) → class 210
+  en main gauche exigée ; sinon arme droite, ou deux armes de même class 101, 103 ou 113 pour les « doubles ». 101 épée une main, 102 épée
+  deux mains, 103 dague, 104 lance, 105 hache, 106 / 107 masse une / deux mains, 108 arc lourd, 109 arc léger, 110 arbalète, 111 / 112 bâton
+  une / deux mains, 113 hache une main. Les passifs ne sont pas contrôlés par le client.
+- **Bascules** (701, 702 ; sous-agent sauf mention) : le client renvoie le **même 400** pour éteindre, sans savoir si elle est active ;
+  aucune sortie temporisée : toujours répondre FIRE ou un refus. Chaque FIRE démarre la recharge locale. `toggle_group` (rec+0x12) :
+  aucun lecteur. 13 bascules sur 181 sans fiche d'animation.
+- **407** (14 octets) : +7 handle, +0xb **u16** skill_id, +0xd u8 (0 ou 1) ; surimpression de la barre rapide seulement.
+- **408** C→S (15 octets : +7 handle, +0xb code d'état ; construction relue en 0x6d5d36,
+  `ev_d5494c15c51afde6591fd5b0e1bbeba4a2f6c6cbd703d06792e99b8d39b6a80c`) : **double-clic** sur l'icône d'un état dont `state_time_type` porte
+  le bit 0x20 (241 états, aucun nuisible, aucun de bascule).
+- **505 avec fin −1** : ni durée ni jauge affichées.
+
+### 17.2 Implémentation RappelzCore
+
+| Élément | Choix |
+|---|---|
+| Base | caractéristiques du métier envoyées dans STAT_INFO (10 partout auparavant) ; attaque, défense, PV et PM de base restent la règle provisoire par niveau |
+| Points gagnés | seuls les points **ajoutés ou retirés** par un passif ou un état valent les coefficients du client : rien n'est inventé pour la part du niveau |
+| Ordre | (base + points gagnés + valeurs fixes) × (1 + somme des pourcentages) **[D]** |
+| Statistiques reconnues | toute la banque A sauf SP (23, 26) et les bits 29, 31 ; états retenus : 609 → 612 → **1 332** |
+| **Affichées sans effet en combat** | précision, esquive, résistance magique, critique, blocage, vitesse d'incantation, régénérations, restaurations, poids : le client n'a pas de formule finale |
+| Monstres | caractéristiques non converties (base inconnue) |
+| Passifs | **396** : types 3, 4 (banque A), 10001, 10008, 10009, 10011, 10015, 10021, 10042, 10043, 10045 ; recalculés à l'entrée, à l'apprentissage et au changement d'équipement ; arme requise respectée. Écartés : banque B, 10010 (condition v1 inconnue), 10037, 10044, 31001, déclenchements… |
+| PV / PM max | recalculés à chaque changement ; PV courants ramenés au nouveau maximum ; passifs comptés dès la connexion, **pas les états** (non sauvegardés) |
+| Arme requise (actives) | refus côté serveur aussi ; le client refuse déjà (texte 317) |
+| Bascules | 701 à un seul état, sur soi : **7** compétences. FIRE avec RESULT de genre 0 (505 nomme déjà l'état), 505 à fin −1, 407 au porteur. Extinction immédiate et gratuite, même pendant la recharge |
+| Entretien | `v1 + L·v2` PM toutes les 5 s (texte 1585) ; PM insuffisants : extinction **[D]**. Bascules du même `toggle_group` non nul : la nouvelle remplace l'ancienne **[D]** |
+| 408 | retire les états du joueur lui-même s'ils sont retirables et hors bascule |
+| Total | **281** compétences actives lançables au niveau 1 (253 auparavant) |
+
+Validation (MariaDB de test isolée) : 1003 niveau 3 → défense 44 → 53 ; 1004 → PV max 480 → 1 980 ; 40902 niveau 10 → FOR 10 → 20, attaque
+92 → 120, poids 1 000 → 1 100 ; valeurs retrouvées à la reconnexion ; 3426 → FOR 20 → 40, attaque 120 → 176, entretien 2 PM toutes les 5 s,
+extinction par la même demande ; 51012 niveau 2 → 120 → 144 avec une épée seulement ; 2032 tirée avec l'épée, refusée sans. Tests unitaires :
+conversions, masques, armes simples / doubles / bouclier, profil, montée de niveau, entretien, groupe, 408.
+**Non vérifié : client graphique d'origine.**

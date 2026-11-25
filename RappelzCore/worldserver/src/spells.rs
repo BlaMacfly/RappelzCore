@@ -63,8 +63,12 @@ fn fire_hits(hits: &[Vec<game::SkillDamageHit>], q: &SpellQuote) -> Vec<u8> {
 
 /// Impact RESULT (10 octets) : succès, genre 10 = état ajouté [O].
 fn state_payload(target: u32, success: bool) -> Vec<u8> {
+    result_payload(target, success, 10)
+}
+
+fn result_payload(target: u32, success: bool, kind: i32) -> Vec<u8> {
     let mut w = Writer::new();
-    w.bool(false).f32(0.0).u8(1).u8(1).u16(1).u8(skill_hit::RESULT).u32(target).bool(success).i32(10);
+    w.bool(false).f32(0.0).u8(1).u8(1).u16(1).u8(skill_hit::RESULT).u32(target).bool(success).i32(kind);
     w.finish(0).body
 }
 
@@ -105,7 +109,7 @@ impl World {
         let now = self.now();
         let position = match q.kind {
             SpellKind::Summon | SpellKind::Unsummon => return true,
-            SpellKind::Heal | SpellKind::Bless => match self.players.get(&target).filter(|t| t.hp > 0 && t.layer == p.layer) {
+            SpellKind::Heal | SpellKind::Bless | SpellKind::Toggle => match self.players.get(&target).filter(|t| t.hp > 0 && t.layer == p.layer) {
                 Some(t) => t.motion.position(now),
                 None => return false,
             },
@@ -146,11 +150,16 @@ impl World {
         handle: u32,
         guid: u32,
         target: u32,
-        q: SpellQuote,
+        mut q: SpellQuote,
         action: Action,
         known: Vec<Known>,
     ) -> Result<(), &'static str> {
         let now = self.cast_clock();
+        // Éteindre une bascule : immédiat et gratuit (la recharge locale part à chaque FIRE).
+        let off = q.kind == SpellKind::Toggle && self.toggle_active(handle, q.id);
+        if off {
+            (q.mp, q.cast) = (0, 0);
+        }
         self.cast_cooldowns.retain(|_, end| *end > now);
         let p = self.players.get(&handle).filter(|p| p.guid == guid).ok_or("Hors du monde.")?;
         if p.hp <= 0 {
@@ -162,7 +171,7 @@ impl World {
         if self.casts.contains_key(&handle) || self.spells.contains_key(&handle) {
             return Err("Une compétence est déjà en cours.");
         }
-        if self.cast_cooldowns.contains_key(&(guid, q.group)) || self.cast_cooldowns.len() >= 8192 {
+        if (!off && self.cast_cooldowns.contains_key(&(guid, q.group))) || self.cast_cooldowns.len() >= 8192 {
             return Err("Compétence en recharge.");
         }
         if q.cast > 0 && !p.motion.remaining_points(self.now()).is_empty() {
@@ -324,6 +333,8 @@ impl World {
                 }
                 state_payload(c.target, !posed.is_empty())
             }
+            // Genre 0 : sans message, 505 nomme déjà l'état ajouté ou retiré.
+            SpellKind::Toggle => result_payload(c.target, true, 0),
             SpellKind::Summon | SpellKind::Unsummon => game::ScSkill::fire_payload(false, 0.0, 0, 1, &[]),
         };
         if let Some(packet) = self.spell_event(handle, &c, skill_type::FIRE, q.mp, payload) {
@@ -334,7 +345,9 @@ impl World {
                 self.wake(*target);
             }
         }
-        if let Some((s, def)) = state {
+        if let (Some((s, def)), Some(toggle)) = (&state, q.toggle) {
+            self.switch_toggle(handle, q.id, s, toggle, def.clone());
+        } else if let Some((s, def)) = state {
             let physical = def.periodic.is_some_and(|p| p.pulse == rz_rappelz::states::Pulse::PhysicalDamage);
             let power = self.power_of(handle, !physical);
             for target in posed {
@@ -403,6 +416,12 @@ impl Session {
         }
         if req.caster != g.handle || ![req.x, req.y, req.z].iter().all(|v| v.is_finite()) {
             return Err("Demande invalide.");
+        }
+        if !matches!(q.kind, SpellKind::Summon | SpellKind::Unsummon) {
+            let held = crate::stats::profile(&self.ctx.data, &g.character, &g.items).held;
+            if !self.ctx.data.spells.weapon_fits(q.id, held) {
+                return Err("Arme requise non équipée.");
+            }
         }
         let action = match q.kind {
             SpellKind::Summon | SpellKind::Unsummon => {

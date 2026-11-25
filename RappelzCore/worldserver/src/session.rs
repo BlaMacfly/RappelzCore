@@ -380,7 +380,9 @@ impl Session {
         };
         let wear = Self::wear_array(&items);
         let (events_tx, events_rx) = mpsc::unbounded_channel();
-        let (max_hp, max_mp) = (crate::gameplay::max_hp_for(c.level), crate::gameplay::max_mp_for(c.level));
+        let (base_max_hp, base_max_mp) = (crate::gameplay::max_hp_for(c.level), crate::gameplay::max_mp_for(c.level));
+        let profile = crate::stats::profile(&ctx.data, &c, &items);
+        let (max_hp, max_mp) = profile.vitals(base_max_hp, base_max_mp);
         if c.health == 0 || c.health as i32 > max_hp {
             c.health = max_hp as u32;
         }
@@ -446,6 +448,9 @@ impl Session {
                 max_hp,
                 mp: c.power1 as i32,
                 max_mp,
+                base_max_hp,
+                base_max_mp,
+                profile,
                 attack: crate::gameplay::attack_for(c.level),
                 defence: crate::gameplay::defence_for(c.level),
                 move_speed:s.move_speed,
@@ -454,6 +459,8 @@ impl Session {
                 last_combat: 0,
             });
             world.publish_stats(handle);
+            // Banque B du client : ni son constructeur ni sa remise à zéro ne l'initialisent.
+            self.send(&msg::ScStatInfo { handle, stats: [0; 98], info_type: 1 });
             world.update_visibility();
             handle
         };

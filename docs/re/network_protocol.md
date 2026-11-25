@@ -485,18 +485,18 @@ ci-dessous (i32 utilisés tels quels, i16 via `(short)`) ; getter FUN_00940db0 :
 | +0x0f | i16 | vital | +0x43 | i16 | move_speed |
 | +0x11 | i16 | dexterity | +0x45 | i16 | attack_speed |
 | +0x13 | i16 | agility | +0x47 | i16 | attack_range [O getter] |
-| +0x15 | i16 | intelligence | +0x49 | i16 | max_weight |
-| +0x17 | i16 | mentality | +0x4b | i16 | casting_speed |
-| +0x19 | i16 | luck | +0x4d | i16 | cool_time_speed |
-| +0x1b | i16 | critical | +0x4f | i16 | item_chance |
-| +0x1d | i16 | critical_power | +0x51 | i16 | hp_regen_percentage |
-| **+0x1f** | **i32** | attack_point_right | +0x53 | i16 | hp_regen_point |
-| **+0x23** | **i32** | attack_point_left | +0x55 | i16 | mp_regen_percentage |
-| **+0x27** | **i32** | defence | +0x57 | i16 | mp_regen_point |
-| **+0x2b** | **i32** | block_defence | +0x59 | i16 | perfect_block |
-| **+0x2f** | **i32** | magic_point | +0x5b | i16 | magic_penetration |
-| **+0x33** | **i32** | magic_defence | +0x5d | i16 | physical_penetration |
-| +0x37 | i16 | accuracy_right | +0x5f..+0x6c | 14 o. | inconnus (7 × i16 ?) [?] — mettre 0 |
+| +0x15 | i16 | intelligence | **+0x49** | **i32** | **max_weight** (rectifié, lu en dword : 0x750b93, 0x6db44f) |
+| +0x17 | i16 | mentality | +0x4d | i16 | casting_speed |
+| +0x19 | i16 | luck | +0x4f | i16 | cool_time_speed [D] |
+| +0x1b | i16 | critical (%) | +0x51 | i16 | item_chance [D] |
+| +0x1d | i16 | critical_power (%) | +0x53 | i16 | régénération PV |
+| **+0x1f** | **i32** | attack_point_right | +0x55 | i16 | restauration PV |
+| **+0x23** | **i32** | attack_point_left | +0x57 | i16 | régénération PM |
+| **+0x27** | **i32** | defence | +0x59 | i16 | restauration PM |
+| **+0x2b** | **i32** | block_defence | +0x5b | i16 | blocage parfait (%) |
+| **+0x2f** | **i32** | magic_point | +0x5d / +0x5f | i16 | ignore défense magique / ratio [D] |
+| **+0x33** | **i32** | magic_defence | +0x61 / +0x63 | i16 | ignore défense / ratio |
+| +0x37 | i16 | accuracy_right | +0x65..+0x6b | 4 × i16 | pénétration magique / ratio [D], pénétration / ratio |
 | +0x39 | i16 | accuracy_left | **+0x6d** | **u8** | **type** (0 = copie principale, 1 = contribution séparée puis soustractions ; provenance équipement seule non établie) |
 | +0x3b | i16 | magic_accuracy | | | |
 

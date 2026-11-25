@@ -60,6 +60,9 @@ struct Cli {
     /// Avec --cast : vise son propre personnage (bonus, soins).
     #[arg(long)]
     cast_self: bool,
+    /// Avec --cast : redemande la compétence une fois, ce nombre de secondes après son tir (bascules).
+    #[arg(long)]
+    again: Option<u64>,
     /// Avec --summon ou --cast : bouge pendant l'incantation (elle doit être annulée).
     #[arg(long)]
     interrupt: bool,
@@ -273,6 +276,7 @@ async fn main() -> Result<()> {
     // Avec --quest : PNJ à portée encore à essayer.
     let mut npc_queue: std::collections::VecDeque<u32> = Default::default();
     let mut cast_target = None::<u32>;
+    let mut again = cli.again;
     // Invocations : handle de créature → handle de carte.
     let mut card_of = std::collections::HashMap::<u32, u32>::new();
     let skill = |skill_id: u16, caster: u32, target: u32| game::CsSkill { skill_id, caster, target, x: 0.0, y: 0.0, z: 0.0, layer: 0, skill_level: 1 };
@@ -393,6 +397,11 @@ async fn main() -> Result<()> {
                 if cli.interrupt && phase == "CASTING" {
                     w.send(&msg::CsMoveRequest { handle: lr.handle, x: lr.x, y: lr.y, cur_time: 0, speed_sync: false, points: vec![MovePoint { x: lr.x + 5.0, y: lr.y }] }).await?;
                 }
+                if let (Some(id), Some(target), "FIRE", Some(secs)) = (cli.cast, cast_target, phase, again) {
+                    again = None;
+                    tokio::time::sleep(Duration::from_secs(secs)).await;
+                    w.send(&skill(id, lr.handle, target)).await?;
+                }
                 if let (Some(id), Some(target)) = (cli.cast, cast_target) {
                     if phase == "FIRE" && hit != Some(game::skill_hit::RESULT) && int(14) > 0 {
                         tokio::time::sleep(Duration::from_millis(1100)).await;
@@ -404,13 +413,26 @@ async fn main() -> Result<()> {
                 let s = game::ScState::from_packet(&p)?;
                 tracing::info!("[état] porteur {} : code {} niveau {} (instance {}, {} cs)", s.handle, s.state_code, s.state_level, s.state_handle, s.remain_time - s.start_time as i32);
             }
+            gid::TS_SC_AURA => {
+                let a = game::ScAura::from_packet(&p)?;
+                tracing::info!("[bascule] compétence {} active : {}", a.skill_id, a.active);
+            }
+            gid::TS_SC_HPMP => {
+                let v = game::ScHpMp::from_packet(&p)?;
+                if v.handle == lr.handle {
+                    tracing::info!("[vitaux] PV {}/{} PM {}/{}", v.hp, v.max_hp, v.mp, v.max_mp);
+                }
+            }
             gid::TS_SC_STATE_DAMAGE => {
                 let d = game::ScStateDamage::from_packet(&p)?;
                 tracing::info!("[état] tic {} sur {} : type {} valeur {} → {} (total {}, fin {})", d.state_code, d.target, d.kind, d.value, d.result, d.total, d.last);
             }
             id::TS_SC_STAT_INFO => {
-                if let Some(c) = msg::ScStatInfo::from_packet(&p)?.combat_stats() {
-                    tracing::info!("[stats] attaque {} défense {} vitesse {}", c.attack, c.defence, c.move_speed);
+                let s = msg::ScStatInfo::from_packet(&p)?;
+                if let Some(c) = s.combat_stats() {
+                    let base: Vec<i16> = (1..8).map(|n| i16::from_le_bytes([s.stats[2 * n], s.stats[2 * n + 1]])).collect();
+                    let weight = i32::from_le_bytes(s.stats[0x3e..0x42].try_into().unwrap());
+                    tracing::info!("[stats] attaque {} défense {} vitesse {} FOR/VIT/DEX/AGI/INT/SAG/CHA {base:?} poids {weight}", c.attack, c.defence, c.move_speed);
                 }
             }
             gid::TS_SC_TAKE_ITEM_RESULT => {

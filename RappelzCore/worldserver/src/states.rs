@@ -8,7 +8,7 @@
 use rz_proto::msg::Message;
 use rz_proto::msg_game as game;
 use rz_proto::RawPacket;
-use rz_rappelz::spells::StateQuote;
+use rz_rappelz::spells::{StateQuote, ToggleQuote, UPKEEP_INTERVAL};
 use rz_rappelz::states::{Control, Mods, Pulse, Stat, StateDef};
 
 use crate::gameplay::magic_for;
@@ -32,6 +32,15 @@ pub(crate) struct ActiveState {
     next_pulse: u32,
     total: i32,
     def: StateDef,
+    toggle: Option<ToggleRun>,
+}
+
+/// Bascule active : compétence et prochain entretien.
+#[derive(Clone, Copy, Debug)]
+struct ToggleRun {
+    skill: u32,
+    quote: ToggleQuote,
+    next: u32,
 }
 
 impl ActiveState {
@@ -56,9 +65,9 @@ pub(crate) struct States {
 }
 
 impl World {
-    /// Cumul des modificateurs du porteur (joueur ou monstre).
+    /// Cumul des modificateurs du porteur : états, plus passifs d'un joueur.
     pub(crate) fn mods(&self, bearer: u32) -> Mods {
-        let mut m = Mods::default();
+        let mut m = self.players.get(&bearer).map_or(Mods::default(), |p| p.profile.passives);
         for s in self.states.bearers.get(&bearer).into_iter().flatten() {
             m.add(&s.def.mods(s.level));
         }
@@ -66,7 +75,10 @@ impl World {
     }
 
     pub(crate) fn stat(&self, bearer: u32, stat: Stat, base: i32) -> i32 {
-        self.mods(bearer).apply(stat, base)
+        match self.players.get(&bearer) {
+            Some(p) => self.mods(bearer).derive(stat, base, &p.profile.attributes),
+            None => self.mods(bearer).apply(stat, base),
+        }
     }
 
     /// Contrôles cumulés du porteur.
@@ -152,6 +164,7 @@ impl World {
             next_pulse,
             total: 0,
             def,
+            toggle: None,
         };
         let packet = state.packet(bearer, state.level);
         let stops = state.def.control.no_move;
@@ -179,6 +192,9 @@ impl World {
         for s in &gone {
             let packet = s.packet(bearer, 0);
             self.broadcast_around(bearer, &packet, true);
+            if let Some(t) = s.toggle {
+                self.send_to(bearer, game::ScAura { handle: bearer, skill_id: t.skill as u16, active: false }.to_packet());
+            }
         }
         self.refresh_bearer(bearer);
     }
@@ -187,10 +203,62 @@ impl World {
         self.remove_states(bearer, |_| true);
     }
 
+    pub(crate) fn toggle_active(&self, bearer: u32, skill: u32) -> bool {
+        self.states.bearers.get(&bearer).is_some_and(|l| l.iter().any(|s| s.toggle.is_some_and(|t| t.skill == skill)))
+    }
+
+    /// Éteint une bascule active, sinon l'allume après avoir éteint celles du même groupe.
+    pub(crate) fn switch_toggle(&mut self, bearer: u32, skill: u32, q: &StateQuote, toggle: ToggleQuote, def: StateDef) {
+        if self.toggle_active(bearer, skill) {
+            self.remove_states(bearer, |s| s.toggle.is_some_and(|t| t.skill == skill));
+            return;
+        }
+        if toggle.group != 0 {
+            self.remove_states(bearer, |s| s.toggle.is_some_and(|t| t.quote.group == toggle.group));
+        }
+        let id = def.id;
+        if !self.apply_state(bearer, bearer, q, def, 0) {
+            return;
+        }
+        let next = self.now().saturating_add(UPKEEP_INTERVAL);
+        if let Some(s) = self.states.bearers.get_mut(&bearer).and_then(|l| l.iter_mut().find(|s| s.def.id == id)) {
+            s.toggle = Some(ToggleRun { skill, quote: toggle, next });
+        }
+        self.send_to(bearer, game::ScAura { handle: bearer, skill_id: skill as u16, active: true }.to_packet());
+    }
+
+    /// Entretien des bascules : coût en PM, extinction s'ils manquent.
+    fn pay_upkeep(&mut self, bearer: u32, now: u32) {
+        let due: Vec<(u16, i32)> = self.states.bearers.get(&bearer).into_iter().flatten()
+            .filter_map(|s| s.toggle.filter(|t| now >= t.next).map(|t| (s.state_handle, t.quote.upkeep)))
+            .collect();
+        for (state_handle, cost) in due {
+            let Some(p) = self.players.get_mut(&bearer) else { return };
+            if p.mp < cost {
+                self.remove_states(bearer, |s| s.state_handle == state_handle);
+                continue;
+            }
+            p.mp -= cost;
+            p.enter.creature.mp = p.mp;
+            let packet = Self::hpmp_packet(bearer, p.hp, p.max_hp, p.mp, p.max_mp, 0);
+            if let Some(t) = self.states.bearers.get_mut(&bearer).and_then(|l| l.iter_mut().find(|s| s.state_handle == state_handle)).and_then(|s| s.toggle.as_mut()) {
+                t.next = t.next.saturating_add(UPKEEP_INTERVAL);
+            }
+            if cost > 0 {
+                self.broadcast_around(bearer, &packet, true);
+            }
+        }
+    }
+
+    /// Demande du joueur (408) : ses propres états marqués comme retirables, hors bascules.
+    pub(crate) fn dismiss_state(&mut self, bearer: u32, code: u32) {
+        self.remove_states(bearer, |s| s.def.id == code && s.def.removable && s.toggle.is_none());
+    }
+
     /// Statistiques envoyées au porteur (joueur) après un changement.
     fn refresh_bearer(&mut self, bearer: u32) {
         if self.players.contains_key(&bearer) {
-            self.publish_stats(bearer);
+            self.refresh_player(bearer);
         }
     }
 
@@ -202,8 +270,10 @@ impl World {
                 self.clear_states(b);
                 continue;
             }
-            let due: Vec<u16> = self.states.bearers[&b]
-                .iter()
+            self.pay_upkeep(b, now);
+            let due: Vec<u16> = self.states.bearers.get(&b)
+                .into_iter()
+                .flatten()
                 .filter(|s| s.def.periodic.is_some() && now >= s.next_pulse && s.next_pulse <= s.end)
                 .map(|s| s.state_handle)
                 .collect();

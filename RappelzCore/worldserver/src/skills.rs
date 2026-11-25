@@ -140,11 +140,13 @@ impl Session {
         self.send_job_progress();
     }
     pub fn send_skill_catalog(&mut self) {
+        self.refresh_profile();
         if self.skill_catalog.is_some() {
             self.enable_skills(wire::VERSION);
         }
     }
     pub fn send_learned_skills(&self) {
+        self.refresh_profile();
         let Some(g) = &self.in_game else {
             return;
         };
