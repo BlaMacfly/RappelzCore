@@ -566,7 +566,11 @@ impl Session {
 
     fn handle_move(&mut self, req: msg::CsMoveRequest) {
         let Some(g) = &self.in_game else { return };
-        if req.handle != g.handle || req.points.len() > 64 {
+        if req.handle != g.handle {
+            self.ctx.world.lock().unwrap().summon_move(g.handle, req);
+            return;
+        }
+        if req.points.len() > 64 {
             return;
         }
         let s = &self.ctx.settings;

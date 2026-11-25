@@ -306,7 +306,13 @@ impl Session {
             }
             gid::TS_CS_ATTACK_REQUEST => {
                 let req = game::CsAttackRequest::from_packet(&p)?;
-                self.ctx.world.lock().unwrap().start_attack(handle, req.target_handle);
+                let mut world = self.ctx.world.lock().unwrap();
+                // La créature du joueur attaque avec son propre handle.
+                if req.handle == handle {
+                    world.start_attack(handle, req.target_handle);
+                } else {
+                    world.summon_attack(handle, req.handle, req.target_handle);
+                }
             }
             gid::TS_CS_REMOVE_STATE => {
                 let req = game::CsRemoveState::from_packet(&p)?;
@@ -324,8 +330,13 @@ impl Session {
             gid::TS_EQUIP_SUMMON => self.set_formation(game::EquipSummon::from_packet(&p)?).await?,
             gid::TS_CS_GET_SUMMON_SETUP_INFO => self.send_formation(),
             gid::TS_CS_CANCEL_ACTION => {
+                let who = game::CsCancelAction::from_packet(&p)?.0;
                 let mut world=self.ctx.world.lock().unwrap();
-                world.cancel_restoration(handle);world.stop_attack(handle);
+                if who == handle {
+                    world.cancel_restoration(handle);world.stop_attack(handle);
+                } else {
+                    world.summon_stop(handle, who);
+                }
             },
             gid::TS_CS_TARGETING => {
                 let target = game::CsTargeting::from_packet(&p)?.0;

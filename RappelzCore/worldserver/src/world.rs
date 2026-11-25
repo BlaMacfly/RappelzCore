@@ -761,11 +761,15 @@ impl World {
                 continue;
             }
             let Some(target) = m.target else { continue };
-            let Some(p) = self.players.get(&target).filter(|p| p.hp > 0 && p.layer == 0) else {
+            // Cible : un joueur ou une créature invoquée, vivants et sur la couche des monstres.
+            let victim = match self.players.get(&target) {
+                Some(p) => (p.hp > 0 && p.layer == 0).then(|| p.motion.position(now)),
+                None => self.summons.get(&target).filter(|s| s.hp > 0 && s.layer == 0).map(|s| s.motion.position(now)),
+            };
+            let Some(ppos) = victim else {
                 self.monsters.get_mut(&mh).unwrap().target = None;
                 continue;
             };
-            let ppos = p.motion.position(now);
             let mpos = m.motion.position(now);
             let d = dist(ppos, mpos);
             if d > self.visibility_distance * 1.5 {
@@ -805,6 +809,10 @@ impl World {
             let attack = self.stat(mh, Stat::Attack, base_attack);
             let delay = self.attack_delay(mh, MONSTER_ATTACK_DELAY);
             self.monsters.get_mut(&mh).unwrap().next_attack = now + delay;
+            if !self.players.contains_key(&target) {
+                self.hit_summon(mh, target, attack, delay, now);
+                continue;
+            }
             let defence = self.stat(target, Stat::Defence, self.players[&target].defence);
             let p = self.players.get_mut(&target).unwrap();
             let damage = roll_damage(attack, defence);
@@ -1568,7 +1576,7 @@ mod tests {
         let guid = world.players[&1].guid;
         let pet = rz_database::pets::Pet { card: 5, entry: 1401, level: 1, ..Default::default() };
         let q = spell_quote(rz_rappelz::spells::SpellKind::Summon, 800);
-        world.begin_spell(1, guid, 99, q, crate::spells::Action::Summon { pet, run_speed: 100.0 }, vec![]).unwrap();
+        world.begin_spell(1, guid, 99, q, crate::spells::Action::Summon { pet, run_speed: 100.0, attack_range: 24.0 }, vec![]).unwrap();
         assert_eq!((world.summoning(5), world.summoning(6)), (Some(1), None));
         assert!(world.summons.is_empty());
         world.cancel_spell(1); // carte partie : sync_pets annule l'incantation
@@ -1581,10 +1589,10 @@ mod tests {
         let (mut world, mut receivers) = test_world();
         let pet = rz_database::pets::Pet { card: 5, entry: 1401, level: 3, exp: 0, name: "Pixie".into(), slot: 0 };
         let handle = crate::summons::summon_handle(5);
-        assert!(world.summon(1, &pet, 150.0));
-        assert!(!world.summon(1, &pet, 150.0), "déjà invoquée");
+        assert!(world.summon(1, &pet, 150.0, 24.0));
+        assert!(!world.summon(1, &pet, 150.0, 24.0), "déjà invoquée");
         let other = rz_database::pets::Pet { card: 6, ..pet.clone() };
-        assert!(!world.summon(1, &other, 150.0), "limite par joueur");
+        assert!(!world.summon(1, &other, 150.0, 24.0), "limite par joueur");
         // Un autre joueur voit l'ENTER avec le maître et le code de la créature.
         let seen = receivers.iter_mut().skip(1).any(|rx| std::iter::from_fn(|| rx.try_recv().ok())
             .filter(|p| p.id == msg::ScEnter::ID).filter_map(|p| msg::ScEnter::from_packet(&p).ok())
@@ -1608,9 +1616,58 @@ mod tests {
         assert!(dist(s.motion.position(now + 100), (x + 5000.0, y)) < 30.0);
         // Renvoi, puis départ du maître.
         assert!(world.unsummon(handle) && !world.unsummon(handle));
-        assert!(world.summon(1, &pet, 150.0));
+        assert!(world.summon(1, &pet, 150.0, 24.0));
         world.remove_player(1);
         assert!(world.summons.is_empty());
+    }
+
+    #[test]
+    fn summon_fights_takes_hits_dies_and_obeys_client_moves() {
+        let (mut world, mut receivers) = test_world();
+        let monster = test_monster(&mut world);
+        { let m = world.monsters.get_mut(&monster).unwrap(); m.info.hp = 400; m.hp = 400; m.info.attack = 2000; }
+        let pet = rz_database::pets::Pet { card: 5, entry: 1801, level: 3, exp: 0, name: "Yéti".into(), slot: 0 };
+        let h = crate::summons::summon_handle(5);
+        assert!(world.summon(1, &pet, 150.0, 24.0));
+        world.update_visibility();
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        // Seul le maître commande sa créature, et seulement contre un monstre vivant.
+        assert!(!world.summon_attack(2, h, monster) && !world.summon_attack(1, h, 1));
+        assert!(world.summon_attack(1, h, monster));
+        assert_eq!(world.players[&1].attack_target, None, "le joueur ne part pas au combat");
+        let now = world.now();
+        world.tick_summons(now);
+        let hp = world.monsters[&monster].hp;
+        assert!(hp < 400);
+        let event = std::iter::from_fn(|| receivers[0].try_recv().ok()).find(|p| p.id == game::ScAttackEvent::ID).unwrap();
+        assert_eq!(game::ScAttackEvent::from_packet(&event).unwrap().attacker, h);
+        // Le monstre riposte sur la créature ; le maître reçoit ses PV (fiche).
+        assert_eq!(world.monsters[&monster].target, Some(h));
+        world.tick_monsters(now + 1);
+        let s = &world.summons[&h];
+        assert!(s.hp == 0, "attaque 2000");
+        let vitals = std::iter::from_fn(|| receivers[0].try_recv().ok()).filter(|p| p.id == game::ScHpMp::ID)
+            .map(|p| game::ScHpMp::from_packet(&p).unwrap()).filter(|v| v.handle == h).last().unwrap();
+        assert_eq!(vitals.hp, 0);
+        assert_eq!(world.monsters[&monster].target, None, "la créature morte n'est plus une cible");
+        // Morte : n'attaque plus, puis renvoyée.
+        world.tick_summons(now + 200);
+        assert_eq!(world.monsters[&monster].hp, hp);
+        world.tick_summons(now + 600);
+        assert!(world.summons.is_empty());
+        // Déplacement envoyé par le client : la créature suit ses points et le serveur ne la conduit plus.
+        assert!(world.summon(1, &pet, 150.0, 24.0));
+        let (x, y) = world.summons[&h].motion.position(world.now());
+        let req = msg::CsMoveRequest { handle: h, x, y, cur_time: 0, speed_sync: false, points: vec![MovePoint { x: x + 30.0, y }] };
+        world.summon_move(2, req.clone());
+        assert!(world.summons[&h].motion.points.is_empty(), "pas la créature de ce joueur");
+        world.summon_move(1, req);
+        assert_eq!(world.summons[&h].motion.points.len(), 1);
+        world.players.get_mut(&1).unwrap().motion = Motion::at(x + 200.0, y);
+        let later = world.now() + 1000;
+        world.tick_summons(later);
+        assert!(dist(world.summons[&h].motion.position(later + 100), (x + 30.0, y)) < 1.0, "aucun suivi imposé");
+        world.summon_stop(1, h);
     }
 
     #[test]

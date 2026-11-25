@@ -3,18 +3,23 @@
 //! 4001 / 4002, la cible étant le handle de la **carte**.
 //!
 //! Socle actuel : fiches (301), formation (303/324), invoquer, renvoyer, suivi du maître,
-//! visibilité. L'incantation de 4001 / 4002 est dans `spells.rs`. Pas encore : combat, EXP,
-//! évolution, monture, équipement.
+//! visibilité, combat. L'incantation de 4001 / 4002 est dans `spells.rs`. Pas encore : EXP,
+//! évolution, compétences de créature, monture, équipement.
+//!
+//! Le client pilote lui-même sa créature (docs/re/summon_protocol.md §13) : attaque, déplacement
+//! et annulation arrivent avec le handle de la créature. Le serveur ne la déplace que tant que le
+//! client ne l'a jamais fait (client sans IA de créature, comme `rz-bot`).
 
 use anyhow::Result;
 use rz_database::pets::{self, Pet, NOT_IN_FORMATION};
 use rz_proto::msg::{self, CreatureInfo, EnterKind, Message, MovePoint, ScEnter};
-use rz_proto::msg_game::{self as game, id as gid, FORMATION_SLOTS};
+use rz_proto::msg_game::{self as game, id as gid, AttackInfo, FORMATION_SLOTS};
 use rz_proto::RawPacket;
 
-use crate::gameplay::{max_hp_for, max_mp_for, ITEM_HANDLE_BASE};
+use crate::gameplay::{attack_for, defence_for, max_hp_for, max_mp_for, ITEM_HANDLE_BASE};
 use crate::session::Session;
 use crate::world::{Motion, World};
+use rz_rappelz::states::Stat;
 
 /// Plage de handles des créatures (monstres 0x2000…, PNJ 0x4000…, sol 0x5000…, sac 0x6000…).
 pub const SUMMON_HANDLE_BASE: u32 = 0x3000_0000;
@@ -25,6 +30,14 @@ const FOLLOW_START: f32 = 40.0;
 const FOLLOW_STOP: f32 = 20.0;
 /// Au-delà (téléportation), la créature réapparaît près du maître [D].
 const FOLLOW_SNAP: f32 = 300.0;
+/// Délai entre deux coups (centièmes), comme le joueur [D].
+const SUMMON_ATTACK_DELAY: u32 = 150;
+/// Marge de portée, comme le joueur [D].
+const ATTACK_SLACK: f32 = 45.0;
+/// Corps d'une créature morte avant son renvoi : le client n'en renvoie aucune lui-même [D].
+const DEATH_DELAY: u32 = 500;
+/// Écart toléré entre le départ annoncé d'un déplacement et la position serveur.
+const MOVE_TOLERANCE: f32 = 60.0;
 
 pub fn summon_handle(card: u32) -> u32 {
     SUMMON_HANDLE_BASE + card
@@ -50,6 +63,13 @@ pub struct SummonEntity {
     pub motion: Motion,
     pub run_speed: f32,
     next_follow: u32,
+    /// Unités du monde (db_creature `attack_range` × 12 [D]).
+    pub attack_range: f32,
+    pub attack_target: Option<u32>,
+    next_attack: u32,
+    /// Le client a déjà envoyé un déplacement pour elle : le serveur ne la conduit plus.
+    client_driven: bool,
+    dead_since: Option<u32>,
 }
 
 impl World {
@@ -78,7 +98,7 @@ impl World {
     }
 
     /// Fait apparaître la créature de `master` ; faux si elle y est déjà ou si la limite est atteinte.
-    pub fn summon(&mut self, master: u32, pet: &Pet, run_speed: f32) -> bool {
+    pub fn summon(&mut self, master: u32, pet: &Pet, run_speed: f32, attack_range: f32) -> bool {
         let handle = summon_handle(pet.card);
         let now = self.now();
         if self.summons.contains_key(&handle) || self.summoned_by(master).len() >= MAX_SUMMONED {
@@ -103,6 +123,11 @@ impl World {
                 motion: Motion::at(x + FOLLOW_STOP, y),
                 run_speed,
                 next_follow: 0,
+                attack_range,
+                attack_target: None,
+                next_attack: 0,
+                client_driven: false,
+                dead_since: None,
             },
         );
         self.update_visibility();
@@ -131,8 +156,162 @@ impl World {
         }
     }
 
+    /// Créature de `master`, vivante.
+    fn own_summon(&self, master: u32, handle: u32) -> bool {
+        self.summons.get(&handle).is_some_and(|s| s.master == master && s.hp > 0)
+    }
+
+    /// TS_CS_ATTACK_REQUEST avec le handle d'une créature.
+    pub(crate) fn summon_attack(&mut self, master: u32, handle: u32, target: u32) -> bool {
+        let now = self.now();
+        let ok = self.own_summon(master, handle)
+            && self.monsters.get(&target).is_some_and(|m| m.alive())
+            && self.can_see(master, target, now)
+            && self.summons[&handle].layer == 0;
+        if let Some(s) = self.summons.get_mut(&handle) {
+            s.attack_target = ok.then_some(target);
+        }
+        if !ok {
+            self.send_to(master, game::ScCantAttack { attacker: handle, target, reason: 1 }.to_packet());
+        }
+        ok
+    }
+
+    pub(crate) fn summon_stop(&mut self, master: u32, handle: u32) {
+        if let Some(s) = self.summons.get_mut(&handle).filter(|s| s.master == master) {
+            s.attack_target = None;
+        }
+    }
+
+    /// TS_CS_MOVE_REQUEST avec le handle d'une créature.
+    pub(crate) fn summon_move(&mut self, master: u32, req: msg::CsMoveRequest) {
+        let now = self.now();
+        if !self.own_summon(master, req.handle) || req.points.len() > 64 || self.control(req.handle).no_move {
+            return;
+        }
+        let s = self.summons.get_mut(&req.handle).unwrap();
+        let (sx, sy) = s.motion.position(now);
+        let start = if (sx - req.x).powi(2) + (sy - req.y).powi(2) <= MOVE_TOLERANCE.powi(2) { (req.x, req.y) } else { (sx, sy) };
+        s.client_driven = true;
+        s.motion = Motion { x: start.0, y: start.1, start_time: now, points: req.points.clone(), speed: s.run_speed };
+        let (layer, speed) = (s.layer, s.run_speed.clamp(1.0, 255.0) as u8);
+        let packet = msg::ScMove { start_time: now, handle: req.handle, tlayer: layer, speed, points: req.points }.to_packet();
+        self.broadcast_around(req.handle, &packet, false);
+    }
+
+    /// Coups des créatures : même règle provisoire que le joueur (attaque selon le niveau).
+    fn tick_summon_attacks(&mut self, now: u32) {
+        let attackers: Vec<u32> = self.summons.values().filter(|s| s.hp > 0 && s.attack_target.is_some() && now >= s.next_attack).map(|s| s.handle).collect();
+        for h in attackers {
+            let s = &self.summons[&h];
+            let (mh, master, level) = (s.attack_target.unwrap(), s.master, capped(s.level));
+            let spos = s.motion.position(now);
+            let Some(m) = self.monsters.get(&mh).filter(|m| m.alive()) else {
+                self.summons.get_mut(&h).unwrap().attack_target = None;
+                continue;
+            };
+            let mpos = m.motion.position(now);
+            let d = ((spos.0 - mpos.0).powi(2) + (spos.1 - mpos.1).powi(2)).sqrt();
+            if self.control(h).no_action {
+                continue;
+            }
+            if d > s.attack_range + ATTACK_SLACK {
+                if !s.client_driven && now >= s.next_follow && !self.control(h).no_move {
+                    let t = ((d - s.attack_range * 0.8) / d).clamp(0.0, 1.0);
+                    let dest = MovePoint { x: spos.0 + (mpos.0 - spos.0) * t, y: spos.1 + (mpos.1 - spos.1) * t };
+                    let s = self.summons.get_mut(&h).unwrap();
+                    s.next_follow = now + 50;
+                    s.motion = Motion { x: spos.0, y: spos.1, start_time: now, points: vec![dest], speed: s.run_speed };
+                    if let Some(packet) = Self::move_packet(h, s.layer, &self.summons[&h].motion, now) {
+                        self.broadcast_around(h, &packet, false);
+                    }
+                }
+                continue;
+            }
+            let attack = self.stat(h, Stat::Attack, attack_for(level));
+            let delay = self.attack_delay(h, SUMMON_ATTACK_DELAY);
+            let defence = self.mods(mh).apply(Stat::Defence, self.monsters[&mh].info.defence);
+            let damage = crate::world::roll_damage(attack, defence);
+            let (s_hp, s_mp) = {
+                let s = self.summons.get_mut(&h).unwrap();
+                s.next_attack = now + delay;
+                (s.hp, s.mp)
+            };
+            let m = self.monsters.get_mut(&mh).unwrap();
+            m.hp = (m.hp - damage).max(0);
+            m.target.get_or_insert(h);
+            let (m_hp, m_max, m_mp) = (m.hp, m.info.hp, m.info.mp);
+            let event = game::ScAttackEvent {
+                attacker: h,
+                target: mh,
+                attack_speed: 100,
+                attack_delay: (delay * 10).min(u32::from(u16::MAX)) as u16,
+                attack_action: game::attack_action::ATTACK,
+                attack_flag: 0,
+                attacks: vec![AttackInfo {
+                    damage,
+                    target_hp: i64::from(m_hp),
+                    target_mp: m_mp,
+                    attacker_hp: i64::from(s_hp),
+                    attacker_mp: s_mp,
+                    ..Default::default()
+                }],
+            }
+            .to_packet();
+            self.broadcast_around(h, &event, true);
+            self.broadcast_around(mh, &Self::hpmp_packet(mh, m_hp, m_max, m_mp, m_mp, -damage), false);
+            self.wake(mh);
+            if m_hp == 0 {
+                // La récompense va au maître [D].
+                self.kill_monster(mh, master, now);
+            }
+        }
+    }
+
+    /// Coup d'un monstre sur une créature.
+    pub(crate) fn hit_summon(&mut self, mh: u32, h: u32, attack: i32, delay: u32, now: u32) {
+        let Some(s) = self.summons.get(&h) else { return };
+        let defence = self.stat(h, Stat::Defence, defence_for(capped(s.level)));
+        let damage = crate::world::roll_damage(attack, defence);
+        let (m_hp, m_mp) = self.monsters.get(&mh).map_or((0, 0), |m| (m.hp, m.info.mp));
+        let s = self.summons.get_mut(&h).unwrap();
+        s.hp = (s.hp - damage).max(0);
+        let (hp, max_hp, mp, max_mp, master) = (s.hp, s.max_hp, s.mp, s.max_mp, s.master);
+        let event = game::ScAttackEvent {
+            attacker: mh,
+            target: h,
+            attack_speed: 100,
+            attack_delay: (delay * 10).min(u32::from(u16::MAX)) as u16,
+            attack_action: game::attack_action::ATTACK,
+            attack_flag: 0,
+            attacks: vec![AttackInfo { damage, target_hp: i64::from(hp), target_mp: mp, attacker_hp: i64::from(m_hp), attacker_mp: m_mp, ..Default::default() }],
+        }
+        .to_packet();
+        self.broadcast_around(h, &event, true);
+        // 509 met aussi à jour la fiche du maître, qui la voit toujours.
+        let vitals = Self::hpmp_packet(h, hp, max_hp, mp, max_mp, -damage);
+        self.broadcast_around(h, &vitals, true);
+        self.send_to(master, vitals);
+        self.wake(h);
+        if hp == 0 {
+            self.summon_dies(h, now);
+        }
+    }
+
+    fn summon_dies(&mut self, h: u32, now: u32) {
+        self.clear_states(h);
+        if let Some(s) = self.summons.get_mut(&h) {
+            (s.dead_since, s.attack_target) = (Some(now), None);
+            s.motion.settle(now);
+        }
+        for m in self.monsters.values_mut().filter(|m| m.target == Some(h)) {
+            m.target = None;
+        }
+    }
+
     /// Les créatures suivent leur maître (et le rejoignent après une téléportation).
     pub(crate) fn tick_summons(&mut self, now: u32) {
+        self.tick_summon_attacks(now);
         let handles: Vec<u32> = self.summons.keys().copied().collect();
         for h in handles {
             let s = &self.summons[&h];
@@ -140,6 +319,16 @@ impl World {
                 self.unsummon(h);
                 continue;
             };
+            if let Some(t) = s.dead_since {
+                if now.saturating_sub(t) >= DEATH_DELAY {
+                    self.unsummon(h);
+                }
+                continue;
+            }
+            // Le client conduit sa créature, ou elle combat : pas de suivi serveur.
+            if s.client_driven || s.attack_target.is_some() {
+                continue;
+            }
             let (mx, my) = p.motion.position(now);
             let (sx, sy) = s.motion.position(now);
             let d = ((mx - sx).powi(2) + (my - sy).powi(2)).sqrt();

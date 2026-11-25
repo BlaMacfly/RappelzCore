@@ -22,6 +22,7 @@ pub struct CreatureDef {
     pub card_id: u32,
     pub walk_speed: i32,
     pub run_speed: i32,
+    pub attack_range: i32,
 }
 
 impl CreatureDef {
@@ -58,6 +59,7 @@ impl CreatureBook {
                 card_id: r.int("card_id").max(0) as u32,
                 walk_speed: r.int("walk_speed"),
                 run_speed: r.int("run_speed"),
+                attack_range: r.int("attack_range"),
             });
         }
         Self { creatures }

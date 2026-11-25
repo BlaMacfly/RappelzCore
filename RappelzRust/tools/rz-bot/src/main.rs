@@ -60,6 +60,9 @@ struct Cli {
     /// Avec --cast : vise son propre personnage (bonus, soins).
     #[arg(long)]
     cast_self: bool,
+    /// Avec --summon : la créature attaque le premier monstre visible (handle de la créature).
+    #[arg(long)]
+    summon_attack: bool,
     /// Avec --cast : redemande la compétence une fois, ce nombre de secondes après son tir (bascules).
     #[arg(long)]
     again: Option<u64>,
@@ -277,6 +280,7 @@ async fn main() -> Result<()> {
     let mut npc_queue: std::collections::VecDeque<u32> = Default::default();
     let mut cast_target = None::<u32>;
     let mut again = cli.again;
+    let mut first_monster = None::<u32>;
     // Invocations : handle de créature → handle de carte.
     let mut card_of = std::collections::HashMap::<u32, u32>::new();
     let skill = |skill_id: u16, caster: u32, target: u32| game::CsSkill { skill_id, caster, target, x: 0.0, y: 0.0, z: 0.0, layer: 0, skill_level: 1 };
@@ -332,6 +336,7 @@ async fn main() -> Result<()> {
                 (_, EnterKind::Npc { .. }) => npcs += 1,
                 (h, EnterKind::Monster { monster_id, creature, .. }) => {
                     tracing::info!("[monde] monstre visible (id brut {monster_id}, {} PV)", creature.hp);
+                    first_monster.get_or_insert(h);
                     if let (Some(id), None) = (cli.cast, cast_target) {
                         cast_target = Some(h);
                         w.send(&skill(id, lr.handle, h)).await?;
@@ -347,6 +352,10 @@ async fn main() -> Result<()> {
                 }
                 (h, EnterKind::Summon { creature, master, code, name, .. }) => {
                     tracing::info!("[invocation] {name} (créature {code}, niveau {}, handle {h}) de {master} apparaît", creature.level);
+                    if let (true, Some(m)) = (cli.summon_attack && master == lr.handle, first_monster) {
+                        tracing::info!("[invocation] la créature attaque {m}");
+                        w.send(&game::CsAttackRequest { handle: h, target_handle: m }).await?;
+                    }
                     if let (true, Some(&card)) = (cli.unsummon && master == lr.handle, card_of.get(&h)) {
                         w.send(&skill(game::summon_skill::UNSUMMON, lr.handle, card)).await?;
                     }

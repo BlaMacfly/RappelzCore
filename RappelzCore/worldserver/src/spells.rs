@@ -24,12 +24,14 @@ use crate::world::World;
 const RANGE_SLACK: f32 = 45.0;
 /// Portée d'attaque quand `cast_range` = −1 [D].
 const MELEE_RANGE: f32 = 24.0;
+/// db_creature `attack_range` : centièmes d'unité de portée × 12, comme STAT_INFO +0x47 [D].
+pub(crate) const RANGE_UNIT_PER_POINT: f32 = 12.0 / 100.0;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Action {
     Effect,
     State(StateDef),
-    Summon { pet: Pet, run_speed: f32 },
+    Summon { pet: Pet, run_speed: f32, attack_range: f32 },
     Unsummon { card: u32 },
 }
 
@@ -238,7 +240,7 @@ impl World {
         // L'invocation peut échouer (déjà présente, limite) : ni coût ni recharge dans ce cas.
         let done = match &c.action {
             Action::Effect | Action::State(_) => true,
-            Action::Summon { pet, run_speed } => self.summon(handle, pet, *run_speed),
+            Action::Summon { pet, run_speed, attack_range } => self.summon(handle, pet, *run_speed, *attack_range),
             Action::Unsummon { card } => self.unsummon(summon_handle(*card)),
         };
         if !done {
@@ -430,8 +432,10 @@ impl Session {
                     return Err("La carte doit être dans le sac.");
                 }
                 if q.kind == SpellKind::Summon {
-                    let run_speed = self.ctx.data.creatures.get(pet.entry).map_or(80.0, |c| c.run_speed.clamp(1, 250) as f32);
-                    Action::Summon { pet: pet.clone(), run_speed }
+                    let creature = self.ctx.data.creatures.get(pet.entry);
+                    let run_speed = creature.map_or(80.0, |c| c.run_speed.clamp(1, 250) as f32);
+                    let attack_range = creature.map_or(24.0, |c| (c.attack_range as f32 * crate::spells::RANGE_UNIT_PER_POINT).clamp(20.0, 80.0));
+                    Action::Summon { pet: pet.clone(), run_speed, attack_range }
                 } else {
                     Action::Unsummon { card: pet.card }
                 }

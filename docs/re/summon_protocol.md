@@ -345,3 +345,48 @@ Restent à faire : combat et EXP des créatures, statistiques réelles (PV/PM pr
 chaque invocation), évolution (307), renommage (322/323), monture (320/321), équipement de créature, apprivoisement
 (310), familiers (350–354), double invocation. L'incantation et TS_SC_SKILL de 4001/4002 sont faits :
 `skill_protocol.md` §14.
+
+## 13. Créature pilotée par le client — combat (2026-11-26)
+
+### 13.1 Constats (sous-agent ; envoi d'attaque relu en FUN_0096b6c0, `ev_c95175f56f039cf256ddda1cce5c6d35fab882d5f97e2a0f64508c919b9c85ec`)
+
+- **La créature locale a sa propre IA côté client** (SGameLocalCreature, vtable 0xd61844 ; machine SLocalCreatureStateMachine,
+  vtable 0xd60004 ; script `CreatureState_Script.lua` appelé toutes les 1 000 ms). Elle envoie elle-même, **avec son propre handle** :
+
+| Paquet | Taille | Corps |
+|---|---|---|
+| TS_CS_ATTACK_REQUEST (100) | 15 | +7 handle de la créature [O relu] ; +0xb cible |
+| TS_CS_MOVE_REQUEST | — | handle de la créature (constructeur 0x9efe50) ; suivi derrière le maître (0x96bbf0) |
+| TS_CS_SKILL (400) | 31 | +9 caster = handle de la créature ; fiche db_skillstage exigée, sinon rien n'est envoyé |
+| TS_CS_CANCEL_ACTION (150) | 11 | +7 handle de la créature ; envoyé aussi après TS_SC_CANT_ATTACK, sauf raisons 5 et 6 |
+| TS_CS_UPDATE (503) | 19 | +7 handle de la créature, toutes les 4 000 ms |
+
+- Ordres du joueur (FUN_006d0eb0) : 0x1d « attaque créature » (sélection, sinon cible automatique à 360), 0x1f « joueur et créatures »,
+  0x1e « rappel ». Aucun ordre « rester » trouvé. Aucune riposte autonome : l'attaque reprend après un ordre ou un ATTACK_EVENT.
+- Réception : ATTACK_EVENT et SKILL dont l'attaquant ou la cible est la créature sont traités comme pour un monstre ; handles inconnus →
+  TS_CS_QUERY. Kinds de fiche (FUN_006d2e60) : 0x21 = 1002, 0x22 = 1003, 0x37 = 509, 0x48 = 514 (SP), 0x12 = 287, avec le handle de la
+  créature, sans ENTER. 403 avec target = créature remplit sa liste de compétences.
+- Mort : PV < 1 → animation ; **aucun renvoi automatique côté client** ; au bout de 5 s, boîte de résurrection seulement si un état de
+  type 109 l'autorise.
+
+### 13.2 Défauts corrigés
+
+L'ATTACK_REQUEST et le CANCEL_ACTION d'une créature étaient appliqués **au joueur** (le champ handle était ignoré) ; les déplacements de
+la créature étaient rejetés.
+
+### 13.3 Implémentation RappelzCore
+
+| Élément | Choix |
+|---|---|
+| Commandes | ATTACK_REQUEST, MOVE_REQUEST et CANCEL_ACTION avec le handle d'une créature : acceptés pour la créature **du joueur**, vivante ; départ d'un déplacement à 60 au plus de la position serveur |
+| Conduite | le premier déplacement envoyé par le client désactive le suivi et la poursuite par le serveur (gardés pour un client sans IA de créature, comme `rz-bot`) |
+| Coups | règle provisoire du joueur : attaque et défense selon le niveau, ± 10 %, un coup toutes les 1,5 s, états compris ; portée `attack_range` de db_creature × 12 / 100, bornée à 20..80 **[D]** |
+| Riposte | le monstre frappé vise la créature ; ses coups lui retirent des PV (509 aussi envoyé au maître pour la fiche) |
+| Mort | plus d'attaque ni de cible ; renvoi (305 puis LEAVE) au bout de 5 s **[D]** ; PV pleins à la prochaine invocation |
+| Récompense | au maître **[D]** ; **la créature ne gagne pas encore d'EXP** |
+| Compétences de créature | refusées (TS_SC_RESULT 400, code non nul : la machine du client se libère) |
+
+Validation (MariaDB de test isolée, `rz-bot --summon --summon-attack`) : Yéti niveau 1 invoqué, attaque avec son handle, deux coups de 5,
+riposte du monstre (52 puis 49 : PV 100 → 48 → 0), renvoi 5 s plus tard ; le joueur ne part pas au combat. Tests unitaires : ordres
+d'un autre joueur ou contre une cible invalide refusés, riposte, mort, renvoi, déplacement du client sans suivi imposé.
+**Non vérifié : client graphique d'origine** (son IA de créature n'a jamais tourné contre ce serveur).
