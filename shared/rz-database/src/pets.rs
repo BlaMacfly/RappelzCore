@@ -59,6 +59,17 @@ pub async fn insert(db: &MySqlPool, owner: u32, pet: &Pet) -> Result<()> {
     Ok(())
 }
 
+/// Niveau et EXP cumulée d'une créature.
+pub async fn save_progress(db: &MySqlPool, card: u32, level: u16, exp: u32) -> Result<()> {
+    sqlx::query("UPDATE character_pet SET level = ?, exp = ?, savetime = UNIX_TIMESTAMP() WHERE id = ?")
+        .bind(level)
+        .bind(exp)
+        .bind(card)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 /// La carte a changé de main : nouveau propriétaire, hors formation.
 pub async fn transfer(db: &MySqlPool, card: u32, owner: u32) -> Result<()> {
     sqlx::query("UPDATE character_pet SET owner = ?, slot = ? WHERE id = ?")

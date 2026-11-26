@@ -74,6 +74,9 @@ Rappelz.StartPosition.Asura = "8330 7167"
 #        Description: Vitesse de déplacement envoyée dans TS_SC_MOVE.
 #    Rappelz.MoveSpeedScale
 #        Description: Unités parcourues par seconde = PlayerMoveSpeed × MoveSpeedScale.
+#    Rappelz.SummonExpRate
+#        Description: Part de l'EXP d'un monstre gagnée en plus par la créature invoquée du tueur
+#                     (1.0 = autant que le joueur). Le client ne donne pas la règle d'origine.
 #    Rappelz.MoveTolerance
 #        Description: Écart maximal toléré entre la position annoncée par le client et celle
 #                     calculée par le serveur (anti-téléportation).
@@ -84,6 +87,7 @@ Rappelz.CellSize = 6
 Rappelz.PlayerMoveSpeed = 120
 Rappelz.MoveSpeedScale = 1.0
 Rappelz.MoveTolerance = 60
+Rappelz.SummonExpRate = 1.0
 
 ###################################################################################################
 # RAPPELZ — RÉSEAU

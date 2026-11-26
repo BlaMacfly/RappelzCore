@@ -496,7 +496,7 @@ impl Session {
         let Some(g) = &self.in_game else { return Ok(()) };
         let handle = g.handle;
         match ev {
-            WorldEvent::Reward { exp, jp, gold, monster, monster_id } => {
+            WorldEvent::Reward { exp, jp, gold, monster, monster_id, summon } => {
                 let Some(snapshot) = self.character_snapshot() else {
                     self.detach_world_without_save();
                     anyhow::bail!("reward lost world ownership; closing without a stale save");
@@ -526,6 +526,9 @@ impl Session {
                     }
                 }
                 self.quest_kill(monster_id).await?;
+                if let Some(card) = summon {
+                    self.summon_reward(card, exp).await?;
+                }
             }
             WorldEvent::TradeUncertain => {
                 self.detach_world_without_save();

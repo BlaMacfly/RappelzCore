@@ -330,6 +330,19 @@ impl ProgressionBook {
     pub fn summon_experience(&self, level: u16) -> Option<&SummonExpRow> {
         self.summons.get(usize::from(level.checked_sub(1)?))
     }
+    /// Niveau d'une créature pour une EXP **cumulée** (db_summonexp : la ligne du niveau L donne
+    /// l'EXP totale du niveau L + 1 ; FUN_006481b0), plafonné à `max`.
+    pub fn summon_level(&self, exp: i64, max: u16) -> u16 {
+        let reached = (1..max).take_while(|l| self.summon_experience(*l).is_some_and(|r| r.normal <= exp)).count();
+        1 + reached as u16
+    }
+
+    /// EXP cumulée d'une créature arrêtée à son niveau maximal `max` : barre pleine
+    /// (FUN_00710d30 affiche exp − SummonExp(max − 1) sur SummonExp(max) − SummonExp(max − 1)).
+    pub fn summon_exp_cap(&self, max: u16) -> i64 {
+        self.summon_experience(max).map_or(0, |r| r.normal)
+    }
+
     pub fn counts(&self) -> (usize, usize, usize) {
         (self.bases.len(), self.experience.len(), self.summons.len())
     }
@@ -399,6 +412,14 @@ mod tests {
             &files["Exp.dbc"],
             &files["SummonExp.dbc"],
         )
+    }
+
+    #[test]
+    fn summon_levels_follow_cumulative_experience() {
+        let rows = (1..=5).map(|level| SummonExpRow { level, normal: [5, 17, 43, 80, 120][usize::from(level) - 1], growth: 0, evolve: 0 }).collect();
+        let book = ProgressionBook { bases: Default::default(), experience: vec![], summons: rows };
+        assert_eq!([0, 4, 5, 16, 17, 100].map(|e| book.summon_level(e, 60)), [1, 1, 2, 2, 3, 5]);
+        assert_eq!((book.summon_level(1000, 3), book.summon_exp_cap(3), book.summon_exp_cap(1)), (3, 43, 5));
     }
 
     #[test]

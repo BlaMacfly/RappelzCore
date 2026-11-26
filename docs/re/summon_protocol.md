@@ -92,7 +92,7 @@ FUN_006d2e60 [O] ; ces paquets n'exigent donc pas que la créature soit invoqué
 | TS_SC_STAT_INFO | 1000 | appliqué aux données de l'objet `handle` (FUN_00940f90, tout type) ; fenêtres créature 0x31/0x32 seulement si FUN_00710ab0 : fiche trouvée **et** card_handle présent dans la formation | voir `../SFRAME_STAT_ROUTING_RE.md` |
 
 Barre d'EXP (FUN_00710d30) : `base = SummonExp(level−1)`, `next = SummonExp(level)`,
-fiche+0x50 = base, fiche+0x58 = next − base, fiche+0x60 = exp − base (§8) [O]. Le stade d'évolution `rec+0x5e`
+fiche+0x70 = base, fiche+0x78 = next − base, fiche+0x80 = exp − base (§8 ; offsets rectifiés au §14, relatifs à fiche+0x20 : +0x50 / +0x58 / +0x60) [O]. Le stade d'évolution `rec+0x5e`
 est passé au getter mais **ignoré** (RET 8, second argument inutilisé) [O].
 
 ## 3. TS_SC_ENTER (3) d'une invocation — obj_type 4, 96 octets [O]
@@ -390,3 +390,36 @@ Validation (MariaDB de test isolée, `rz-bot --summon --summon-attack`) : Yéti 
 riposte du monstre (52 puis 49 : PV 100 → 48 → 0), renvoi 5 s plus tard ; le joueur ne part pas au combat. Tests unitaires : ordres
 d'un autre joueur ou contre une cible invalide refusés, riposte, mort, renvoi, déplacement du client sans suivi imposé.
 **Non vérifié : client graphique d'origine** (son IA de créature n'a jamais tourné contre ce serveur).
+
+## 14. EXP et niveau des créatures (2026-11-26)
+
+### 14.1 Constats (sous-agent, non relus)
+
+- **TS_SC_EXP_UPDATE (1003)** avec le handle de la créature : EXP **totale cumulée** (i64) et JP. Barre (FUN_00710d30, fenêtre
+  FUN_00764d10) : base = SummonExp(niveau − 1), plage = SummonExp(niveau) − base, progression = exp − base ; SummonExp(n) = ligne n − 1 de
+  db_summonexp. **Le stade d'évolution est ignoré** ; les plafonds 60 / 115 / 150 n'existent que dans la ferme. Barre pleine au plafond :
+  exp = SummonExp(niveau maximal).
+- **Aucun message de gain pour une créature** : le texte de gain (0xc9, 0xcb…) est réservé au joueur local. Texte 240 « Bonus de
+  Créature » : TS_SC_BONUS_EXP_JP (1004), entrée de type 3 ; textes 10405 et 76000541 : non référencés par l'exécutable.
+- **Effet de bord probable [D]** : pour une créature invoquée, le gain calculé 2 s après un 1003 est transmis à la fenêtre de la créature,
+  qui le prend pour ses PV (FUN_00764380 ne regarde pas le type) jusqu'au 509 suivant.
+- **TS_SC_LEVEL_UPDATE (1002)** : niveau de la fiche et barre recalculés ; effet 8001 sur la créature invoquée, sans message ; **le
+  niveau n'est jamais recalculé depuis l'EXP** ; ordre 1002 / 1003 indifférent.
+- 301 pour une fiche déjà connue : met à jour niveau, nom et code, mais pas la barre, et **ajoute une entrée en double** à la liste du
+  gestionnaire : ne pas le renvoyer pour une montée de niveau.
+
+### 14.2 Implémentation RappelzCore
+
+| Élément | Choix |
+|---|---|
+| Gain | la créature **invoquée et vivante** du tueur gagne l'EXP du monstre × `Rappelz.SummonExpRate` (1,0 par défaut) **[D]** : le client ne donne pas la règle de partage ; les créatures en formation ne gagnent rien |
+| Niveau | déduit de l'EXP cumulée par db_summonexp, plafonné au niveau maximal du stade (60 / 115 / 150), jamais en baisse |
+| Plafond | au niveau maximal, EXP arrêtée à SummonExp(niveau maximal) : barre pleine, plus aucun gain (texte 1141) |
+| Ordre | sauvegarde de `character_pet` (level, exp) **avant** 1003, puis 1002 si le niveau change ; message serveur au maître (le client n'en affiche aucun) |
+| Montée de niveau | créature invoquée : PV et PM pleins au nouveau maximum (règle provisoire par niveau) |
+| Jauge de PV | 509 de la créature renvoyé 2,5 s après chaque 1003, contre l'effet de bord ci-dessus |
+
+Validation (MariaDB de test isolée) : Yéti de niveau 30 (EXP 1 500 000 posée en base) invoqué, monstre tué par la créature : +73 EXP au
+joueur et à la créature (1 500 073), niveau recalculé à 36 depuis cette EXP, sauvegardé dans `character_pet`. Tests unitaires : niveaux
+depuis l'EXP cumulée, plafond, récompense qui désigne la créature.
+**Non vérifié : client graphique d'origine** (barre, effet 8001, jauge de PV).

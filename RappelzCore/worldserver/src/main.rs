@@ -55,6 +55,8 @@ pub struct Settings {
     pub region_size: i32,
     pub cell_size: i32,
     pub move_speed: u8,
+    /// Part de l'EXP d'un monstre gagnée par la créature invoquée du tueur [D].
+    pub summon_exp_rate: f32,
     pub speed_scale: f32,
     pub move_tolerance: f32,
     pub save_interval: Duration,
@@ -146,6 +148,7 @@ async fn main() -> Result<()> {
         region_size: conf.int("Rappelz.RegionSize", 180i32),
         cell_size: conf.int("Rappelz.CellSize", 6i32),
         move_speed: conf.int("Rappelz.PlayerMoveSpeed", 120u8),
+        summon_exp_rate: conf.float("Rappelz.SummonExpRate", 1.0f32).clamp(0.0, 100.0),
         speed_scale: conf.float("Rappelz.MoveSpeedScale", 1.0),
         move_tolerance: conf.float("Rappelz.MoveTolerance", 60.0),
         save_interval: Duration::from_millis(conf.int("PlayerSaveInterval", 900_000u64).max(10_000)),

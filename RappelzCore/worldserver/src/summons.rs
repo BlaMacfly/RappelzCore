@@ -70,6 +70,8 @@ pub struct SummonEntity {
     /// Le client a déjà envoyé un déplacement pour elle : le serveur ne la conduit plus.
     client_driven: bool,
     dead_since: Option<u32>,
+    /// PV/PM à renvoyer : un 1003 peut fausser la jauge de PV environ 2 s plus tard (§14) [D].
+    vitals_again: Option<u32>,
 }
 
 impl World {
@@ -128,6 +130,7 @@ impl World {
                 next_attack: 0,
                 client_driven: false,
                 dead_since: None,
+                vitals_again: None,
             },
         );
         self.update_visibility();
@@ -159,6 +162,32 @@ impl World {
     /// Créature de `master`, vivante.
     fn own_summon(&self, master: u32, handle: u32) -> bool {
         self.summons.get(&handle).is_some_and(|s| s.master == master && s.hp > 0)
+    }
+
+    /// Nouveau niveau : fiche (1002) et, si elle est invoquée, PV/PM pleins au nouveau maximum.
+    pub(crate) fn summon_level_up(&mut self, master: u32, handle: u32, level: u16) {
+        self.send_to(master, game::ScLevelUpdate { handle, level: i32::from(level), job_level: 0 }.to_packet());
+        let Some(s) = self.summons.get_mut(&handle).filter(|s| s.hp > 0) else {
+            let (hp, mp) = (max_hp_for(capped(level)), max_mp_for(capped(level)));
+            self.send_to(master, game::ScHpMp { handle, hp, max_hp: hp, mp, max_mp: mp, ..Default::default() }.to_packet());
+            return;
+        };
+        s.level = level;
+        (s.max_hp, s.max_mp) = (max_hp_for(capped(level)), max_mp_for(capped(level)));
+        (s.hp, s.mp) = (s.max_hp, s.max_mp);
+        let vitals = Self::hpmp_packet(handle, s.hp, s.max_hp, s.mp, s.max_mp, 0);
+        let level_packet = game::ScLevelUpdate { handle, level: i32::from(level), job_level: 0 }.to_packet();
+        self.broadcast_around(handle, &level_packet, false);
+        self.broadcast_around(handle, &vitals, false);
+        self.to_master(master, handle, level_packet);
+        self.to_master(master, handle, vitals);
+    }
+
+    /// Paquet de fiche pour un maître qui ne voit pas (ou plus) sa créature.
+    fn to_master(&self, master: u32, handle: u32, packet: RawPacket) {
+        if self.players.get(&master).is_some_and(|p| !p.visible.contains(&handle)) {
+            self.send_to(master, packet);
+        }
     }
 
     /// TS_CS_ATTACK_REQUEST avec le handle d'une créature.
@@ -290,8 +319,8 @@ impl World {
         self.broadcast_around(h, &event, true);
         // 509 met aussi à jour la fiche du maître, qui la voit toujours.
         let vitals = Self::hpmp_packet(h, hp, max_hp, mp, max_mp, -damage);
-        self.broadcast_around(h, &vitals, true);
-        self.send_to(master, vitals);
+        self.broadcast_around(h, &vitals, false);
+        self.to_master(master, h, vitals);
         self.wake(h);
         if hp == 0 {
             self.summon_dies(h, now);
@@ -319,6 +348,12 @@ impl World {
                 self.unsummon(h);
                 continue;
             };
+            if s.vitals_again.is_some_and(|at| now >= at) {
+                let (master, packet) = (s.master, Self::hpmp_packet(h, s.hp, s.max_hp, s.mp, s.max_mp, 0));
+                self.summons.get_mut(&h).unwrap().vitals_again = None;
+                self.send_to(master, packet);
+            }
+            let s = &self.summons[&h];
             if let Some(t) = s.dead_since {
                 if now.saturating_sub(t) >= DEATH_DELAY {
                     self.unsummon(h);
@@ -413,6 +448,40 @@ impl Session {
             };
             self.send_pet(&pet);
             self.in_game.as_mut().unwrap().pets.push(pet);
+        }
+        Ok(())
+    }
+
+    /// EXP de la créature invoquée, sauvegardée avant d'être annoncée (comme celle du joueur).
+    pub(crate) async fn summon_reward(&mut self, card: u32, monster_exp: i64) -> Result<()> {
+        let ctx = self.ctx.clone();
+        let Some(book) = &ctx.data.progression else { return Ok(()) };
+        let Some(g) = &self.in_game else { return Ok(()) };
+        let Some(pet) = g.pets.iter().find(|p| p.card == card).cloned() else { return Ok(()) };
+        let max = ctx.data.creatures.get(pet.entry).map_or(60, |c| c.max_level());
+        let gain = (monster_exp as f64 * f64::from(ctx.settings.summon_exp_rate)).round() as i64;
+        // Au niveau maximal de son stade, elle ne gagne plus rien (texte 1141).
+        let cap = book.summon_exp_cap(max).min(i64::from(u32::MAX));
+        let exp = (i64::from(pet.exp) + gain.max(0)).min(cap.max(i64::from(pet.exp)));
+        if exp == i64::from(pet.exp) {
+            return Ok(());
+        }
+        let level = book.summon_level(exp, max).max(pet.level);
+        pets::save_progress(&ctx.chars, card, level, exp as u32).await?;
+        let p = self.in_game.as_mut().unwrap().pets.iter_mut().find(|p| p.card == card).unwrap();
+        (p.exp, p.level) = (exp as u32, level);
+        let handle = summon_handle(card);
+        self.send(&game::ScExpUpdate { handle, exp, jp: 0 });
+        let mut w = ctx.world.lock().unwrap();
+        let resend = w.now() + 250;
+        if let Some(s) = w.summons.get_mut(&handle) {
+            s.vitals_again = Some(resend);
+        }
+        let master = self.in_game.as_ref().unwrap().handle;
+        w.notify(master, &format!("{} : +{} EXP.", pet.name, exp - i64::from(pet.exp)));
+        if level != pet.level {
+            w.summon_level_up(master, handle, level);
+            w.notify(master, &format!("{} atteint le niveau {level} !", pet.name));
         }
         Ok(())
     }
