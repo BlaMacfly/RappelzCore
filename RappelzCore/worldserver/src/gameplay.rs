@@ -58,6 +58,7 @@ pub fn handles(id: u16) -> bool {
             | gid::TS_CS_LEARN_SKILL
             | gid::TS_CS_PUTOFF_ITEM
             | gid::TS_CS_DROP_ITEM
+            | gid::TS_CS_USE_ITEM
             | gid::TS_CS_ERASE_ITEM
             | gid::TS_CS_CONTACT
             | gid::TS_CS_DIALOG
@@ -186,6 +187,8 @@ impl Session {
         self.send_quest_list();
         let c = &g.character;
         self.send(&game::ScExpUpdate { handle: g.handle, exp: c.xp as i64, jp: c.extra_i64("jp", 0) });
+        let cool = self.ctx.world.lock().unwrap().item_cool_times(c.guid);
+        self.send(&cool);
         // Maxima de l'entité : passifs compris.
         let (max_hp, max_mp) = match self.ctx.world.lock().unwrap().players.get(&g.handle) {
             Some(p) => (p.max_hp, p.max_mp),
@@ -253,6 +256,7 @@ impl Session {
                 | gid::TS_CS_SELL_ITEM
                 | gid::TS_CS_STORAGE
                 | gid::TS_CS_TAKE_ITEM
+                | gid::TS_CS_USE_ITEM
         );
         if touches_bag && self.ctx.world.lock().unwrap().trade_busy(handle) {
             self.ctx.world.lock().unwrap().notify(handle, "Action impossible pendant un échange.");
@@ -269,6 +273,7 @@ impl Session {
                 let req = game::CsPutOffItem::from_packet(&p)?;
                 self.put_off(handle, req.position).await?;
             }
+            gid::TS_CS_USE_ITEM => self.use_item(game::CsUseItem::from_packet(&p)?).await?,
             gid::TS_CS_DROP_ITEM => self.drop_item(game::CsDropItem::from_packet(&p)?).await?,
             gid::TS_CS_TAKE_ITEM => self.take_item(game::CsTakeItem::from_packet(&p)?).await?,
             gid::TS_CS_ERASE_ITEM => {

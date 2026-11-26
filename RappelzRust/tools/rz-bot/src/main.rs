@@ -60,6 +60,9 @@ struct Cli {
     /// Avec --cast : vise son propre personnage (bonus, soins).
     #[arg(long)]
     cast_self: bool,
+    /// Utilise l'objet du sac portant ce code (une fois, ou --again secondes plus tard une seconde fois).
+    #[arg(long)]
+    use_item: Option<i32>,
     /// Avec --summon : la créature attaque le premier monstre visible (handle de la créature).
     #[arg(long)]
     summon_attack: bool,
@@ -281,6 +284,7 @@ async fn main() -> Result<()> {
     let mut cast_target = None::<u32>;
     let mut again = cli.again;
     let mut first_monster = None::<u32>;
+    let mut used = false;
     // Invocations : handle de créature → handle de carte.
     let mut card_of = std::collections::HashMap::<u32, u32>::new();
     let skill = |skill_id: u16, caster: u32, target: u32| game::CsSkill { skill_id, caster, target, x: 0.0, y: 0.0, z: 0.0, layer: 0, skill_level: 1 };
@@ -422,6 +426,15 @@ async fn main() -> Result<()> {
                 let s = game::ScState::from_packet(&p)?;
                 tracing::info!("[état] porteur {} : code {} niveau {} (instance {}, {} cs)", s.handle, s.state_code, s.state_level, s.state_handle, s.remain_time - s.start_time as i32);
             }
+            gid::TS_SC_ITEM_COOL_TIME => {
+                let c = game::ScItemCoolTime::from_packet(&p)?;
+                let running: Vec<(usize, i32)> = c.cool_time.iter().enumerate().filter(|(_, v)| **v > 0).map(|(i, v)| (i + 1, *v)).collect();
+                tracing::info!("[objet] recharges (groupe, cs) : {running:?}");
+            }
+            gid::TS_SC_UPDATE_ITEM_COUNT => {
+                let u = game::ScUpdateItemCount::from_packet(&p)?;
+                tracing::info!("[objet] {} : reste {}", u.item_handle, u.count);
+            }
             gid::TS_SC_AURA => {
                 let a = game::ScAura::from_packet(&p)?;
                 tracing::info!("[bascule] compétence {} active : {}", a.skill_id, a.active);
@@ -535,6 +548,16 @@ async fn main() -> Result<()> {
                     );
                     if it.wear_position == game::WEAR_NONE {
                         bag.push(it.handle);
+                    }
+                    if cli.use_item.is_some_and(|c| c as i64 == it.code as i64) && !used {
+                        used = true;
+                        tracing::info!("[objet] utilisation de {} (code {})", it.handle, it.code);
+                        w.send(&game::CsUseItem { item_handle: it.handle, target_handle: 0, parameter: String::new() }).await?;
+                        if let Some(secs) = cli.again {
+                            tokio::time::sleep(Duration::from_secs(secs)).await;
+                            tracing::info!("[objet] seconde utilisation");
+                            w.send(&game::CsUseItem { item_handle: it.handle, target_handle: 0, parameter: String::new() }).await?;
+                        }
                     }
                 }
                 if let (true, Some(&h)) = (cli.drop, bag.first()) {

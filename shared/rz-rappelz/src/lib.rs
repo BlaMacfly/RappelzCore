@@ -10,6 +10,7 @@ pub mod quests;
 pub mod rdb;
 pub mod skills;
 pub mod spells;
+pub mod consumables;
 pub mod passives;
 pub mod states;
 pub mod restoration;

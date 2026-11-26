@@ -9,6 +9,7 @@ mod soap;
 mod shutdown;
 mod data;
 mod gameplay;
+mod items;
 mod ground;
 mod loot;
 mod job_progression;

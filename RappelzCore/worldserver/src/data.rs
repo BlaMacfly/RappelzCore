@@ -73,6 +73,8 @@ pub struct GameData {
     pub states: rz_rappelz::states::StateBook,
     /// Passifs dont tous les effets sont établis.
     pub passives: rz_rappelz::passives::PassiveBook,
+    /// Consommables dont tous les effets sont établis.
+    pub consumables: rz_rappelz::consumables::ConsumableBook,
 }
 
 /// Statistiques d'un monstre (Monster.dbc).
@@ -270,6 +272,8 @@ impl GameData {
             Default::default()
         });
         let passives = rz_rappelz::passives::PassiveBook::open(&dbc_dir).unwrap_or_default();
+        let consumables = rz_rappelz::consumables::ConsumableBook::open(&dbc_dir).unwrap_or_default();
+        tracing::info!(">> {} consommables pris en charge (Item.dbc)", consumables.len());
         tracing::info!(">> {} passifs pris en charge (Skill.dbc)", passives.len());
         let spells = rz_rappelz::spells::SpellBook::open(&dbc_dir, &states).unwrap_or_else(|error| {
             tracing::warn!("Compétences actives indisponibles : {error}");
@@ -286,7 +290,7 @@ impl GameData {
                 Default::default()
             }
         };
-        Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns, quests, creatures, spells, states, passives })
+        Ok(Self { progression,restoration,skills,jobs, npcs, teleports, strings, monsters, items, vendors: std::sync::RwLock::new(vendors), monster_spawns, quests, creatures, spells, states, passives, consumables })
     }
 
     /// Le PNJ (`NpcResource.id`) tient-il un entrepôt ?

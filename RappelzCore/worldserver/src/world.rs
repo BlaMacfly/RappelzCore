@@ -184,6 +184,8 @@ pub struct World {
     /// Tables de butin AzerothCore (creature/reference_loot_template).
     pub(crate) loot: crate::loot::LootStore,
     pub(crate) cast_cooldowns:HashMap<(u32,u32),u64>,
+    /// Recharges des objets : (guid du personnage, groupe) → fin (horloge de cast_clock).
+    pub(crate) item_cooldowns:HashMap<(u32,u32),u64>,
     pub(crate) parties: crate::party::Parties,
     pub(crate) party_clients: HashSet<u32>,
     pub(crate) party_sent: HashMap<u32,rz_proto::party::ScPartyState>,
@@ -249,7 +251,7 @@ impl World {
             next_monster_handle: MONSTER_HANDLE_BASE,
             visibility_distance,
             max_online: 0,
-            last_regen: 0, trades: Default::default(), states: Default::default(), spells: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            last_regen: 0, trades: Default::default(), states: Default::default(), spells: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),item_cooldowns:HashMap::new(),
         };
         for &(_, id, x, y, z, respawn) in &data.monster_spawns {
             if let Some(info) = data.monsters.get(&id) {
@@ -898,7 +900,7 @@ mod tests {
             parties:Default::default(),party_clients:HashSet::new(),party_sent:HashMap::new(),
             started: Instant::now(), players: HashMap::new(), npcs: HashMap::new(), monsters: HashMap::new(),
             next_handle: 3, next_monster_handle: MONSTER_HANDLE_BASE, visibility_distance: 540.0,
-            max_online: 0, last_regen: 0, trades: Default::default(), states: Default::default(), spells: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),
+            max_online: 0, last_regen: 0, trades: Default::default(), states: Default::default(), spells: Default::default(), summons: Default::default(), ground: Default::default(), loot: Default::default(), casts:HashMap::new(),cast_cooldowns:HashMap::new(),item_cooldowns:HashMap::new(),
         };
         let mut receivers = Vec::new();
         for handle in [1, 2] {
@@ -1078,7 +1080,7 @@ mod tests {
         let pool=rz_database::sqlx::mysql::MySqlPoolOptions::new().acquire_timeout(Duration::from_millis(20))
             .connect_lazy("mysql://unused:unused@127.0.0.1:1/unused").unwrap();
         let data=GameData {progression:None,restoration:None,skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
-            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default(),creatures:Default::default(),spells:Default::default(),states:Default::default(),passives:Default::default()};
+            monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default(),creatures:Default::default(),spells:Default::default(),states:Default::default(),passives:Default::default(),consumables:Default::default()};
         let settings=Settings {realm_id:1,network_key:vec![],characters_per_realm:1,start_level:1,start_money:0,start_positions:[(0.0,0.0);3],
             region_size:180,cell_size:6,move_speed:120,summon_exp_rate:1.0,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
         let ctx=Arc::new(Ctx {login:pool.clone(),chars:pool.clone(),world_db:pool,data,world:Mutex::new(world),settings,
@@ -1676,6 +1678,25 @@ mod tests {
         let now = world.now();
         world.kill_monster(monster, 1, now);
         assert!(matches!(rewards.try_recv().unwrap(), WorldEvent::Reward { summon: Some(5), .. }));
+    }
+
+    #[test]
+    fn potions_heal_up_to_the_maximum_and_cooldowns_are_reported_by_group() {
+        let (mut world, mut receivers) = test_world();
+        world.update_visibility();
+        for rx in &mut receivers { while rx.try_recv().is_ok() {} }
+        // 50/100 PV, 20/50 PM : +900 PV plafonné à +50, +10 PM.
+        assert_eq!(world.test_restore(1, 900, 10), (50, 10));
+        let v = game::ScHpMp::from_packet(&receivers[1].try_recv().unwrap()).unwrap();
+        assert_eq!((v.handle, v.hp, v.add_hp, v.mp, v.add_mp, v.need_to_display), (1, 100, 50, 30, 10, true));
+        world.players.get_mut(&1).unwrap().hp = 0;
+        assert_eq!(world.test_restore(1, 900, 10), (0, 0), "pas de soin pour un mort");
+        // Recharge du groupe 1 : indice 0 de TS_SC_ITEM_COOL_TIME ; groupe propre : non affiché.
+        world.test_item_cooldown(1, 1, 1000);
+        world.test_item_cooldown(1, 0x8000_0000 | 602004, 1000);
+        let cool = world.item_cool_times(1).cool_time;
+        assert!(cool[0] > 900 && cool[1..].iter().all(|v| *v == 0));
+        assert_eq!((world.item_cooldown(1, 1) > 0, world.item_cooldown(2, 1)), (true, 0));
     }
 
     #[test]
