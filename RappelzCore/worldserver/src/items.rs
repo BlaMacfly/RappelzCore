@@ -156,7 +156,7 @@ impl Session {
     }
 
     /// Retire un exemplaire d'une pile précise.
-    async fn consume_stack(&mut self, item_guid: u32) -> Result<()> {
+    pub(crate) async fn consume_stack(&mut self, item_guid: u32) -> Result<()> {
         let ctx = self.ctx.clone();
         let Some(g) = &mut self.in_game else { return Ok(()) };
         let owner = g.character.guid;

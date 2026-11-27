@@ -58,6 +58,8 @@ pub struct Settings {
     pub move_speed: u8,
     /// Part de l'EXP d'un monstre gagnée par la créature invoquée du tueur [D].
     pub summon_exp_rate: f32,
+    /// Résurrection d'office au point de retour, pour un client qui n'envoie pas 513 ; 0 = jamais.
+    pub auto_resurrect: u32,
     pub speed_scale: f32,
     pub move_tolerance: f32,
     pub save_interval: Duration,
@@ -152,6 +154,7 @@ async fn main() -> Result<()> {
         summon_exp_rate: conf.float("Rappelz.SummonExpRate", 1.0f32).clamp(0.0, 100.0),
         speed_scale: conf.float("Rappelz.MoveSpeedScale", 1.0),
         move_tolerance: conf.float("Rappelz.MoveTolerance", 60.0),
+        auto_resurrect: conf.int("Rappelz.AutoResurrectSeconds", 60u32).min(86_400),
         save_interval: Duration::from_millis(conf.int("PlayerSaveInterval", 900_000u64).max(10_000)),
         player_limit: conf.int("PlayerLimit", 1000usize),
         motd: conf.string("Motd", "Bienvenue sur RappelzCore."),
@@ -202,7 +205,7 @@ async fn main() -> Result<()> {
         let mut tick = tokio::time::interval(Duration::from_millis(200));
         let mut stopping = tick_ctx.shutdown.subscribe();
         while !*stopping.borrow() {
-            tokio::select! { _ = stopping.changed() => break, _ = tick.tick() => tick_ctx.world.lock().unwrap().tick() }
+            tokio::select! { _ = stopping.changed() => break, _ = tick.tick() => { let mut w = tick_ctx.world.lock().unwrap(); w.tick(); let now = w.now(); w.tick_dead(now, tick_ctx.settings.auto_resurrect * 100); } }
         }
     });
 

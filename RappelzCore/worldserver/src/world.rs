@@ -85,8 +85,10 @@ pub enum WorldEvent {
     /// Monstre tué : récompenses.
     /// `summon` : carte de la créature invoquée et vivante du tueur, qui gagne aussi de l'EXP.
     Reward { exp: i64, jp: i64, gold: i64, monster: String, monster_id: u32, summon: Option<u32> },
-    /// Le joueur est mort.
+    /// Le joueur est mort : il le reste jusqu'à sa demande (513) ou au délai `AutoResurrectSeconds`.
     Died,
+    /// Délai écoulé sans demande : retour au point de retour.
+    AutoResurrect,
     /// Échange exécuté : objets perdus (guid, restant), objets reçus, variation de rupees.
     /// Échange à l'issue SQL incertaine : quitter sans sauvegarder.
     TradeUncertain,
@@ -122,6 +124,8 @@ pub struct PlayerEntity {
     pub attack_target: Option<u32>,
     pub next_attack: u32,
     pub last_combat: u32,
+    /// Heure de la mort (horloge `now`), tant que le joueur n'est pas ressuscité.
+    pub dead_since: Option<u32>,
 }
 
 pub struct NpcEntity {
@@ -843,7 +847,8 @@ impl World {
             self.broadcast_around(target, &event, true);
             self.broadcast_around(target, &Self::hpmp_packet(target, p_hp, p_max, p_mp, p_mmax, -damage), true);
             if p_hp == 0 {
-                let p = &self.players[&target];
+                let p = self.players.get_mut(&target).unwrap();
+                (p.dead_since, p.attack_target) = (Some(now), None);
                 let _ = p.events.send(WorldEvent::Died);
                 self.monsters.get_mut(&mh).unwrap().target = None;
             }
@@ -866,6 +871,29 @@ impl World {
         }
     }
 
+    /// Joueurs morts depuis plus de `delay` centièmes : à ressusciter d'office (une seule fois).
+    pub(crate) fn tick_dead(&mut self, now: u32, delay: u32) {
+        if delay == 0 {
+            return;
+        }
+        for p in self.players.values_mut() {
+            if p.hp <= 0 && p.dead_since.is_some_and(|t| now.saturating_sub(t) >= delay) {
+                p.dead_since = None;
+                let _ = p.events.send(WorldEvent::AutoResurrect);
+            }
+        }
+    }
+
+    /// Résurrection sur place : PV/PM au maximum [D]. Le client se relève sur un 509 aux PV positifs.
+    pub fn revive_here(&mut self, handle: u32) -> bool {
+        let Some(p) = self.players.get_mut(&handle).filter(|p| p.hp <= 0) else { return false };
+        (p.hp, p.mp, p.attack_target, p.dead_since) = (p.max_hp, p.max_mp, None, None);
+        (p.enter.creature.hp, p.enter.creature.mp) = (p.hp, p.mp);
+        let packet = Self::hpmp_packet(handle, p.hp, p.max_hp, p.mp, p.max_mp, 0);
+        self.broadcast_around(handle, &packet, true);
+        true
+    }
+
     /// Résurrection après la mort : PV/PM au maximum, renvoi au point indiqué.
     pub fn revive(&mut self, handle: u32, x: f32, y: f32) {
         if !self.players.contains_key(&handle) { return; }
@@ -873,6 +901,8 @@ impl World {
             p.hp = p.max_hp;
             p.mp = p.max_mp;
             p.attack_target = None;
+            p.dead_since = None;
+            (p.enter.creature.hp, p.enter.creature.mp) = (p.hp, p.mp);
             let packet = Self::hpmp_packet(handle, p.hp, p.max_hp, p.mp, p.max_mp, 0);
             self.broadcast_around(handle, &packet, true);
         }
@@ -912,7 +942,7 @@ mod tests {
                 wear: [0; game::WEAR_SLOTS], tx, events: tokio::sync::mpsc::unbounded_channel().0,
                 visible: if handle == 2 { HashSet::from([1]) } else { HashSet::new() },
                 hp: 50, max_hp: 100, mp: 20, max_mp: 50, base_max_hp: 100, base_max_mp: 50, profile: Default::default(), attack: 16, defence: 6, move_speed:120,
-                attack_target: None, next_attack: 0, last_combat: 0,
+                attack_target: None, next_attack: 0, last_combat: 0, dead_since: None,
             });
         }
         (world, receivers)
@@ -1082,7 +1112,7 @@ mod tests {
         let data=GameData {progression:None,restoration:None,skills,jobs:HashMap::new(),npcs:vec![],teleports:vec![],strings:rz_rappelz::dbcstore::StringTable::empty(),
             monsters:HashMap::new(),items:HashMap::new(),vendors:RwLock::new(HashMap::new()),monster_spawns:vec![],quests:Default::default(),creatures:Default::default(),spells:Default::default(),states:Default::default(),passives:Default::default(),consumables:Default::default()};
         let settings=Settings {realm_id:1,network_key:vec![],characters_per_realm:1,start_level:1,start_money:0,start_positions:[(0.0,0.0);3],
-            region_size:180,cell_size:6,move_speed:120,summon_exp_rate:1.0,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
+            region_size:180,cell_size:6,move_speed:120,summon_exp_rate:1.0,auto_resurrect:60,speed_scale:1.0,move_tolerance:60.0,save_interval:Duration::from_secs(60),player_limit:3,motd:String::new()};
         let ctx=Arc::new(Ctx {login:pool.clone(),chars:pool.clone(),world_db:pool,data,world:Mutex::new(world),settings,
             save_all:tokio::sync::broadcast::channel(4).0,shutdown:tokio::sync::watch::channel(false).0,
             character_guid:AtomicU32::new(1),item_guid:AtomicU32::new(99),creature_guid:AtomicU32::new(0)});
@@ -1697,6 +1727,35 @@ mod tests {
         let cool = world.item_cool_times(1).cool_time;
         assert!(cool[0] > 900 && cool[1..].iter().all(|v| *v == 0));
         assert_eq!((world.item_cooldown(1, 1) > 0, world.item_cooldown(2, 1)), (true, 0));
+    }
+
+    #[test]
+    fn a_killed_player_stays_dead_until_resurrected() {
+        let (mut world, mut receivers) = test_world();
+        let monster = test_monster(&mut world);
+        world.monsters.get_mut(&monster).unwrap().info.attack = 5000;
+        world.players.get_mut(&1).unwrap().motion = Motion::at(15.0, 0.0);
+        world.update_visibility();
+        let (events, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        world.players.get_mut(&1).unwrap().events = events;
+        world.monsters.get_mut(&monster).unwrap().target = Some(1);
+        let now = world.now();
+        world.tick_monsters(now + 1);
+        assert_eq!(world.players[&1].hp, 0);
+        assert!(matches!(rx.try_recv().unwrap(), WorldEvent::Died));
+        // Toujours mort : ni regen ni résurrection avant le délai, puis une seule demande.
+        world.tick_dead(now + 5_000, 6_000);
+        assert!(rx.try_recv().is_err() && world.players[&1].hp == 0);
+        world.tick_dead(now + 6_002, 6_000);
+        assert!(matches!(rx.try_recv().unwrap(), WorldEvent::AutoResurrect));
+        world.tick_dead(now + 9_000, 6_000);
+        assert!(rx.try_recv().is_err());
+        // Sur place : 509 aux PV pleins, visible des autres ; un vivant n'est pas « ressuscité ».
+        for r in &mut receivers { while r.try_recv().is_ok() {} }
+        assert!(world.revive_here(1) && !world.revive_here(1));
+        let v = game::ScHpMp::from_packet(&receivers[1].try_recv().unwrap()).unwrap();
+        assert_eq!((v.handle, v.hp), (1, 100));
+        assert_eq!(world.players[&1].dead_since, None);
     }
 
     #[test]

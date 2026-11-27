@@ -59,6 +59,7 @@ pub fn handles(id: u16) -> bool {
             | gid::TS_CS_PUTOFF_ITEM
             | gid::TS_CS_DROP_ITEM
             | gid::TS_CS_USE_ITEM
+            | gid::TS_CS_RESURRECTION
             | gid::TS_CS_ERASE_ITEM
             | gid::TS_CS_CONTACT
             | gid::TS_CS_DIALOG
@@ -197,6 +198,35 @@ impl Session {
         self.send(&game::ScHpMp { handle: g.handle, hp: c.health as i32, max_hp, mp: c.power1 as i32, max_mp, ..Default::default() });
     }
 
+    /// TS_CS_RESURRECTION (513) : 0 point de retour, 1 état (aucun pris en charge), 2 objet, 3 et 4
+    /// (combat entre joueurs, fin du compte à rebours) : point de retour [D].
+    pub(crate) async fn resurrect(&mut self, kind: u8) -> Result<()> {
+        let ctx = self.ctx.clone();
+        let Some(g) = &self.in_game else { return Ok(()) };
+        let handle = g.handle;
+        if ctx.world.lock().unwrap().players.get(&handle).is_none_or(|p| p.hp > 0) {
+            return Ok(());
+        }
+        // Objets proposés par la fenêtre, dans l'ordre du client (FUN_009d3db0) ; le code n'est pas envoyé.
+        const ITEMS: [u32; 4] = [2010454, 2902042, 910005, 910004];
+        if kind == 2 {
+            let stack = ITEMS.iter().find_map(|code| g.items.iter().find(|i| i.entry == *code && i.in_bag()).map(|i| i.guid));
+            if let Some(guid) = stack {
+                self.consume_stack(guid).await?;
+                let mut w = ctx.world.lock().unwrap();
+                if w.revive_here(handle) {
+                    w.notify(handle, "Vous êtes ressuscité sur place.");
+                }
+                return Ok(());
+            }
+        }
+        let (x, y) = ctx.settings.start_position(self.in_game.as_ref().unwrap().character.race as i32);
+        let mut w = ctx.world.lock().unwrap();
+        w.notify(handle, "Vous êtes ressuscité à votre point de retour.");
+        w.revive(handle, x, y);
+        Ok(())
+    }
+
     fn free_bag_slot(items: &[InvItem]) -> Option<u8> {
         (BAG_SLOT_BASE..BAG_SLOT_BASE.saturating_add(BAG_CAPACITY)).find(|s| !items.iter().any(|i| i.slot == *s))
     }
@@ -317,6 +347,13 @@ impl Session {
                     world.start_attack(handle, req.target_handle);
                 } else {
                     world.summon_attack(handle, req.handle, req.target_handle);
+                }
+            }
+            gid::TS_CS_RESURRECTION => {
+                let req = game::CsResurrection::from_packet(&p)?;
+                // Type 1 porte le handle du joueur, les autres 0 (0x6d624a).
+                if req.handle == 0 || req.handle == handle {
+                    self.resurrect(req.res_type).await?;
                 }
             }
             gid::TS_CS_REMOVE_STATE => {
@@ -541,11 +578,9 @@ impl Session {
             }
             WorldEvent::TradeApplied { lost, gained, gold_delta } => self.apply_trade(lost, gained, gold_delta).await?,
             WorldEvent::Died => {
-                let (x, y) = ctx.settings.start_position(self.in_game.as_ref().unwrap().character.race as i32);
-                let mut w = ctx.world.lock().unwrap();
-                w.notify(handle, "Vous êtes mort. Retour au point de départ.");
-                w.revive(handle, x, y);
+                ctx.world.lock().unwrap().notify(handle, "Vous êtes mort.");
             }
+            WorldEvent::AutoResurrect => self.resurrect(0).await?,
         }
         self.send_skill_catalog();
         Ok(())

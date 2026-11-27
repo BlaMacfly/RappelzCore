@@ -457,6 +457,8 @@ impl Session {
                 attack_target: None,
                 next_attack: 0,
                 last_combat: 0,
+                // Mort à la déconnexion : PV ramenés au maximum plus haut, donc vivant.
+                dead_since: None,
             });
             world.publish_stats(handle);
             // Banque B du client : ni son constructeur ni sa remise à zéro ne l'initialisent.
@@ -572,6 +574,9 @@ impl Session {
         }
         if req.points.len() > 64 {
             return;
+        }
+        if self.ctx.world.lock().unwrap().players.get(&g.handle).is_some_and(|p| p.hp <= 0) {
+            return; // un mort ne se déplace pas
         }
         let s = &self.ctx.settings;
         let mut world = self.ctx.world.lock().unwrap();

@@ -74,6 +74,9 @@ Rappelz.StartPosition.Asura = "8330 7167"
 #        Description: Vitesse de déplacement envoyée dans TS_SC_MOVE.
 #    Rappelz.MoveSpeedScale
 #        Description: Unités parcourues par seconde = PlayerMoveSpeed × MoveSpeedScale.
+#    Rappelz.AutoResurrectSeconds
+#        Description: Secondes après lesquelles un joueur mort est ressuscité d'office à son point de
+#                     retour (client sans fenêtre de résurrection, comme RappelzRust) ; 0 = jamais.
 #    Rappelz.SummonExpRate
 #        Description: Part de l'EXP d'un monstre gagnée en plus par la créature invoquée du tueur
 #                     (1.0 = autant que le joueur). Le client ne donne pas la règle d'origine.
@@ -88,6 +91,7 @@ Rappelz.PlayerMoveSpeed = 120
 Rappelz.MoveSpeedScale = 1.0
 Rappelz.MoveTolerance = 60
 Rappelz.SummonExpRate = 1.0
+Rappelz.AutoResurrectSeconds = 60
 
 ###################################################################################################
 # RAPPELZ — RÉSEAU

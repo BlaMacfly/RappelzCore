@@ -60,6 +60,9 @@ struct Cli {
     /// Avec --cast : vise son propre personnage (bonus, soins).
     #[arg(long)]
     cast_self: bool,
+    /// Mort : envoie TS_CS_RESURRECTION de ce type (0 point de retour, 2 objet) 6 s après.
+    #[arg(long)]
+    resurrect: Option<u8>,
     /// Utilise l'objet du sac portant ce code (une fois, ou --again secondes plus tard une seconde fois).
     #[arg(long)]
     use_item: Option<i32>,
@@ -443,6 +446,11 @@ async fn main() -> Result<()> {
                 let v = game::ScHpMp::from_packet(&p)?;
                 if v.handle == lr.handle {
                     tracing::info!("[vitaux] PV {}/{} PM {}/{}", v.hp, v.max_hp, v.mp, v.max_mp);
+                    if let (0, Some(kind)) = (v.hp, cli.resurrect) {
+                        tokio::time::sleep(Duration::from_secs(6)).await;
+                        tracing::info!("[mort] demande de résurrection, type {kind}");
+                        w.send(&game::CsResurrection { handle: 0, res_type: kind }).await?;
+                    }
                 }
             }
             gid::TS_SC_STATE_DAMAGE => {
