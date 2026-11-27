@@ -160,6 +160,9 @@ async fn main() -> Result<()> {
         motd: conf.string("Motd", "Bienvenue sur RappelzCore."),
     };
     let mut world = world::World::new(&data, conf.float("Visibility.Distance", 540.0));
+    let groups = rz_database::groups::load_all(&chars).await?;
+    tracing::info!(">> groupes : {} (groups / group_member)", groups.len());
+    world.parties.load(groups, rz_database::groups::max_id(&chars).await?);
     world.loot = loot::LootStore::load(&world_db).await?;
     tracing::info!(
         ">> butin : {} monstres (creature_loot_template), {} groupes (reference_loot_template)",

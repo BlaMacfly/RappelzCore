@@ -306,8 +306,10 @@ impl World {
     }
 
     pub fn add_player(&mut self, player: PlayerEntity) {
-        self.players.insert(player.handle, player);
+        let handle = player.handle;
+        self.players.insert(handle, player);
         self.max_online = self.max_online.max(self.players.len());
+        self.party_login(handle);
     }
 
     /// Retire un joueur et prévient ceux qui le voyaient.
@@ -319,7 +321,7 @@ impl World {
         }
         self.clear_states(handle);
         let p = self.players.remove(&handle)?;
-        self.parties.disconnected(handle);
+        self.party_logout(p.guid, &p.name);
         self.party_clients.remove(&handle);self.party_sent.remove(&handle);
         self.publish_parties();
         let leave = msg::ScLeave { handle }.to_packet();
@@ -622,6 +624,7 @@ impl World {
         self.broadcast_around(handle, &hpmp, true);
         self.send_to(handle, msg::ScProperty { handle, name: "lv".into(), value: level as i64, text: None }.to_packet());
         self.publish_stats(handle);
+        self.party_level(handle);
         true
     }
 
@@ -662,6 +665,7 @@ impl World {
             self.tick_regen(now);
         }
         self.update_visibility();
+        self.tick_party_positions(now);
         self.publish_parties();
     }
 
@@ -747,8 +751,12 @@ impl World {
             0
         };
         let summon = self.summons.values().find(|s| s.master == killer && s.hp > 0).map(|s| s.handle - crate::summons::SUMMON_HANDLE_BASE);
-        if let Some(p) = self.players.get(&killer) {
-            let _ = p.events.send(WorldEvent::Reward { exp: info.exp.max(1), jp: info.jp, gold, monster: info.name.clone(), monster_id: info.id, summon });
+        // Groupe : EXP et JP partagés, crédit de quête pour chacun ; rupees et créature au tueur.
+        for (h, exp, jp) in self.party_shares(killer, info.exp.max(1), info.jp) {
+            let (gold, summon) = if h == killer { (gold, summon) } else { (0, None) };
+            if let Some(p) = self.players.get(&h) {
+                let _ = p.events.send(WorldEvent::Reward { exp, jp, gold, monster: info.name.clone(), monster_id: info.id, summon });
+            }
         }
         self.drop_monster_loot(mh, info.id, corpse_at, killer);
     }
@@ -1060,11 +1068,12 @@ mod tests {
 
     #[test]
     fn party_state_requires_opt_in_consent_and_stays_private_across_layers_and_logout() {
+        use crate::party::{Action,Store};
         use rz_proto::party::{ScPartyState,SC_PARTY_STATE,VERSION};
         let (mut world,mut receivers)=test_world();
         let (mut other,_)=test_world();let mut outsider=other.players.remove(&1).unwrap();
         let (tx,mut outsider_rx)=tokio::sync::mpsc::unbounded_channel();
-        outsider.handle=3;outsider.name="Outsider".into();outsider.tx=tx;world.add_player(outsider);
+        outsider.handle=3;outsider.guid=3;outsider.name="Outsider".into();outsider.tx=tx;world.add_player(outsider);
         for p in world.players.values_mut() {p.enter.creature.level=1;}
         world.update_visibility();
         for rx in &mut receivers {while rx.try_recv().is_ok(){}}while outsider_rx.try_recv().is_ok(){}
@@ -1073,18 +1082,21 @@ mod tests {
         world.enable_party(1,VERSION);world.enable_party(2,VERSION);
         for rx in &mut receivers {assert_eq!(ScPartyState::from_packet(&rx.try_recv().unwrap()).unwrap(),ScPartyState::default());}
         assert!(outsider_rx.try_recv().is_err());
-        world.party_command(1,&["invite","Player2"]);
-        assert!(world.parties.group(1).is_none());
+        // Sans groupe, l'invitation en crée un d'un seul membre.
+        let stores=world.party_action(1,Action::Invite("Player2".into()));
+        assert!(matches!(stores.as_slice(),[Store::Create{leader:1,..}]));
         let pending:Vec<_>=std::iter::from_fn(||receivers[1].try_recv().ok()).collect();
         let state=ScPartyState::from_packet(pending.iter().find(|p|p.id==SC_PARTY_STATE).unwrap()).unwrap();
         assert_eq!(state.invite.unwrap().inviter,1);assert!(state.members.is_empty());
-        world.party_command(2,&["accept"]);
+        // Un client de l'extension ne reçoit pas les textes @PARTY du client SFrame.
+        assert!(pending.iter().filter(|p|p.id==msg::id::TS_SC_CHAT).all(|p|msg::ScChat::from_packet(p).unwrap().chat_type!=100));
+        world.party_action(2,Action::Accept);
         for rx in &mut receivers {
             let packets:Vec<_>=std::iter::from_fn(||rx.try_recv().ok()).collect();
             let state=ScPartyState::from_packet(packets.iter().rev().find(|p|p.id==SC_PARTY_STATE).unwrap()).unwrap();
             assert_eq!(state.members.len(),2);assert_eq!(state.leader,1);assert!(state.invite.is_none());
         }
-        world.party_command(2,&["disband"]);assert!(world.parties.group(1).is_some());
+        world.party_action(2,Action::Disband);assert!(world.parties.group(1).is_some());
         world.players.get_mut(&2).unwrap().hp=25;world.players.get_mut(&2).unwrap().mp=4;
         world.change_layer(2,1);world.publish_parties();
         let packets:Vec<_>=std::iter::from_fn(||receivers[0].try_recv().ok()).collect();
@@ -1097,9 +1109,50 @@ mod tests {
         assert!(outsider_rx.try_recv().is_err());
         world.party_chat(3,"injected outsider message");assert!(receivers.iter_mut().all(|rx|rx.try_recv().is_err()));
         world.remove_player(1);
+        // Le joueur 1 reste membre hors ligne ; l'extension n'affiche qu'un groupe d'au moins deux connectés.
         let packets:Vec<_>=std::iter::from_fn(||receivers[1].try_recv().ok()).collect();
         assert_eq!(ScPartyState::from_packet(packets.iter().find(|p|p.id==SC_PARTY_STATE).unwrap()).unwrap(),ScPartyState::default());
+        assert_eq!(world.parties.group(1).unwrap().members.len(),2);
         assert!(!world.party_clients.contains(&1));assert!(!world.party_sent.contains_key(&1));
+    }
+
+    #[test]
+    fn sframe_party_texts_follow_the_client_protocol_and_exp_is_shared() {
+        use crate::party::Action;
+        let (mut world,mut receivers)=test_world();
+        for p in world.players.values_mut() {p.enter.creature.level=10;}
+        world.update_visibility();
+        fn party_texts(rx:&mut tokio::sync::mpsc::UnboundedReceiver<RawPacket>)->Vec<String>{
+            std::iter::from_fn(||rx.try_recv().ok()).filter(|p|p.id==msg::id::TS_SC_CHAT).map(|p|msg::ScChat::from_packet(&p).unwrap())
+                .filter(|c|c.sender=="@PARTY"&&c.chat_type==100).map(|c|c.message).collect()
+        }
+        for rx in &mut receivers {party_texts(rx);}
+        world.party_action(1,Action::Create("Fiers".into()));
+        let t=party_texts(&mut receivers[0]);
+        assert_eq!(t[0],"CREATE|Fiers|Player1|0");
+        assert!(t[1].starts_with("PINFO|1|Fiers|Player1|0|0|0|0|1|Player1|10|"),"{}",t[1]);
+        world.party_action(1,Action::Invite("Player2".into()));
+        let t=party_texts(&mut receivers[1]);
+        let f:Vec<&str>=t[0].split('|').collect();
+        assert_eq!(&f[..4],["INVITE","Player1","Fiers","1"]);
+        let key:u32=f[4].parse().unwrap();
+        // Une clé fausse est refusée sans consommer l'invitation.
+        world.party_action(2,Action::Respond{party:1,key:Some(key.wrapping_add(1))});
+        assert!(world.parties.group(2).is_none());
+        world.party_action(2,Action::Respond{party:1,key:Some(key)});
+        assert_eq!(party_texts(&mut receivers[0])[0],"JOIN|Fiers|Player2");
+        let t=party_texts(&mut receivers[1]);
+        assert!(t[0].starts_with("PINFO|1|Fiers|Player1|")&&t[0].split('|').count()==8+18,"{}",t[0]);
+        // Même niveau, deux membres : moitié chacun (coefficient 1,0).
+        let mut shares=world.party_shares(1,100,10);shares.sort();
+        assert_eq!(shares,vec![(1,50,5),(2,50,5)]);
+        world.set_player_level(2,11,1);
+        assert!(party_texts(&mut receivers[0]).contains(&"CHANGE_LEVEL|Player2|11".to_string()));
+        assert!(party_texts(&mut receivers[1]).contains(&"CHANGE_LEVEL|Player2|11".to_string()));
+        world.party_action(2,Action::Leave);
+        assert_eq!(party_texts(&mut receivers[1])[0],"DESTROY|Fiers|0");
+        assert_eq!(party_texts(&mut receivers[0])[0],"LEAVE|Player2|0");
+        assert_eq!(world.party_shares(1,100,10),vec![(1,100,10)]);
     }
 
     fn isolated_session(skills:Option<rz_rappelz::skills::SkillBook>)->(crate::session::Session,tokio::sync::mpsc::UnboundedReceiver<RawPacket>) {

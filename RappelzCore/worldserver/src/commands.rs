@@ -21,7 +21,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "gps", level: 0, help: ".gps — position actuelle" },
     Command { name: "online", level: 0, help: ".online — joueurs connectés" },
     Command { name: "save", level: 0, help: ".save — sauvegarde le personnage" },
-    Command { name: "party", level: 0, help: ".party invite <joueur> | accept | decline | leave | kick <joueur> | leader <joueur> | disband" },
+    Command { name: "party", level: 0, help: ".party create <nom> | invite <joueur> | accept | decline | leave | kick <joueur> | leader <joueur> | share <n> | disband" },
     Command { name: "server", level: 0, help: ".server info — état du serveur" },
     Command { name: "tele", level: 1, help: ".tele <lieu> — téléportation (game_tele)" },
     Command { name: "go", level: 1, help: ".go <x> <y> [z] — téléportation aux coordonnées" },
@@ -58,7 +58,10 @@ pub async fn handle(session: &mut Session, line: &str) -> Result<()> {
     }
 
     match cmd.name {
-        "party" => ctx.world.lock().unwrap().party_command(handle,&args),
+        "party" => match crate::party::Action::from_args(&args[..]) {
+            Some(action) => session.party(action).await?,
+            None => reply(crate::party::Action::USAGE),
+        },
         "help" => {
             for c in COMMANDS.iter().filter(|c| c.level <= session.gm_level) {
                 reply(c.help);

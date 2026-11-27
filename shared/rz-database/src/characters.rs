@@ -81,7 +81,7 @@ const SELECT: &str = "SELECT c.guid, c.account, c.name, c.race, c.class, c.gende
 
 /// Colonne texte, y compris en collation binaire (`characters.name` est en utf8mb4_bin,
 /// que MariaDB annonce comme VARBINARY).
-fn text(r: &sqlx::mysql::MySqlRow, col: &str) -> String {
+pub(crate) fn text(r: &sqlx::mysql::MySqlRow, col: &str) -> String {
     r.try_get::<String, _>(col)
         .or_else(|_| r.try_get::<Vec<u8>, _>(col).map(|b| String::from_utf8_lossy(&b).into_owned()))
         .unwrap_or_default()

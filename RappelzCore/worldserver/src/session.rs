@@ -315,6 +315,9 @@ impl Session {
             return Ok(());
         };
         characters::soft_delete(&ctx.chars, c.guid, self.account_id()).await?;
+        // Comme AzerothCore : le personnage supprimé quitte son groupe.
+        let stores = ctx.world.lock().unwrap().party_forget(c.guid);
+        crate::party::store(&ctx.chars, &stores).await;
         let left = characters::list_for_account(&ctx.chars, self.account_id()).await?.len();
         auth::update_realm_character_count(&ctx.login, ctx.settings.realm_id, self.account_id(), left as u8).await?;
         tracing::info!("{} : personnage {} supprimé", self.addr, c.name);
@@ -604,6 +607,10 @@ impl Session {
         let handle = g.handle;
         let name = g.character.name.clone();
         let text = req.message.trim().to_string();
+        // Commandes de groupe du client SFrame (/pcreate, /pinvite, /pjoin…).
+        if let Some(cmd) = rz_proto::party_text::Command::parse(&text) {
+            return self.party(cmd.into()).await;
+        }
         if text.starts_with('.') || (text.starts_with('/') && self.gm_level > 0) {
             commands::handle(self, &text[1..]).await?;
             self.send_skill_catalog();

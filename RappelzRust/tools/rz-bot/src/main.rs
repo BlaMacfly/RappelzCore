@@ -93,6 +93,14 @@ struct Cli {
     /// Jette au sol le premier objet du sac (TS_CS_DROP_ITEM).
     #[arg(long)]
     drop: bool,
+    /// Répond à une invitation de groupe (INVITE) par `/pjoin id clé`, comme la boîte du client.
+    #[arg(long)]
+    party_accept: bool,
+    /// Commandes de chat envoyées --late-delay secondes après l'entrée en jeu.
+    #[arg(long = "late-cmd")]
+    late_cmds: Vec<String>,
+    #[arg(long, default_value_t = 4)]
+    late_delay: u64,
 }
 
 async fn expect(r: &mut PacketReader, wanted: u16) -> Result<rz_proto::RawPacket> {
@@ -299,7 +307,16 @@ async fn main() -> Result<()> {
         w.send(&skill(id, lr.handle, lr.handle)).await?;
     }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(cli.stay);
+    let late_at = tokio::time::Instant::now() + Duration::from_secs(cli.late_delay);
+    let mut late = cli.late_cmds.clone();
     while let Ok(Ok(Some(p))) = tokio::time::timeout_at(deadline, r.recv()).await {
+        if !late.is_empty() && tokio::time::Instant::now() >= late_at {
+            for c in std::mem::take(&mut late) {
+                tracing::info!("[chat] envoi : {c}");
+                w.send(&msg::CsChatRequest { target: String::new(), request_id: 0, chat_type: 0, message: c }).await?;
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+        }
         match p.id {
             id::TS_SC_ENTER => match {
                 let e = msg::ScEnter::from_packet(&p)?;
@@ -542,7 +559,18 @@ async fn main() -> Result<()> {
             id::TS_SC_CHAT_LOCAL => chats.push(msg::ScChatLocal::from_packet(&p)?.message),
             id::TS_SC_CHAT => {
                 let c = msg::ScChat::from_packet(&p)?;
-                chats.push(format!("{} : {}", c.sender, c.message));
+                if c.sender == "@PARTY" && c.chat_type == 100 {
+                    // Groupe du client SFrame : texte `COMMANDE|champ|…`.
+                    tracing::info!("[groupe] {}", c.message);
+                    let f: Vec<&str> = c.message.split('|').collect();
+                    if cli.party_accept && f.len() >= 5 && f[0] == "INVITE" {
+                        let reply = format!("/pjoin {} {}", f[3], f[4]);
+                        tracing::info!("[groupe] réponse : {reply}");
+                        w.send(&msg::CsChatRequest { target: String::new(), request_id: 0, chat_type: 0, message: reply }).await?;
+                    }
+                } else {
+                    chats.push(format!("{} : {}", c.sender, c.message));
+                }
             }
             id::TS_TIMESYNC => {}
             gid::TS_SC_INVENTORY => {

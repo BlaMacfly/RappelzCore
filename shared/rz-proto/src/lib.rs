@@ -8,6 +8,7 @@ pub mod msg;
 pub mod msg_game;
 pub mod packet;
 pub mod party;
+pub mod party_text;
 pub mod secure;
 pub mod skills;
 pub mod restoration;

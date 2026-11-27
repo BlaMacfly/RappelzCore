@@ -7,6 +7,7 @@
 
 pub mod auth;
 pub mod characters;
+pub mod groups;
 pub mod pets;
 pub mod quests;
 pub mod trade;
